@@ -9,13 +9,20 @@ lokinet), and also provides a local multithreaded job scheduling within a proces
 It is not required to use this library to interact with loki components as a client: this is mainly
 intended to abstract away much of the server-side handling.
 
+[//]: # It's unclear what this is trying to convey
+[//]: # Also, a general purpose client could be useful...?
+
 All messages are encrypted (using x25519).
+
+[//]: # Might be worth mentioning that this is done ZMQ in a transparent way.
 
 This library makes minimal use of mutexes, and none in the hot paths of the code, instead mostly
 relying on ZMQ sockets for synchronization; for more information on this (and why this is generally
 much better performing and more scalable) see the ZMQ guide documentation on the topic.
 
 ## Basic message structure
+
+[//]: # An example message (in its entirety) would be useful
 
 LokiMQ messages consist of 1+ part messages where the first part is a string command and remaining
 parts are command-specific data.
@@ -46,11 +53,18 @@ information) can be obtained.  There is no structure imposed at all on the data 
 message parts: it is up to the command itself to deserialize however it wishes (e.g. JSON,
 bt-encoded, or any other encoding).
 
+[//]: # Could refer to this as a payload
+
 The Message object also provides methods for replying to the caller.  Simple replies queue a reply
 if the client is still connected.  Replies to service nodes can also be "strong" replies: when
 replying to a SN that has closed connection with a strong reply we will attempt to reestablish a
 connection to deliver the message.  In order for this to work the LokiMQ caller must provide a
 lookup function to retrieve the remote address given a SN x25519 pubkey.
+
+[//]: # Might want different modes of reply here:
+[//]: # - no reply
+[//]: # - opportunistic (reply iff still connected)
+[//]: # - best effort (will open new connection)
 
 ### Callbacks
 
@@ -58,6 +72,9 @@ Invoked command functions are always invoked with exactly one arguments: a non-c
 reference from which the connection info, LokiMQ object, and message data can be obtained.  If you
 need some extra state data (for example, a reference to some high level object) the LokiMQ object
 has an opaque public `void* data` member intended for exactly this purpose.
+
+[//]: # Can we avoid `void*` here and say this is modern-C++-only? I imagine 99% of the use cases
+[//]: # will be lamdas and member functions
 
 ## Authentication
 
@@ -84,6 +101,8 @@ socket) to automatically be an Admin connection without requiring explicit authe
 also allows configuration of how public connections should be treated: for example, a lokid running
 as a public RPC server would do so by granting Basic access to all incoming connections.
 
+[//]: # Nice, this will play well with the lokinet gui.
+
 Explicit logins allow the daemon to specify username/passwords with mapping to Basic or Admin
 authentication levels.
 
@@ -108,6 +127,9 @@ command invocation).  If you require stronger protection against being called by
 decommissioned/deregistered service nodes from a connection established when the SN was active then
 the callback itself will need to verify when invoked.
 
+[//]: # decommissioned/deregistered SNs: sounds like an important use case, maybe we should include
+[//]: # this as design goal
+
 ## Command aliases
 
 Command aliases can be specified.  For example, an alias `a.b` -> `c.d` will rewrite any incoming
@@ -118,7 +140,12 @@ The main purpose here is for backwards compatibility either for renaming categor
 for changing command access levels by moving it from one category to another.  It's recommended that
 such aliases be used only temporarily for version transitions.
 
+[//]: # If we want to discourage this, maybe we don't support it at all. I don't think it would be
+[//]: # hard to work around this (e.g. just assign the same code handler to multiple command strings)
+
 ## Threads
+
+[//]: # Should at least briefly discuss queue overflow, rejection of messages, etc.
 
 LokiMQ operates a pool of worker threads to handle jobs.  The simplest use just allocates new jobs
 to a free worker thread, and we have a "general threads" value to configure how many such threads
@@ -139,6 +166,8 @@ As mentioned above, LokiMQ tries to avoid exceeding the configured general threa
 whenever possible: the only time we will dispatch a job to a worker thread when we have >= G threads
 already running is when a new command arrives, the category reserves M threads, and the thread pool
 is currently processing fewer than M jobs for that category.
+
+[//]: # Could just dedicate a thread for message handling?
 
 Some examples: assume A and B are commands that take sufficiently long to run that we receive all
 commands before the first job is finished.  Suppose that A's category reserves 2 threads, B's
@@ -162,6 +191,8 @@ queued.  The 5th and 6th B's are already interesting on their own: they won't be
 are only three active jobs; the third A won't be started until *either* there are only three active
 jobs, or one of the other A's finish.
 
+[//]: # s/jobs/threads ?
+
 Thus the general thread count should be regarded as the "normal" thread limit and reserved threads
 allow an extra burst of thread activity *only if* all general threads are busy with other categories
 when a command with reserve threads arrived.
@@ -174,6 +205,8 @@ no authentication and can only be submitted by the program itself to its own wor
 have either no second message part, or else one single message part consists of an opaque void
 pointer value.  This pointer is passed by value to the registered function, which must take exactly
 one `void *` argument.
+
+[//]: # eww `void *` ... at least provide overloads that take `std::function` (etc)
 
 It is entirely the responsibility of the caller and callee to deal with the `void *` argument,
 including construction/destruction/etc.  This is very low level but allow the most flexibility.  For
@@ -217,13 +250,19 @@ We can easily queue all the jobs into the worker thread pool (see above), but th
 to continue when the work is done.  You could (but shouldn't) employ some blocking, locking, mutex +
 condition variable monstrosity, but you shouldn't.
 
+[//]: # shouldn't used reduntantly 
+
 Instead LokiMQ provides a mechanism for this by allowing you to submit a batch of jobs with a
 completion callback.  All jobs will be queued and, when the last one finishes, the finalization
 callback will be queued to continue with the task.
 
+[//]: # this sounds a lot like futures/promises, should we consider using them in the API?
+
 From the caller point of view this requires splitting the logic into two parts, a "Before" that sets
 up the batch, a "Job" that does the work (multiple times), and an "After" that continues once all
 jobs are finished.
+
+[//]: # what about timeouts / other error conditions WRT callbacks? promises handle this well...
 
 For example, the following example shows how you might use it to convert from input values (0 to 49)
 to some other output value:
