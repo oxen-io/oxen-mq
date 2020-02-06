@@ -28,11 +28,11 @@
 
 #pragma once
 
-#include "zmq.hpp"
 #include <string>
 #include <list>
 #include <queue>
 #include <unordered_map>
+#include <unordered_set>
 #include <memory>
 #include <functional>
 #include <thread>
@@ -40,6 +40,7 @@
 #include <iostream>
 #include <chrono>
 #include <atomic>
+#include <zmq.hpp>
 #include "bt_serialize.h"
 #include "string_view.h"
 
@@ -107,6 +108,10 @@ public:
     template <typename... Args>
     void reply(const std::string& command, Args&&... args);
 };
+
+// Forward declarations; see batch.h
+namespace detail { class Batch; }
+template <typename R> class Batch;
 
 
 /** The keep-alive time for a send() that results in a establishing a new outbound connection.  To
@@ -214,7 +219,7 @@ public:
 
 private:
 
-    /// The lookup function that tells us where to connect to a peer
+    /// The lookup function that tells us where to connect to a peer, or empty if not found.
     SNRemoteAddress peer_lookup;
 
     /// Callback to see whether the incoming connection is allowed
@@ -222,7 +227,7 @@ private:
 
     /// The log level; this is atomic but we use relaxed order to set and access it (so changing it
     /// might not be instantly visible on all threads, but that's okay).
-    std::atomic<LogLevel> log_lvl;
+    std::atomic<LogLevel> log_lvl{LogLevel::warn};
 
     /// The callback to call with log messages
     Logger logger;
@@ -313,13 +318,17 @@ private:
     /// indices of idle, active workers
     std::vector<unsigned int> idle_workers;
 
-    /// Maximum number of general task workers, specified during construction
-    unsigned int general_workers;
+    /// Maximum number of general task workers, specified by g`/during construction
+    unsigned int general_workers = std::thread::hardware_concurrency();
 
     /// Maximum number of possible worker threads we can have.  This is calculated when starting,
-    /// and equals general_workers plus the sum of all categories' reserved threads counts.  This is
-    /// also used to signal a shutdown; we set it to 0 when quitting.
+    /// and equals general_workers plus the sum of all categories' reserved threads counts plus the
+    /// reserved batch workers count.  This is also used to signal a shutdown; we set it to 0 when
+    /// quitting.
     unsigned int max_workers;
+
+    /// Number of active workers
+    unsigned int active_workers() const { return workers.size() - idle_workers.size(); }
 
     /// Worker thread loop
     void worker_thread(unsigned int index);
@@ -327,11 +336,31 @@ private:
     /// Does the proxying work
     void proxy_loop();
 
+    void proxy_worker_message(std::vector<zmq::message_t>& parts);
+
+    void proxy_process_queue();
+
+    /// Looks up a peers element given a zmq message (which has the pubkey and sn status metadata
+    /// set during initial connection authentication), creating a new peer element if required.
+    decltype(peers)::iterator proxy_lookup_peer(zmq::message_t& msg);
+
     /// Handles built-in primitive commands in the proxy thread for things like "BYE" that have to
     /// be done in the proxy thread anyway (if we forwarded to a worker the worker would just have
     /// to send an instruction back to the proxy to do it).  Returns true if one was handled, false
     /// to continue with sending to a worker.
     bool proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>& parts);
+
+    struct run_info;
+    /// Gets an idle worker's run_info and removes the worker from the idle worker list.  If there
+    /// is no idle worker this creates a new `workers` element for a new worker (and so you should
+    /// only call this if new workers are permitted).  Note that if this creates a new work info the
+    /// worker will *not* yet be started, so the caller must create the thread (in `.thread`) after
+    /// setting up the job if `.thread.joinable()` is false.
+    run_info& get_idle_worker();
+
+    /// Runs the worker; called after the `run` object has been set up.  If the worker thread hasn't
+    /// been created then it is spawned; otherwise it is sent a RUN command.
+    void proxy_run_worker(run_info& run);
 
     /// Sets up a job for a worker then signals the worker (or starts a worker thread)
     void proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& parts);
@@ -350,8 +379,7 @@ private:
     /// existing or a new one).
     std::pair<zmq::socket_t*, std::string> proxy_connect(bt_dict&& data);
 
-    /// DISCONNECT command telling us to disconnect our remote connection to the given pubkey (if we
-    /// have one).
+    /// Called to disconnect our remote connection to the given pubkey (if we have one).
     void proxy_disconnect(const std::string& pubkey);
 
     /// SEND command.  Does a connect first, if necessary.
@@ -360,6 +388,18 @@ private:
     /// REPLY command.  Like SEND, but only has a listening socket route to send back to and so is
     /// weaker (i.e. it cannot reconnect to the SN if the connection is no longer open).
     void proxy_reply(bt_dict&& data);
+
+    /// Currently active batches.
+    std::unordered_set<detail::Batch*> batches;
+    /// Individual batch jobs waiting to run
+    using batch_job = std::pair<detail::Batch*, int>;
+    std::queue<batch_job> batch_jobs;
+    unsigned int batch_jobs_active = 0;
+    unsigned int batch_jobs_reserved = std::max((std::thread::hardware_concurrency() + 1) / 2, 1u);
+
+    /// BATCH command.  Called with a Batch<R> (see lokimq/batch.h) object pointer for the proxy to
+    /// take over and queue batch jobs.
+    void proxy_batch(detail::Batch* batch);
 
     /// ZAP (https://rfc.zeromq.org/spec:27/ZAP/) authentication handler; this is called with the
     /// zap auth socket to do non-blocking processing of any waiting authentication requests waiting
@@ -383,8 +423,8 @@ private:
         std::unordered_map<std::string, CommandCallback> commands;
         unsigned int reserved_threads = 0;
         unsigned int active_threads = 0;
-        std::queue<std::list<zmq::message_t>> pending; // FIXME - vector?
         int max_queue = 200;
+        int queued = 0;
 
         category(Access access, unsigned int reserved_threads, int max_queue)
             : access{access}, reserved_threads{reserved_threads}, max_queue{max_queue} {}
@@ -401,14 +441,27 @@ private:
     /// Retrieve category and callback from a command name, including alias mapping.  Warns on
     /// invalid commands and returns nullptrs.  The command name will be updated in place if it is
     /// aliased to another command.
-    std::pair<const category*, const CommandCallback*> get_command(std::string& command);
+    std::pair<category*, const CommandCallback*> get_command(std::string& command);
 
     /// Checks a peer's authentication level.  Returns true if allowed, warns and returns false if
     /// not.
-    bool proxy_check_auth(const std::string& pubkey, size_t conn_index, const peer_info& peer,
+    bool proxy_check_auth(string_view pubkey, size_t conn_index, const peer_info& peer,
             const std::string& command, const category& cat, zmq::message_t& msg);
 
-    /// 
+    /// Details for a pending command; such a command already has authenticated access and is just
+    /// waiting for a thread to become available to handle it.
+    struct pending_command {
+        category& cat;
+        std::string command;
+        std::vector<zmq::message_t> data_parts;
+        const CommandCallback* callback;
+        std::string pubkey;
+        bool service_node;
+
+        pending_command(category& cat, std::string command, std::vector<zmq::message_t> data_parts, const CommandCallback* callback, std::string pubkey, bool service_node)
+            : cat{cat}, command{std::move(command)}, data_parts{std::move(data_parts)}, callback{callback}, pubkey{std::move(pubkey)}, service_node{service_node} {}
+    };
+    std::list<pending_command> pending_commands;
 
 
     /// End of proxy-specific members
@@ -418,16 +471,33 @@ private:
     /// Structure that contains the data for a worker thread - both the thread itself, plus any
     /// transient data we are passing into the thread.
     struct run_info {
+        bool is_batch_job = false;
+
+        // If is_batch_job is false then these will be set appropriate (if is_batch_job is true then
+        // these shouldn't be accessed and likely contain stale data).
+        category *cat;
         std::string command;
         std::string pubkey;
         bool service_node = false;
-        const CommandCallback* callback = nullptr;
-        std::vector<zmq::message_t> message_parts;
+        std::vector<zmq::message_t> data_parts;
 
-    private:
-        friend class LokiMQ;
+        // If is_batch_job true then these are set (if is_batch_job false then don't access these!):
+        int batch_jobno; // >= 0 for a job, -1 for the completion job
+
+        union {
+            const CommandCallback* callback; // set if !is_batch_job
+            detail::Batch* batch;            // set if is_batch_job
+        };
+
+        // These belong to the proxy thread and must not be accessed by a worker:
         std::thread thread;
-        std::string routing_id;
+        size_t worker_id; // The index in `workers`
+        std::string routing_id; // "w123" where 123 == worker_id
+
+        /// Loads the run info with a pending command
+        run_info& operator=(pending_command&& pending);
+        /// Loads the run info with a batch job
+        run_info& operator=(batch_job&& bj);
     };
     /// Data passed to workers for the RUN command.  The proxy thread sets elements in this before
     /// sending RUN to a worker then the worker uses it to get call info, and only allocates it
@@ -461,7 +531,7 @@ public:
      * connection string such as "tcp://1.2.3.4:23456" to which a connection should be established
      * to reach that service node.  Note that this function is only called if there is no existing
      * connection to that service node, and that the function is never called for a connection to
-     * self (that uses an internal connection instead).
+     * self (that uses an internal connection instead).  Should return empty for not found.
      *
      * @param allow_incoming is a callback that LokiMQ can use to determine whether an incoming
      * connection should be allowed at all and, if so, whether the connection is from a known
@@ -472,11 +542,6 @@ public:
      *
      * @param log a function or callable object that writes a log message.  If omitted then all log
      * messages are suppressed.
-     *
-     * @param general_workers the maximum number of worker threads to start for general tasks.
-     * These threads can be used for any command, and will be created (up to the limit) on demand.
-     * Note that individual categories with reserved threads can create threads in addition to the
-     * amount specified here.  The default (0) means std::thread::hardware_concurrency().
      */
     LokiMQ( std::string pubkey,
             std::string privkey,
@@ -484,8 +549,7 @@ public:
             std::vector<std::string> bind,
             SNRemoteAddress peer_lookup,
             AllowFunc allow_connection,
-            Logger logger = [](LogLevel, const char*, int, std::string) { },
-            unsigned int general_workers = 0);
+            Logger logger = [](LogLevel, const char*, int, std::string) { });
 
     /**
      * Destructor; instructs the proxy to quit.  The proxy tells all workers to quit, waits for them
@@ -521,10 +585,11 @@ public:
      * that category.
      *
      * @param max_queue is the maximum number of incoming messages in this category that we will
-     * queue up when waiting for a worker to become available for this category.  Once the queue
-     * for a category exceeds this many incoming messages then new messages will be dropped until
-     * some messages are processed off the queue.  -1 means unlimited, 0 means we will just drop
-     * messages for this category when no workers are available.
+     * queue up when waiting for a worker to become available for this category.  Once the queue for
+     * a category exceeds this many incoming messages then new messages will be dropped until some
+     * messages are processed off the queue.  -1 means unlimited, 0 means we will never queue (which
+     * means just dropping messages for this category if no workers are available to instantly
+     * handle the request).
      */
     void add_category(std::string name, Access access_level, unsigned int reserved_threads = 0, int max_queue = 200);
 
@@ -555,6 +620,26 @@ public:
      * not those of `cat`, even if `cat` is more restrictive than `dog`.
      */
     void add_command_alias(std::string from, std::string to);
+
+    /**
+     * Sets the number of worker threads reserved for batch jobs.  If not called this defaults to
+     * half the number of hardware threads available (rounded up).  This works exactly like reserved_threads
+     * for a category, but allows to batch jobs.  See category for details.
+     *
+     * Cannot be called after start()ing the LokiMQ instance.
+     */
+    void set_batch_threads(unsigned int threads);
+
+    /**
+     * Sets the number of general worker threads.  This is the target number of threads to run that
+     * we generally try not to exceed.  These threads can be used for any command, and will be
+     * created (up to the limit) on demand.  Note that individual categories (or batch jobs) with
+     * reserved threads can create threads in addition to the amount specified here if necessary to
+     * fulfill the reserved threads count for the category.
+     *
+     * Cannot be called after start()ing the LokiMQ instance.
+     */
+    void set_general_threads(unsigned int threads);
 
     /**
      * Finish starting up: binds to the bind locations given in the constructor and launches the
@@ -636,6 +721,20 @@ public:
     /// this returns the generated keys.
     const std::string& get_pubkey() const { return pubkey; }
     const std::string& get_privkey() const { return privkey; }
+
+    /**
+     * Batches a set of jobs to be executed by workers, optionally followed by a completion function.
+     *
+     * Must include lokimq/batch.h to use.
+     */
+    template <typename R>
+    void batch(Batch<R>&& batch);
+
+    /**
+     * Queues a single job to be executed with no return value.  This is a shortcut for creating and
+     * submitting a single-job, no-completion batch.
+     */
+    void job(std::function<void()> f);
 };
 
 /// Namespace for options to the send() method
@@ -764,6 +863,17 @@ void LokiMQ::log_(LogLevel lvl, const char* file, int line, const T&... stuff) {
     (void) std::initializer_list<int>{(os << stuff, 0)...};
 #endif
     logger(lvl, file, line, os.str());
+}
+
+std::ostream &operator<<(std::ostream &os, LogLevel lvl) {
+    os <<  (lvl == LogLevel::trace ? "trace" :
+            lvl == LogLevel::debug ? "debug" :
+            lvl == LogLevel::info  ? "info"  :
+            lvl == LogLevel::warn  ? "warn"  :
+            lvl == LogLevel::error ? "ERROR" :
+            lvl == LogLevel::fatal ? "FATAL" :
+            "unknown");
+    return os;
 }
 
 }

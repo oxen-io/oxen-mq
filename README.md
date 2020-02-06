@@ -17,18 +17,19 @@ much better performing and more scalable) see the ZMQ guide documentation on the
 
 ## Basic message structure
 
-LokiMQ messages consist of 1+ part messages where the first part is a string command and remaining
-parts are command-specific data.
+LokiMQ messages come in two fundamental forms: "commands", consisting of a command named and
+optional arguments, and "requests", consisting of a request name, a request tag, and optional
+arguments.
 
-The command string is one of two types:
+The command/request string is one of two types:
 
-`basic` - for basic commands such as authentication (`login`) handled by LokiMQ itself.  These
-commands may not contain a `.`, and are reserved for LokiMQ itself.
+`BASIC` - for basic requests such as authentication (`LOGIN`) handled by LokiMQ itself.  These
+commands may not contain a `.`, and are handled by LokiMQ itself.
 
-`category.command` - for commands registered by the LokiMQ caller (e.g. lokid).  Here `category`
-must be at least one character not containing a `.` and `command` may be anything.  These categories
-and commands are registered according to general function and authentication level (more on this
-below).  For example, for lokid categories are:
+`category.command` - for commands/requests registered by the LokiMQ caller (e.g. lokid).  Here
+`category` must be at least one character not containing a `.` and `command` may be anything.  These
+categories and commands are registered according to general function and authentication level (more
+on this below).  For example, for lokid categories are:
 
 - `system` - is for RPC commands related to the system administration such as mining, getting
   sensitive statistics, accessing SN private keys, remote shutdown, etc.
@@ -37,6 +38,71 @@ below).  For example, for lokid categories are:
   running as service nodes.
 - `blockchain` - is for remote blockchain access such as retrieving blocks and transactions as well
   as subscribing to updates for new blocks, transactions, and service node states.
+
+The difference between a request and a command is that a request includes an additional opaque tag
+value which is used to identify a reply.  For example you could register a `general.backwards`
+request that takes a string that receives a reply containing that string reversed.  When invoking
+the request via LokiMQ you provide a callback to be invoked when the reply arrives.  On the wire
+this looks like:
+
+    <<< [general.backwards] [v71.&a] [hello world]
+    >>> [REPLY] [v71.&a] [dlrow olleh]
+
+where each [] denotes a message part and `v71.&a` is a unique randomly generated identifier handled
+by LokiMQ (both the invoker and the recipient code only see the `hello world`/`dlrow olleh` message
+parts).
+
+In contrast, regular registered commands have no identifier or expected reply callback.  For example
+you could register a `general.pong` commands that takes an argument and prints it out.  So requests
+and output would look like this:
+
+    >>> [general.pong] [hi]
+    hi
+    >>> [general.pong] [there]
+    there
+
+You could also create a `ping` command that instructs someone to pong you with a random word -- i.e.
+give him a ping and she sends you a pong:
+
+    <<< [general.ping]
+    >>> [general.pong] [omg]
+    omg
+
+Although this *looks* like a reply it isn't quite the same because there is no connection between
+the ping and the pong (and, as above, pongs can be issued directly).  In particular this means if
+you send multiple pings to the same recipient:
+
+    <<< [general.ping]
+    <<< [general.ping]
+    >>> [general.pong] [world]
+    >>> [general.pong] [hello]
+
+you would have no way to know whether the first pong is in reply to the first or second ping.  We
+could amend this to include a number to be echoed back:
+
+    <<< [general.ping] [1]
+    <<< [general.ping] [2]
+    >>> [general.pong] [2] [world]
+    >>> [general.pong] [1] [hello]
+
+and now, in the pong, we could keep track of which number goes with which outgoing ping.  This is
+the basic idea behind using a reply instead of command, except that you don't register the `pong`
+command at all (there is a generic "REPLY" command for all replies), and the index values are
+handled for you transparently.
+
+## Command arguments
+
+Optional command/request arguments are always strings on the wire.  The LokiMQ-using developer is
+free to create whatever encoding she wants, and these can vary across commands.  For example
+`wallet.tx` might be a request that returns a transaction in binary, while `wallet.tx_info` might
+return tx metadata in JSON, and `p2p.send_tx` might encode tx data and metadata in a bt-encoded
+data string.
+
+No structure at all is imposed on message data to allow maximum flexibility; it is entirely up to
+the calling code to handle all encoding/decoding duties.
+
+Internal commands passed between LokiMQ-managed threads use either plain strings or bt-encoded
+dictionaries.  See `lokimq/bt_serialize.h` if you want a bt serializer/deserializer.
 
 ## Command invocation
 
@@ -229,41 +295,51 @@ For example, the following example shows how you might use it to convert from in
 to some other output value:
 
 ```C++
-struct task_data { int input; double result; };
+double do_my_task(int input) {
+    if (input % 10 == 7)
+        throw std::domain_error("I don't do '7s, sorry");
+    if (input == 1)
+        return 5.0;
+    return 3.0 * input;
+}
 
-// Called for each job.
-void do_my_task(void* in) {
-    auto& x = *static_cast<task_data*>(in);
-    x.result = 42.0 * x.input; // Job
+void continue_big_task(std::vector<lokimq::job_result<double>> results) {
+    double sum = 0;
+    for (auto& r : results) {
+        try {
+            sum += r.get();
+        } catch (const std::exception& e) {
+            std::cout << "Oh noes! " << e.what() << "\n";
+        }
+    }
+    std::cout << "All done, sum = " << sum << "\n";
+
+    // Output:
+    // Oh noes! I don't do '7s, sorry
+    // Oh noes! I don't do '7s, sorry
+    // Oh noes! I don't do '7s, sorry
+    // All done, sum = 1337
 }
 
 void start_big_task() {
-    // ... Before code ...
+    size_t num_jobs = 32;
 
-    auto* results = new std::vector<task_data>{50};
+    lokimq::Batch<double /*return type*/> batch;
+    batch.reserve(num_jobs);
 
-    lokimq::Batch batch;
-    for (size_t i = 0; i < results->size(); i++) {
-        auto* r = (*result)[i];
-        r->input = i;
-        batch.add_job(&do_my_task, r);
-    }
-    lmq.job(batch, &continue_big_task, results);
+    for (size_t i = 0; i < num_jobs; i++)
+        batch.add_job([i]() { return do_my_task(i); });
+
+    batch.completion(&continue_big_task);
+
+    lmq.batch(std::move(batch));
     // ... to be continued in `continue_big_task` after all the jobs finish
-}
 
-// This will be called once all the `do_my_task` calls have completed.  (Note that we could be in
-// a different thread from the one `start_big_task()` was running in).
-void continue_big_task(void* rptr) {
-    // Put into a unique_ptr to deal with ownership
-    std::unique_ptr<std::vector<task_data>> results{static_cast<std::vector<int>*>(rptr)};
-    double sum = 0;
-    for (auto &r : results) sum += r;
-    std::cout << "All done, sum = " << sum << "\n";
+    // Can do other things here, but note that continue_big_task could run
+    // *before* anything else here finishes.
 }
 ```
 
 This code deliberately does not support blocking to wait for the tasks to finish: if you want such a
-bad design you can implement it yourself; LokiMQ isn't going to help you hurt yourself.
-
-
+poor design (which is a recipe for deadlocks, imagine jobs queuing other jobs and then waiting) you
+can implement it yourself; LokiMQ isn't going to help you hurt yourself like that.

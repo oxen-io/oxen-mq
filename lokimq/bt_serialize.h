@@ -131,9 +131,9 @@ inline void bt_need_more(const string_view &s) {
 
 union maybe_signed_int64_t { int64_t i64; uint64_t u64; };
 
-/// Deserializes a signed or unsigned 64-bit integer from an input stream.  Sets the second bool to
-/// true iff the value is int64_t because a negative value was read.  Throws an exception if the
-/// read value doesn't fit in a int64_t (if negative) or a uint64_t (if positive).  Removes consumed
+/// Deserializes a signed or unsigned 64-bit integer from a string.  Sets the second bool to true
+/// iff the value is int64_t because a negative value was read.  Throws an exception if the read
+/// value doesn't fit in a int64_t (if negative) or a uint64_t (if positive).  Removes consumed
 /// characters from the string_view.
 std::pair<maybe_signed_int64_t, bool> bt_deserialize_integer(string_view& s);
 
