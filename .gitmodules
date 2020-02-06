@@ -4,3 +4,6 @@
 [submodule "cppzmq"]
 	path = cppzmq
 	url = https://github.com/zeromq/cppzmq.git
+[submodule "Catch2"]
+	path = tests/Catch2
+	url = https://github.com/catchorg/Catch2.git

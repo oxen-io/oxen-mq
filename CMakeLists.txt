@@ -20,9 +20,9 @@ add_subdirectory(cppzmq EXCLUDE_FROM_ALL)
 foreach(target lokimq lokimq-static)
     target_include_directories(${target}
         PUBLIC
-            $<INSTALL_INTERFACE:lokimq>
+            $<INSTALL_INTERFACE:>
             $<INSTALL_INTERFACE:mapbox-variant/include>
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lokimq>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/mapbox-variant/include>
     )
 
@@ -33,4 +33,8 @@ endforeach()
 
 target_link_libraries(lokimq PUBLIC cppzmq)
 target_link_libraries(lokimq-static PUBLIC cppzmq-static)
+
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
 
