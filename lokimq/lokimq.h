@@ -385,6 +385,10 @@ private:
     /// Worker thread loop
     void worker_thread(unsigned int index);
 
+    /// If set, skip polling for one proxy loop iteration (set when we know we have something
+    /// processible without having to shove it onto a socket, such as scheduling an internal job).
+    bool proxy_skip_poll = false;
+
     /// Does the proxying work
     void proxy_loop();
 

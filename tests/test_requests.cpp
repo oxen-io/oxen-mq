@@ -1,10 +1,9 @@
-#include "lokimq/lokimq.h"
+#include "common.h"
 #include <future>
-#include <catch2/catch.hpp>
 
 using namespace lokimq;
 
-TEST_CASE("basic requests", "[req-basic]") {
+TEST_CASE("basic requests", "[requests]") {
     std::string listen = "tcp://127.0.0.1:5678";
     LokiMQ server{
         "", "", // generate ephemeral keys
@@ -37,13 +36,15 @@ TEST_CASE("basic requests", "[req-basic]") {
             [&](string_view) { failed = true; },
             server.get_pubkey());
 
-    for (int i = 0; i < 20; i++) {
+    int i;
+    for (i = 0; i < 5; i++) {
         if (connected.load())
             break;
-        std::this_thread::sleep_for(100ms);
+        std::this_thread::sleep_for(50ms);
     }
     REQUIRE( connected.load() );
     REQUIRE( !failed.load() );
+    REQUIRE( i <= 1 );
     REQUIRE( pubkey == server.get_pubkey() );
 
     std::atomic<bool> got_reply{false};
@@ -55,8 +56,7 @@ TEST_CASE("basic requests", "[req-basic]") {
             data = std::move(data_);
     });
 
-    // FIXME: we shouldn't need to wait this long (perhaps explore zmq send immediate?)
-    std::this_thread::sleep_for(1500ms);
+    std::this_thread::sleep_for(50ms);
     REQUIRE( got_reply.load() );
     REQUIRE( success );
     REQUIRE( data == std::vector<std::string>{{"123"}} );

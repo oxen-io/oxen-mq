@@ -1,10 +1,9 @@
-#include "lokimq/lokimq.h"
+#include "common.h"
 #include <future>
-#include <catch2/catch.hpp>
 
 using namespace lokimq;
 
-TEST_CASE("basic commands", "[cmd-basic]") {
+TEST_CASE("basic commands", "[commands]") {
     std::string listen = "tcp://127.0.0.1:4567";
     LokiMQ server{
         "", "", // generate ephemeral keys
@@ -12,7 +11,9 @@ TEST_CASE("basic commands", "[cmd-basic]") {
         {listen},
         [](auto &) { return ""; },
         [](auto /*ip*/, auto /*pk*/) { return Allow{AuthLevel::none, false}; },
+        get_logger("S» ")
     };
+    server.log_level(LogLevel::trace);
 
     std::atomic<int> hellos{0}, his{0};
 
@@ -24,10 +25,10 @@ TEST_CASE("basic commands", "[cmd-basic]") {
     });
     server.start();
 
-    LokiMQ client(
-        [](LogLevel, const char* file, int line, std::string msg) { std::cerr << file << ":" << line << " --C-- " << msg << "\n"; }
-        );
-    //client.log_level(LogLevel::trace);
+    LokiMQ client{
+        get_logger("C» ")
+    };
+    client.log_level(LogLevel::trace);
 
     client.add_category("public", Access{AuthLevel::none});
     client.add_command("public", "hi", [&](auto&) { his++; });
@@ -41,24 +42,26 @@ TEST_CASE("basic commands", "[cmd-basic]") {
             [&](string_view) { failed = true; },
             server.get_pubkey());
 
-    for (int i = 0; i < 20; i++) {
+    int i;
+    for (i = 0; i < 5; i++) {
         if (connected.load())
             break;
-        std::this_thread::sleep_for(100ms);
+        std::this_thread::sleep_for(50ms);
     }
     REQUIRE( connected.load() );
+    REQUIRE( i <= 1 ); // should be fast
     REQUIRE( !failed.load() );
     REQUIRE( pubkey == server.get_pubkey() );
 
     client.send(pubkey, "public.hello");
-    std::this_thread::sleep_for(200ms);
+    std::this_thread::sleep_for(50ms);
     REQUIRE( hellos == 1 );
     REQUIRE( his == 1 );
 
     for (int i = 0; i < 50; i++)
         client.send(pubkey, "public.hello");
 
-    std::this_thread::sleep_for(200ms);
+    std::this_thread::sleep_for(100ms);
     REQUIRE( hellos == 51 );
     REQUIRE( his == 26 );
 }

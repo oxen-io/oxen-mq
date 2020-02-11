@@ -757,6 +757,7 @@ Batch<void>* LokiMQ::proxy_schedule_job(std::function<void()> f) {
     b->add_job(std::move(f));
     batches.insert(b);
     batch_jobs.emplace(static_cast<detail::Batch*>(b), 0);
+    proxy_skip_poll = true;
     return b;
 }
 
@@ -1013,11 +1014,16 @@ void LokiMQ::proxy_loop() {
             poll_timeout = std::chrono::milliseconds{zmq_timers_timeout(timers.get())};
         }
 
-        // We poll the control socket and worker socket for any incoming messages.  If we have
-        // available worker room then also poll incoming connections and outgoing connections for
-        // messages to forward to a worker.  Otherwise, we just look for a control message or a
-        // worker coming back with a ready message.
-        zmq::poll(pollitems.data(), pollitems.size(), poll_timeout);
+        if (proxy_skip_poll)
+            proxy_skip_poll = false;
+        else {
+            LMQ_LOG(trace, "polling for new messages");
+            // We poll the control socket and worker socket for any incoming messages.  If we have
+            // available worker room then also poll incoming connections and outgoing connections
+            // for messages to forward to a worker.  Otherwise, we just look for a control message
+            // or a worker coming back with a ready message.
+            zmq::poll(pollitems.data(), pollitems.size(), poll_timeout);
+        }
 
         LMQ_LOG(trace, "processing control messages");
         // Retrieve any waiting incoming control messages
@@ -1251,7 +1257,7 @@ bool LokiMQ::proxy_handle_builtin(int conn_index, std::vector<zmq::message_t>& p
             LMQ_LOG(warn, "Got invalid 'HI' message on an outgoing connection; ignoring");
             return true;
         }
-        LMQ_LOG(info, "Incoming client from ", peer_address(parts.back()), " send HI, replying with HELLO");
+        LMQ_LOG(info, "Incoming client from ", peer_address(parts.back()), " sent HI, replying with HELLO");
         send_routed_message(listener, route, "HELLO");
         return true;
     } else if (cmd == "HELLO") {

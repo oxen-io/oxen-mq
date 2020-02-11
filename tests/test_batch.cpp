@@ -1,7 +1,6 @@
-#include "lokimq/lokimq.h"
 #include "lokimq/batch.h"
+#include "common.h"
 #include <future>
-#include <catch2/catch.hpp>
 
 double do_my_task(int input) {
     if (input % 10 == 7)
