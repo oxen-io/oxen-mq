@@ -1,6 +1,8 @@
 #include <queue>
 #include <map>
 #include <cassert>
+#include <random>
+
 extern "C" {
 #include <sodium.h>
 }
@@ -102,6 +104,7 @@ void send_routed_message(zmq::socket_t &socket, std::string route, std::string m
     send_message_parts(socket, msgs.begin(), data.empty() ? std::prev(msgs.end()) : msgs.end());
 }
 
+// Sends some stuff to a socket directly.
 void send_direct_message(zmq::socket_t &socket, std::string msg, std::string data = {}) {
     std::array<zmq::message_t, 2> msgs{{create_message(std::move(msg))}};
     if (!data.empty())
@@ -142,18 +145,23 @@ std::string zmtp_metadata(string_view key, string_view value) {
     return result;
 }
 
-void check_not_started(const std::thread& proxy_thread) {
+void check_started(const std::thread& proxy_thread, const std::string &verb) {
+    if (!proxy_thread.joinable())
+        throw std::logic_error("Cannot " + verb + " before calling `start()`");
+}
+
+void check_not_started(const std::thread& proxy_thread, const std::string &verb) {
     if (proxy_thread.joinable())
-        throw std::logic_error("Cannot add categories/commands/aliases after calling `start()`");
+        throw std::logic_error("Cannot " + verb + " after calling `start()`");
 }
 
 // Extracts and builds the "send" part of a message for proxy_send/proxy_reply
-std::list<zmq::message_t> build_send_parts(bt_dict &data, const std::string &route) {
+std::list<zmq::message_t> build_send_parts(bt_list_consumer send, string_view route) {
     std::list<zmq::message_t> parts;
     if (!route.empty())
         parts.push_back(create_message(route));
-    for (auto &s : data.at("send").get<bt_list>())
-        parts.push_back(create_message(std::move(s.get<std::string>())));
+    while (!send.is_finished())
+        parts.push_back(create_message(send.consume_string()));
     return parts;
 }
 
@@ -229,7 +237,7 @@ LogLevel LokiMQ::log_level() const {
 
 
 void LokiMQ::add_category(std::string name, Access access_level, unsigned int reserved_threads, int max_queue) {
-    check_not_started(proxy_thread);
+    check_not_started(proxy_thread, "add a category");
 
     if (name.size() > MAX_CATEGORY_LENGTH)
         throw std::runtime_error("Invalid category name `" + name + "': name too long (> " + std::to_string(MAX_CATEGORY_LENGTH) + ")");
@@ -245,7 +253,7 @@ void LokiMQ::add_category(std::string name, Access access_level, unsigned int re
 }
 
 void LokiMQ::add_command(const std::string& category, std::string name, CommandCallback callback) {
-    check_not_started(proxy_thread);
+    check_not_started(proxy_thread, "add a command");
 
     if (name.size() > MAX_COMMAND_LENGTH)
         throw std::runtime_error("Invalid command name `" + name + "': name too long (> " + std::to_string(MAX_COMMAND_LENGTH) + ")");
@@ -258,13 +266,18 @@ void LokiMQ::add_command(const std::string& category, std::string name, CommandC
     if (command_aliases.count(fullname))
         throw std::runtime_error("Cannot add command `" + fullname + "': a command alias with that name is already defined");
 
-    auto ins = catit->second.commands.emplace(std::move(name), std::move(callback));
+    auto ins = catit->second.commands.insert({std::move(name), {std::move(callback), false}});
     if (!ins.second)
         throw std::runtime_error("Cannot add command `" + fullname + "': that command already exists");
 }
 
+void LokiMQ::add_request_command(const std::string& category, std::string name, CommandCallback callback) {
+    add_command(category, name, std::move(callback));
+    categories.at(category).commands.at(name).second = true;
+}
+
 void LokiMQ::add_command_alias(std::string from, std::string to) {
-    check_not_started(proxy_thread);
+    check_not_started(proxy_thread, "add a command alias");
 
     if (from.empty())
         throw std::runtime_error("Cannot add an alias for empty command");
@@ -299,6 +312,8 @@ std::mutex control_sockets_mutex;
 /// commands in a thread-safe manner.  A mutex is only required here the first time a thread
 /// accesses the control socket.
 zmq::socket_t& LokiMQ::get_control_socket() {
+    assert(proxy_thread.joinable());
+
     // Maps the LokiMQ unique ID to a local thread command socket.
     static thread_local std::map<int, std::shared_ptr<zmq::socket_t>> control_sockets;
     static thread_local std::pair<int, std::shared_ptr<zmq::socket_t>> last{-1, nullptr};
@@ -338,7 +353,7 @@ LokiMQ::LokiMQ(
         AllowFunc allow,
         Logger logger)
     : object_id{next_id++}, pubkey{std::move(pubkey_)}, privkey{std::move(privkey_)}, local_service_node{service_node},
-        bind{std::move(bind_)}, peer_lookup{std::move(lookup)}, allow_connection{std::move(allow)}, logger{logger},
+        bind{std::move(bind_)}, peer_lookup{std::move(lookup)}, allow_connection{std::move(allow)}, logger{std::move(logger)},
         poll_remote_offset{poll_internal_size + (bind.empty() ? 0 : 1)} {
 
     LMQ_LOG(trace, "Constructing listening LokiMQ, id=", object_id, ", this=", this);
@@ -404,11 +419,7 @@ void LokiMQ::start() {
 void LokiMQ::worker_thread(unsigned int index) {
     std::string worker_id = "w" + std::to_string(index);
     zmq::socket_t sock{context, zmq::socket_type::dealer};
-#if ZMQ_VERSION >= ZMQ_MAKE_VERSION (4, 3, 0)
     sock.setsockopt(ZMQ_ROUTING_ID, worker_id.data(), worker_id.size());
-#else
-    sock.setsockopt(ZMQ_IDENTITY, worker_id.data(), worker_id.size());
-#endif
     LMQ_LOG(debug, "New worker thread ", worker_id, " started");
     sock.connect(SN_ADDR_WORKERS);
 
@@ -427,14 +438,21 @@ void LokiMQ::worker_thread(unsigned int index) {
                     run.batch->job_completion();
                 }
             } else {
-                message.pubkey = {run.pubkey.data(), 32};
+                message.pubkey = run.pubkey;
                 message.service_node = run.service_node;
                 message.data.clear();
-                for (auto& m : run.data_parts)
-                    message.data.emplace_back(m.data<char>(), m.size());
+
+                if (run.callback->second /*is_request*/) {
+                    message.reply_tag = {run.data_parts[0].data<char>(), run.data_parts[0].size()};
+                    for (auto it = run.data_parts.begin() + 1; it != run.data_parts.end(); ++it)
+                        message.data.emplace_back(it->data<char>(), it->size());
+                } else {
+                    for (auto& m : run.data_parts)
+                        message.data.emplace_back(m.data<char>(), m.size());
+                }
 
                 LMQ_LOG(trace, "worker thread ", worker_id, " invoking ", run.command, " callback with ", message.data.size(), " message parts");
-                (*run.callback)(message);
+                run.callback->first(message);
             }
 
             /*
@@ -546,8 +564,19 @@ void LokiMQ::proxy_quit() {
     LMQ_LOG(debug, "Proxy thread teardown complete");
 }
 
+void LokiMQ::setup_outgoing_socket(zmq::socket_t& socket, string_view remote_pubkey) {
+    // FIXME: not passing a remote_pubkey is a problem
+    if (!remote_pubkey.empty())
+        socket.setsockopt(ZMQ_CURVE_SERVERKEY, remote_pubkey.data(), remote_pubkey.size());
+    socket.setsockopt(ZMQ_CURVE_PUBLICKEY, pubkey.data(), pubkey.size());
+    socket.setsockopt(ZMQ_CURVE_SECRETKEY, privkey.data(), privkey.size());
+    socket.setsockopt(ZMQ_HANDSHAKE_IVL, (int) HANDSHAKE_TIME.count());
+    socket.setsockopt<int64_t>(ZMQ_MAXMSGSIZE, MAX_MSG_SIZE);
+    socket.setsockopt(ZMQ_ROUTING_ID, pubkey.data(), pubkey.size());
+}
+
 std::pair<zmq::socket_t *, std::string>
-LokiMQ::proxy_connect(const std::string &remote, const std::string &connect_hint, bool optional, bool incoming_only, std::chrono::milliseconds keep_alive) {
+LokiMQ::proxy_connect_sn(const std::string &remote, const std::string &connect_hint, bool optional, bool incoming_only, std::chrono::milliseconds keep_alive) {
     auto &peer = peers[remote]; // We may auto-vivify here, but that's okay; it'll get cleaned up in idle_expiry if no connection gets established
 
     std::pair<zmq::socket_t *, std::string> result = {nullptr, ""s};
@@ -598,16 +627,7 @@ LokiMQ::proxy_connect(const std::string &remote, const std::string &connect_hint
 
     LMQ_LOG(debug, to_hex(pubkey), " connecting to ", addr, " to reach ", to_hex(remote));
     zmq::socket_t socket{context, zmq::socket_type::dealer};
-    socket.setsockopt(ZMQ_CURVE_SERVERKEY, remote.data(), remote.size());
-    socket.setsockopt(ZMQ_CURVE_PUBLICKEY, pubkey.data(), pubkey.size());
-    socket.setsockopt(ZMQ_CURVE_SECRETKEY, privkey.data(), privkey.size());
-    socket.setsockopt(ZMQ_HANDSHAKE_IVL, SN_HANDSHAKE_TIME);
-    socket.setsockopt<int64_t>(ZMQ_MAXMSGSIZE, SN_ZMQ_MAX_MSG_SIZE);
-#if ZMQ_VERSION >= ZMQ_MAKE_VERSION (4, 3, 0)
-    socket.setsockopt(ZMQ_ROUTING_ID, pubkey.data(), pubkey.size());
-#else
-    socket.setsockopt(ZMQ_IDENTITY, pubkey.data(), pubkey.size());
-#endif
+    setup_outgoing_socket(socket, remote);
     socket.connect(addr);
     peer.idle_expiry = keep_alive;
 
@@ -621,7 +641,7 @@ LokiMQ::proxy_connect(const std::string &remote, const std::string &connect_hint
     return result;
 }
 
-std::pair<zmq::socket_t *, std::string> LokiMQ::proxy_connect(bt_dict &&data) {
+std::pair<zmq::socket_t *, std::string> LokiMQ::proxy_connect_sn(bt_dict &&data) {
     auto remote_pubkey = data.at("pubkey").get<std::string>();
     std::chrono::milliseconds keep_alive{get_int<int>(data.at("keep-alive"))};
     std::string hint;
@@ -631,24 +651,44 @@ std::pair<zmq::socket_t *, std::string> LokiMQ::proxy_connect(bt_dict &&data) {
 
     bool optional = data.count("optional"), incoming = data.count("incoming");
 
-    return proxy_connect(remote_pubkey, hint, optional, incoming, keep_alive);
+    return proxy_connect_sn(remote_pubkey, hint, optional, incoming, keep_alive);
 }
 
-void LokiMQ::proxy_send(bt_dict &&data) {
-    const auto &remote_pubkey = data.at("pubkey").get<std::string>();
+void LokiMQ::proxy_send(bt_dict_consumer data) {
+    // NB: bt_dict_consumer goes in alphabetical order
     std::string hint;
-    auto hint_it = data.find("hint");
-    if (hint_it != data.end())
-        hint = hint_it->second.get<std::string>();
+    std::chrono::milliseconds keep_alive{DEFAULT_SEND_KEEP_ALIVE};
+    bool optional = false;
+    bool incoming = false;
+    bool request = false;
+    std::string request_tag;
+    std::unique_ptr<ReplyCallback> request_cbptr;
+    if (data.skip_until("hint"))
+        hint = data.consume_string();
+    if (data.skip_until("incoming"))
+        incoming = data.consume_integer<bool>();
+    if (data.skip_until("keep-alive"))
+        keep_alive = std::chrono::milliseconds{data.consume_integer<uint64_t>()};
+    if (data.skip_until("optional"))
+        optional = data.consume_integer<bool>();
+    if (!data.skip_until("pubkey"))
+        throw std::runtime_error("Internal error: Invalid proxy send command; pubkey missing");
+    std::string remote_pubkey = data.consume_string();
+    if (data.skip_until("request"))
+        request = data.consume_integer<bool>();
+    if (request) {
+        if (!data.skip_until("request_callback"))
+            throw std::runtime_error("Internal error: received request without request_callback");
+        request_cbptr.reset(reinterpret_cast<ReplyCallback*>(data.consume_integer<uintptr_t>()));
+        if (!data.skip_until("request_tag"))
+            throw std::runtime_error("Internal error: received request without request_name");
+        request_tag = data.consume_string();
+    }
+    if (!data.skip_until("send"))
+        throw std::runtime_error("Internal error: Invalid proxy send command; send parts missing");
+    bt_list_consumer send = data.consume_list_consumer();
 
-    auto idle_it = data.find("keep-alive");
-    std::chrono::milliseconds keep_alive = idle_it != data.end()
-        ? std::chrono::milliseconds{get_int<uint64_t>(idle_it->second)}
-        : DEFAULT_SEND_KEEP_ALIVE;
-
-    bool optional = data.count("optional"), incoming = data.count("incoming");
-
-    auto sock_route = proxy_connect(remote_pubkey, hint, optional, incoming, keep_alive);
+    auto sock_route = proxy_connect_sn(remote_pubkey, hint, optional, incoming, keep_alive);
     if (!sock_route.first) {
         if (optional)
             LMQ_LOG(debug, "Not sending: send is optional and no connection to ", to_hex(remote_pubkey), " is currently established");
@@ -656,8 +696,14 @@ void LokiMQ::proxy_send(bt_dict &&data) {
             LMQ_LOG(error, "Unable to send to ", to_hex(remote_pubkey), ": no connection could be established");
         return;
     }
+
+    if (request) {
+        pending_requests.insert({ request_tag, {
+            std::chrono::steady_clock::now() + REQUEST_TIMEOUT, std::move(*request_cbptr) }});
+    }
+
     try {
-        send_message_parts(*sock_route.first, build_send_parts(data, sock_route.second));
+        send_message_parts(*sock_route.first, build_send_parts(send, sock_route.second));
     } catch (const zmq::error_t &e) {
         if (e.num() == EHOSTUNREACH && sock_route.first == &listener && !sock_route.second.empty()) {
             // We *tried* to route via the incoming connection but it is no longer valid.  Drop it,
@@ -671,16 +717,25 @@ void LokiMQ::proxy_send(bt_dict &&data) {
     }
 }
 
-void LokiMQ::proxy_reply(bt_dict &&data) {
-    const auto &route = data.at("route").get<std::string>();
+void LokiMQ::proxy_reply(bt_dict_consumer data) {
+    // NB: bt_dict_consumer goes in alphabetical order
+    data.skip_until("route");
+    string_view route = data.consume_string();
     assert(!route.empty());
+
     if (!listener.connected()) {
+        // FIXME: this is wrong; we can reply to something even with no listener (e.g. if client
+        // says A, server replies B, client replies to that with C).
         LMQ_LOG(error, "Internal error: proxy_reply called but that shouldn't be possible as we have no listener!");
         return;
     }
 
+    if (!data.skip_until("send"))
+        throw std::runtime_error("Internal error: Invalid proxy reply command; send parts missing");
+    bt_list_consumer send = data.consume_list_consumer();
+
     try {
-        send_message_parts(listener, build_send_parts(data, route));
+        send_message_parts(listener, build_send_parts(send, route));
     } catch (const zmq::error_t &err) {
         if (err.num() == EHOSTUNREACH) {
             LMQ_LOG(info, "Unable to send reply to incoming non-SN request: remote is no longer connected");
@@ -690,8 +745,8 @@ void LokiMQ::proxy_reply(bt_dict &&data) {
     }
 }
 
-void LokiMQ::proxy_batch(detail::Batch* batchptr) {
-    auto& batch = *batches.emplace(batchptr).first;
+void LokiMQ::proxy_batch(detail::Batch* batch) {
+    batches.insert(batch);
     const int jobs = batch->size();
     for (int i = 0; i < jobs; i++)
         batch_jobs.emplace(batch, i);
@@ -735,18 +790,22 @@ void LokiMQ::proxy_control_message(std::vector<zmq::message_t>& parts) {
     auto route = view(parts[0]), cmd = view(parts[1]);
     LMQ_LOG(trace, "control message: ", cmd);
     if (parts.size() == 3) {
+        LMQ_LOG(trace, "...: ", parts[2]);
         if (cmd == "SEND") {
             LMQ_LOG(trace, "proxying message");
-            return proxy_send(bt_deserialize<bt_dict>(view(parts[2])));
+            return proxy_send(view(parts[2]));
         } else if (cmd == "REPLY") {
             LMQ_LOG(trace, "proxying reply to non-SN incoming message");
-            return proxy_reply(bt_deserialize<bt_dict>(view(parts[2])));
+            return proxy_reply(view(parts[2]));
         } else if (cmd == "BATCH") {
             LMQ_LOG(trace, "proxy batch jobs");
             auto ptrval = bt_deserialize<uintptr_t>(view(parts[2]));
             return proxy_batch(reinterpret_cast<detail::Batch*>(ptrval));
-        } else if (cmd == "CONNECT") {
-            proxy_connect(bt_deserialize<bt_dict>(view(parts[2])));
+        } else if (cmd == "CONNECT_SN") {
+            proxy_connect_sn(bt_deserialize<bt_dict>(view(parts[2])));
+            return;
+        } else if (cmd == "CONNECT_REMOTE") {
+            proxy_connect_remote(view(parts[2]));
             return;
         } else if (cmd == "TIMER") {
             return proxy_timer(view(parts[2]));
@@ -771,20 +830,30 @@ void LokiMQ::proxy_control_message(std::vector<zmq::message_t>& parts) {
             " (" + std::to_string(parts.size()) + ")");
 }
 
+
+void LokiMQ::proxy_close_remote(int index, bool linger) {
+    remotes[index].second.setsockopt<int>(ZMQ_LINGER, linger ? std::chrono::milliseconds{CLOSE_LINGER}.count() : 0);
+    pollitems.erase(pollitems.begin() + poll_remote_offset + index);
+    remotes.erase(remotes.begin() + index);
+    assert(remotes.size() == pollitems.size() + poll_remote_offset);
+
+    for (auto& p : peers)
+        if (p.second.outgoing > index)
+            --p.second.outgoing;
+
+    for (auto& pc : pending_connects) {
+        auto& i = std::get<int>(pc);
+        if (i > index)
+            --i;
+    }
+}
+
 auto LokiMQ::proxy_close_outgoing(decltype(peers)::iterator it) -> decltype(it) {
     auto &peer = *it;
     auto &info = peer.second;
 
     if (info.outgoing >= 0) {
-        remotes[info.outgoing].second.setsockopt<int>(ZMQ_LINGER, std::chrono::milliseconds{CLOSE_LINGER}.count());
-        pollitems.erase(pollitems.begin() + poll_remote_offset + info.outgoing);
-        remotes.erase(remotes.begin() + info.outgoing);
-        assert(remotes.size() == pollitems.size() + poll_remote_offset);
-
-        for (auto &p : peers)
-            if (p.second.outgoing > info.outgoing)
-                --p.second.outgoing;
-
+        proxy_close_remote(info.outgoing);
         info.outgoing = -1;
     }
 
@@ -822,6 +891,42 @@ void LokiMQ::proxy_expire_idle_peers() {
     }
 }
 
+void LokiMQ::proxy_conn_cleanup() {
+    // Drop idle connections (if we haven't done it in a while) but *only* if we have some idle
+    // general workers: if we don't have any idle workers then we may still have incoming messages which
+    // we haven't processed yet and those messages might end up resetting the last activity time.
+    if (workers.size() < general_workers) {
+        LMQ_LOG(trace, "closing idle connections");
+        proxy_expire_idle_peers();
+    }
+
+    auto now = std::chrono::steady_clock::now();
+
+    // Check any pending outgoing connections for timeout
+    for (auto it = pending_connects.begin(); it != pending_connects.end(); ) {
+        auto& pc = *it;
+        if (std::get<1>(pc) < now) {
+            job([callback = std::move(std::get<3>(pc))] { callback("connection attempt timed out"); });
+            int index = std::get<0>(pc);
+            it = pending_connects.erase(it);
+            proxy_close_remote(index, false /*linger*/);
+        } else {
+            ++it;
+        }
+    }
+
+    // Remove any expired pending requests and schedule their callback with a failure
+    for (auto it = pending_requests.begin(); it != pending_requests.end(); ) {
+        auto& callback = it->second;
+        if (callback.first < now) {
+            job([callback = std::move(callback.second)] { callback(false, {}); });
+            it = pending_requests.erase(it);
+        } else {
+            ++it;
+        }
+    }
+};
+
 void LokiMQ::proxy_loop() {
     zmq::socket_t zap_auth{context, zmq::socket_type::rep};
     zap_auth.setsockopt<int>(ZMQ_LINGER, 0);
@@ -839,9 +944,10 @@ void LokiMQ::proxy_loop() {
     }
 
     if (log_level() >= LogLevel::trace) {
-        LMQ_LOG(trace, "Reserving space for ", max_workers, " max workers = ", general_workers, " general + category reserved:");
+        LMQ_LOG(trace, "Reserving space for ", max_workers, " max workers = ", general_workers, " general + reserved:");
         for (const auto& cat : categories)
             LMQ_LOG(trace, "    - ", cat.first, ": ", cat.second.reserved_threads);
+        LMQ_LOG(trace, "    - (batch jobs): ", batch_jobs_reserved);
     }
 
     workers.reserve(max_workers);
@@ -860,7 +966,8 @@ void LokiMQ::proxy_loop() {
         listener.setsockopt<int>(ZMQ_CURVE_SERVER, 1);
         listener.setsockopt(ZMQ_CURVE_PUBLICKEY, pubkey.data(), pubkey.size());
         listener.setsockopt(ZMQ_CURVE_SECRETKEY, privkey.data(), privkey.size());
-        listener.setsockopt<int64_t>(ZMQ_MAXMSGSIZE, SN_ZMQ_MAX_MSG_SIZE);
+        listener.setsockopt(ZMQ_HANDSHAKE_IVL, (int) HANDSHAKE_TIME.count());
+        listener.setsockopt<int64_t>(ZMQ_MAXMSGSIZE, MAX_MSG_SIZE);
         listener.setsockopt<int>(ZMQ_ROUTER_HANDOVER, 1);
         listener.setsockopt<int>(ZMQ_ROUTER_MANDATORY, 1);
 
@@ -879,10 +986,18 @@ void LokiMQ::proxy_loop() {
 
     assert(pollitems.size() == poll_remote_offset);
 
-    constexpr auto timeout_check_interval = 10000ms; // Minimum time before for checking for connections to close since the last check
-    auto last_conn_timeout = std::chrono::steady_clock::now();
     if (!timers)
         timers.reset(zmq_timers_new());
+
+    auto do_conn_cleanup = [this] { proxy_conn_cleanup(); };
+    using CleanupLambda = decltype(do_conn_cleanup);
+    if (-1 == zmq_timers_add(timers.get(),
+            std::chrono::milliseconds{CONN_CHECK_INTERVAL}.count(),
+            // Wrap our lambda into a C function pointer where we pass in the lambda pointer as extra arg
+            [](int /*timer_id*/, void* cleanup) { (*static_cast<CleanupLambda*>(cleanup))(); },
+            &do_conn_cleanup)) {
+        throw zmq::error_t{};
+    }
 
     std::vector<zmq::message_t> parts;
 
@@ -932,9 +1047,9 @@ void LokiMQ::proxy_loop() {
         // We round-robin connections when pulling off pending messages one-by-one rather than
         // pulling off all messages from one connection before moving to the next; thus in cases of
         // contention we end up fairly distributing.
-        const size_t num_sockets = remotes.size() + listener.connected();
-        std::queue<size_t> queue_index;
-        for (size_t i = 0; i < num_sockets; i++)
+        const int num_sockets = remotes.size() + listener.connected();
+        std::queue<int> queue_index;
+        for (int i = 0; i < num_sockets; i++)
             queue_index.push(i);
 
         for (parts.clear(); !queue_index.empty() && workers.size() < max_workers; parts.clear()) {
@@ -958,23 +1073,11 @@ void LokiMQ::proxy_loop() {
                 proxy_to_worker(i, parts);
         }
 
-        // Drop idle connections (if we haven't done it in a while) but *only* if we have some idle
-        // general workers: if we don't have any idle workers then we may still have incoming messages which
-        // we haven't processed yet and those messages might end up reset the last activity time.
-        if (workers.size() < general_workers) {
-            auto now = std::chrono::steady_clock::now();
-            if (now - last_conn_timeout >= timeout_check_interval) {
-                LMQ_LOG(trace, "closing idle connections");
-                proxy_expire_idle_peers();
-                last_conn_timeout = now;
-            }
-        }
-
         LMQ_LOG(trace, "done proxy loop");
     }
 }
 
-std::pair<LokiMQ::category*, const LokiMQ::CommandCallback*> LokiMQ::get_command(std::string& command) {
+std::pair<LokiMQ::category*, const std::pair<LokiMQ::CommandCallback, bool>*> LokiMQ::get_command(std::string& command) {
     if (command.size() > MAX_CATEGORY_LENGTH + 1 + MAX_COMMAND_LENGTH) {
         LMQ_LOG(warn, "Invalid command '", command, "': command too long");
         return {};
@@ -1082,14 +1185,20 @@ void LokiMQ::proxy_worker_message(std::vector<zmq::message_t>& parts) {
     }
 }
 
-decltype(LokiMQ::peers)::iterator LokiMQ::proxy_lookup_peer(zmq::message_t& msg) {
+decltype(LokiMQ::peers)::iterator LokiMQ::proxy_lookup_peer(int conn_index, zmq::message_t& msg) {
+    bool is_outgoing_conn = !listener.connected() || conn_index > 0;
+
     std::string pubkey;
-    bool service_node;
-    try {
-        extract_pubkey(msg, pubkey, service_node);
-    } catch (...) {
-        LMQ_LOG(error, "Internal error: message metadata not set or invalid; dropping message");
-        throw std::out_of_range("message pubkey metadata invalid");
+    bool service_node = false;
+    if (!is_outgoing_conn) {
+        try {
+            extract_pubkey(msg, pubkey, service_node);
+        } catch (...) {
+            LMQ_LOG(error, "Internal error: message metadata not set or invalid; dropping message");
+            throw std::out_of_range("message pubkey metadata invalid");
+        }
+    } else {
+        pubkey = remotes[conn_index].first;
     }
 
     auto it = peers.find(pubkey);
@@ -1099,11 +1208,77 @@ decltype(LokiMQ::peers)::iterator LokiMQ::proxy_lookup_peer(zmq::message_t& msg)
     return it;
 }
 
-bool LokiMQ::proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>& parts) {
-    (void) conn_index; // FIXME
-    auto cmd = view(parts.front());
-    if (cmd == "BYE") {
-        auto pit = proxy_lookup_peer(parts.front());
+// Return true if we recognized/handled the builtin command (even if we reject it for whatever
+// reason)
+bool LokiMQ::proxy_handle_builtin(int conn_index, std::vector<zmq::message_t>& parts) {
+    string_view route, cmd;
+    bool is_outgoing_conn = !listener.connected() || conn_index > 0;
+    if (parts.size() < (is_outgoing_conn ? 1 : 2)) {
+        LMQ_LOG(warn, "Received empty message; ignoring");
+        return true;
+    }
+    if (is_outgoing_conn) {
+        cmd = view(parts[0]);
+    } else {
+        route = view(parts[0]);
+        cmd = view(parts[1]);
+    }
+    LMQ_LOG(trace, "Checking for builtins: ", cmd, " from ", peer_address(parts.back()));
+
+    if (cmd == "REPLY") {
+        size_t tag_pos = (is_outgoing_conn ? 1 : 2);
+        if (parts.size() <= tag_pos) {
+            LMQ_LOG(warn, "Received REPLY without a reply tag; ignoring");
+            return true;
+        }
+        std::string reply_tag = view(parts[1]);
+        auto it = pending_requests.find(reply_tag);
+        if (it != pending_requests.end()) {
+            LMQ_LOG(debug, "Received REPLY for pending command; scheduling callback");
+            std::vector<std::string> data;
+            data.reserve(parts.size() - (tag_pos + 1));
+            for (auto it = parts.begin() + (tag_pos + 1); it != parts.end(); ++it)
+                data.emplace_back(view(*it));
+            proxy_schedule_job([callback=std::move(it->second.second), data=std::move(data)] {
+                    callback(true, std::move(data));
+            });
+        } else {
+            LMQ_LOG(warn, "Received REPLY with unknown or already handled reply tag (", to_hex(reply_tag), "); ignoring");
+        }
+        return true;
+    } else if (cmd == "HI") {
+        if (is_outgoing_conn) {
+            LMQ_LOG(warn, "Got invalid 'HI' message on an outgoing connection; ignoring");
+            return true;
+        }
+        LMQ_LOG(info, "Incoming client from ", peer_address(parts.back()), " send HI, replying with HELLO");
+        send_routed_message(listener, route, "HELLO");
+        return true;
+    } else if (cmd == "HELLO") {
+        if (!is_outgoing_conn) {
+            LMQ_LOG(warn, "Got invalid 'HELLO' message on an incoming connection; ignoring");
+            return true;
+        }
+        auto it = std::find_if(pending_connects.begin(), pending_connects.end(),
+                [&](auto& pc) { return std::get<0>(pc) == conn_index; });
+        if (it == pending_connects.end()) {
+            LMQ_LOG(warn, "Got invalid 'HELLO' message on an already handshaked incoming connection; ignoring");
+            return true;
+        }
+        LMQ_LOG(info, "Got initial HELLO server response from ", peer_address(parts.back()));
+        size_t pksize = 32;
+        remotes[conn_index].first.resize(pksize);
+        remotes[conn_index].second.getsockopt(ZMQ_CURVE_SERVERKEY, &remotes[conn_index].first[0], &pksize);
+        auto &peer = peers[remotes[conn_index].first];
+        peer.idle_expiry = 365 * 24h;
+        peer.outgoing = conn_index;
+        peer.service_node = false;
+        peer.activity();
+        proxy_schedule_job([on_success=std::move(std::get<2>(*it)), pk=remotes[conn_index].first] { on_success(std::move(pk)); });
+        pending_connects.erase(it);
+        return true;
+    } else if (cmd == "BYE") {
+        auto pit = proxy_lookup_peer(conn_index, parts.front());
         proxy_close_outgoing(pit);
         return true;
     }
@@ -1191,7 +1366,7 @@ void LokiMQ::proxy_process_queue() {
 }
 
 void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& parts) {
-    auto pit = proxy_lookup_peer(parts.back());
+    auto pit = proxy_lookup_peer(conn_index, parts.back());
     string_view pubkey = pit->first;
     auto& peer_info = pit->second;
 
@@ -1231,6 +1406,11 @@ void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
         LMQ_LOG(debug, "No available free workers, queuing ", command, " for later");
         pending_commands.emplace_back(category, std::move(command), std::move(data_parts), cat_call.second, pubkey, peer_info.service_node);
         category.queued++;
+        return;
+    }
+
+    if (cat_call.second->second /*is_request*/ && data_parts.empty()) {
+        LMQ_LOG(warn, "Received an invalid request command with no reply tag; dropping message");
         return;
     }
 
@@ -1411,11 +1591,81 @@ LokiMQ::~LokiMQ() {
     LMQ_LOG(info, "LokiMQ proxy thread has stopped");
 }
 
-void LokiMQ::connect(const std::string &pubkey, std::chrono::milliseconds keep_alive, const std::string &hint) {
-    detail::send_control(get_control_socket(), "CONNECT", bt_serialize<bt_dict>({{"pubkey",pubkey}, {"keep-alive",keep_alive.count()}, {"hint",hint}}));
+void LokiMQ::connect_sn(string_view pubkey, std::chrono::milliseconds keep_alive, string_view hint) {
+    check_started(proxy_thread, "connect");
+
+    detail::send_control(get_control_socket(), "CONNECT_SN", bt_serialize<bt_dict>({{"pubkey",pubkey}, {"keep-alive",keep_alive.count()}, {"hint",hint}}));
 }
 
-inline void LokiMQ::job(std::function<void()> f) {
+void LokiMQ::connect_remote(string_view remote, ConnectSuccess on_connect, ConnectFailure on_failure,
+        string_view pubkey, std::chrono::milliseconds timeout) {
+    if (!proxy_thread.joinable())
+        LMQ_LOG(warn, "connect_remote() called before start(); this won't take effect until start() is called");
+
+    LMQ_LOG(trace, "telling proxy to connect to ", remote, ", expecting pubkey [", to_hex(pubkey), "]");
+    detail::send_control(get_control_socket(), "CONNECT_REMOTE", bt_serialize<bt_dict>({
+        {"remote", remote},
+        {"pubkey", pubkey},
+        {"timeout", timeout.count()},
+        {"connect", reinterpret_cast<uintptr_t>(new ConnectSuccess{std::move(on_connect)})},
+        {"failure", reinterpret_cast<uintptr_t>(new ConnectFailure{std::move(on_failure)})},
+    }));
+}
+
+void LokiMQ::proxy_connect_remote(bt_dict_consumer data) {
+    ConnectSuccess on_connect;
+    ConnectFailure on_failure;
+    std::string remote;
+    std::string remote_pubkey;
+    std::chrono::milliseconds timeout = REMOTE_CONNECT_TIMEOUT;
+
+    if (data.skip_until("connect")) {
+        auto* ptr = reinterpret_cast<ConnectSuccess*>(data.consume_integer<uintptr_t>());
+        on_connect = std::move(*ptr);
+        delete ptr;
+    }
+    if (data.skip_until("failure")) {
+        auto* ptr = reinterpret_cast<ConnectFailure*>(data.consume_integer<uintptr_t>());
+        on_failure = std::move(*ptr);
+        delete ptr;
+    }
+    if (data.skip_until("pubkey")) {
+        remote_pubkey = data.consume_string();
+        assert(remote_pubkey.size() == 32 || remote_pubkey.empty());
+    }
+    if (data.skip_until("remote"))
+        remote = data.consume_string();
+    if (data.skip_until("timeout"))
+        timeout = std::chrono::milliseconds{data.consume_integer<uint64_t>()};
+
+    if (remote.empty())
+        throw std::runtime_error("Internal error: CONNECT_REMOTE proxy command missing required 'remote' value");
+
+    LMQ_LOG(info, "Establishing remote connection to ", remote, remote_pubkey.empty() ? " (any pubkey)" : " expecting pubkey " + to_hex(remote_pubkey));
+
+    zmq::socket_t sock{context, zmq::socket_type::dealer};
+    try {
+        setup_outgoing_socket(sock, remote_pubkey);
+        sock.connect(remote);
+    } catch (const zmq::error_t &e) {
+        proxy_schedule_job([on_failure=std::move(on_failure), what="connect() failed: "s+e.what()] { on_failure(std::move(what)); });
+        return;
+    }
+
+    LMQ_LOG(debug, "Opened new zmq socket to ", remote, ", sending HI");
+    send_direct_message(sock, "HI");
+    add_pollitem(sock);
+    remotes.emplace_back("", std::move(sock));
+    pending_connects.emplace_back(remotes.size()-1, std::chrono::steady_clock::now() + timeout,
+            std::move(on_connect), std::move(on_failure));
+}
+
+void LokiMQ::disconnect_remote(string_view id, std::chrono::milliseconds linger) {
+    (void)id, (void)linger;
+}
+
+
+void LokiMQ::job(std::function<void()> f) {
     auto* b = new Batch<void>;
     b->add_job(std::move(f));
     auto* baseptr = static_cast<detail::Batch*>(b);
@@ -1479,6 +1729,15 @@ std::ostream &operator<<(std::ostream &os, LogLevel lvl) {
     return os;
 }
 
+std::string make_random_string(size_t size) {
+    static thread_local std::mt19937_64 rng{std::random_device{}()};
+    static thread_local std::uniform_int_distribution<char> dist{std::numeric_limits<char>::min(), std::numeric_limits<char>::max()};
+    std::string rando;
+    rando.reserve(size);
+    for (size_t i = 0; i < size; i++)
+        rando += dist(rng);
+    return rando;
 }
 
+} // namespace lokimq
 // vim:sw=4:et

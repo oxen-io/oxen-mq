@@ -4,6 +4,8 @@ add_subdirectory(Catch2)
 set(LMQ_TEST_SRC
     main.cpp
     test_batch.cpp
+    test_commands.cpp
+    test_requests.cpp
     )
 
 add_executable(tests ${LMQ_TEST_SRC})

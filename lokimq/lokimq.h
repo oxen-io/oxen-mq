@@ -91,8 +91,10 @@ class Message {
 public:
     LokiMQ& lokimq; ///< The owning LokiMQ object
     std::vector<string_view> data; ///< The provided command data parts, if any.
-    string_view pubkey; ///< The originator pubkey (32 bytes)
+    string_view id; ///< The remote's unique, opaque id for routing.
+    string_view pubkey; ///< The remote's pubkey (32 bytes)
     bool service_node; ///< True if the pubkey is an active SN (note that this is only checked on initial connection, not every received message)
+    std::string reply_tag; ///< If the invoked command is a request command this is the required reply tag that will be prepended by `send_reply()`.
 
     /// Constructor
     Message(LokiMQ& lmq) : lokimq{lmq} {}
@@ -101,29 +103,44 @@ public:
     Message(const Message&) = delete;
     Message& operator=(const Message&) = delete;
 
-    /// Sends a reply.  Arguments are forwarded to send() but with send_option::optional{} added
-    /// if the originator is not a SN.  For SN messages (i.e.  where `sn` is true) this is a
-    /// "strong" reply by default in that the proxy will attempt to establish a new connection
-    /// to the SN if no longer connected.  For non-SN messages the reply will be attempted using
-    /// the available routing information, but if the connection has already been closed the
-    /// reply will be dropped.
+    /// Sends a command back to whomever sent this message.  Arguments are forwarded to send() but
+    /// with send_option::optional{} added if the originator is not a SN.  For SN messages (i.e.
+    /// where `sn` is true) this is a "strong" reply by default in that the proxy will attempt to
+    /// establish a new connection to the SN if no longer connected.  For non-SN messages the reply
+    /// will be attempted using the available routing information, but if the connection has already
+    /// been closed the reply will be dropped.
     ///
     /// If you want to send a non-strong reply even when the remote is a service node then add
     /// an explicit `send_option::optional()` argument.
     template <typename... Args>
-    void reply(const std::string& command, Args&&... args);
+    void send_back(const std::string& command, Args&&... args);
+
+    /// Sends a reply to a request.  This takes no command: the command is always the built-in
+    /// "REPLY" command, followed by the unique reply tag, then any reply data parts.  All other
+    /// arguments are as in `send_back()`.
+    template <typename... Args>
+    void send_reply(Args&&... args);
 };
 
 // Forward declarations; see batch.h
 namespace detail { class Batch; }
 template <typename R> class Batch;
 
-
 /** The keep-alive time for a send() that results in a establishing a new outbound connection.  To
  * use a longer keep-alive to a host call `connect()` first with the desired keep-alive time or pass
  * the send_option::keep_alive.
  */
 static constexpr auto DEFAULT_SEND_KEEP_ALIVE = 30s;
+
+// How frequently we cleanup connections (closing idle connections, calling connect or request failure callbacks)
+static constexpr auto CONN_CHECK_INTERVAL = 1s;
+
+// The default timeout for connect_remote()
+static constexpr auto REMOTE_CONNECT_TIMEOUT = 10s;
+
+// The minimum amount of time we wait for a reply to a REQUEST before calling the callback with
+// `false` to signal a timeout.
+static constexpr auto REQUEST_TIMEOUT = 15s;
 
 /// Maximum length of a category
 static constexpr size_t MAX_CATEGORY_LENGTH = 50;
@@ -195,11 +212,20 @@ public:
     /// The callback type for registered commands.
     using CommandCallback = std::function<void(Message& message)>;
 
+    /// The callback for making requests.  This is called with `true` and a (moved) vector of data
+    /// part strings when we get a reply, or `false` and empty vector on timeout.
+    using ReplyCallback = std::function<void(bool success, std::vector<std::string> data)>;
+
     /// Called to write a log message.  This will only be called if the `level` is >= the current
     /// LokiMQ object log level.  It must be a raw function pointer (or a capture-less lambda) for
     /// performance reasons.  Takes four arguments: the log level of the message, the filename and
     /// line number where the log message was invoked, and the log message itself.
     using Logger = std::function<void(LogLevel level, const char* file, int line, std::string msg)>;
+
+    /// Callback for the success case of connect_remote()
+    using ConnectSuccess = std::function<void(const std::string& pubkey)>;
+    /// Callback for the failure case of connect_remote()
+    using ConnectFailure = std::function<void(const std::string& reason)>;
 
     /// Explicitly non-copyable, non-movable because most things here aren't copyable, and a few
     /// things aren't movable, either.  If you need to pass the LokiMQ instance around, wrap it
@@ -211,11 +237,11 @@ public:
 
     /** How long to wait for handshaking to complete on external connections before timing out and
      * closing the connection.  Setting this only affects new outgoing connections. */
-    std::chrono::milliseconds SN_HANDSHAKE_TIME = 10s;
+    std::chrono::milliseconds HANDSHAKE_TIME = 10s;
 
     /** Maximum incoming message size; if a remote tries sending a message larger than this they get
      * disconnected. -1 means no limit. */
-    int64_t SN_ZMQ_MAX_MSG_SIZE = 1 * 1024 * 1024;
+    int64_t MAX_MSG_SIZE = 1 * 1024 * 1024;
 
     /** How long (in ms) to linger sockets when closing them; this is the maximum time zmq spends
      * trying to sending pending messages before dropping them and closing the underlying socket
@@ -254,6 +280,10 @@ private:
     /// Info about a peer's established connection to us.  Note that "established" means both
     /// connected and authenticated.
     struct peer_info {
+        /// Pubkey of the remote; can be empty (especially before handshake) but will only be set if
+        /// the pubkey has been verified.
+        std::string pubkey;
+
         /// True if we've authenticated this peer as a service node.
         bool service_node = false;
 
@@ -281,15 +311,20 @@ private:
         std::chrono::milliseconds idle_expiry;
     };
 
-    struct pk_hash {
-        size_t operator()(const std::string& pubkey) const {
-            size_t h;
-            std::memcpy(&h, pubkey.data(), sizeof(h));
-            return h;
-        }
-    };
-    /// Currently peer connections, pubkey -> peer_info
-    std::unordered_map<std::string, peer_info, pk_hash> peers;
+    /// Currently peer connections: id -> peer_info.  id == pubkey for incoming and outgoing SN
+    /// connections; random string for outgoing direct connections.
+    std::unordered_map<std::string, peer_info> peers;
+
+    /// Remotes we are still trying to connect to (via connect_remote(), not connect_sn()); when
+    /// we pass handshaking we move them out of here and (if set) trigger the on_connect callback.
+    /// Unlike regular node-to-node peers, these have an extra "HI"/"HELLO" sequence that we used
+    /// before we consider ourselves connected to the remote.
+    std::vector<std::tuple<int /*remotes index*/, std::chrono::steady_clock::time_point, ConnectSuccess, ConnectFailure>> pending_connects;
+
+    /// Pending requests that have been sent out but not yet received a matching "REPLY".  The value
+    /// is the timeout timestamp.
+    std::unordered_map<std::string, std::pair<std::chrono::steady_clock::time_point, ReplyCallback>>
+        pending_requests;
 
     /// different polling sockets the proxy handler polls: this always contains some internal
     /// sockets for inter-thread communication followed by listener socket and a pollitem for every
@@ -309,6 +344,8 @@ private:
     /// The outgoing remote connections we currently have open along with the remote pubkeys.  Each
     /// element [i] here corresponds to an the pollitem_t at pollitems[i+1+poll_internal_size].
     /// (Ideally we'd use one structure, but zmq requires the pollitems be in contiguous storage).
+    /// For new connections established via connect_remote the pubkey will be empty until we
+    /// do the HI/HELLO handshake over the socket.
     std::vector<std::pair<std::string, zmq::socket_t>> remotes;
 
     /// Socket we listen on to receive control messages in the proxy thread. Each thread has its own
@@ -351,21 +388,25 @@ private:
     /// Does the proxying work
     void proxy_loop();
 
+    void proxy_conn_cleanup();
+
     void proxy_worker_message(std::vector<zmq::message_t>& parts);
 
     void proxy_process_queue();
 
     Batch<void>* proxy_schedule_job(std::function<void()> f);
 
-    /// Looks up a peers element given a zmq message (which has the pubkey and sn status metadata
-    /// set during initial connection authentication), creating a new peer element if required.
-    decltype(peers)::iterator proxy_lookup_peer(zmq::message_t& msg);
+    /// Looks up a peers element given a connect index (for outgoing connections where we already
+    /// knew the pubkey and SN status) or an incoming zmq message (which has the pubkey and sn
+    /// status metadata set during initial connection authentication), creating a new peer element
+    /// if required.
+    decltype(peers)::iterator proxy_lookup_peer(int conn_index, zmq::message_t& msg);
 
     /// Handles built-in primitive commands in the proxy thread for things like "BYE" that have to
     /// be done in the proxy thread anyway (if we forwarded to a worker the worker would just have
     /// to send an instruction back to the proxy to do it).  Returns true if one was handled, false
     /// to continue with sending to a worker.
-    bool proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>& parts);
+    bool proxy_handle_builtin(int conn_index, std::vector<zmq::message_t>& parts);
 
     struct run_info;
     /// Gets an idle worker's run_info and removes the worker from the idle worker list.  If there
@@ -387,24 +428,31 @@ private:
     /// gets called after all works have done so.
     void proxy_quit();
 
+    // Sets the various properties on an outgoing socket prior to connection.
+    void setup_outgoing_socket(zmq::socket_t& socket, string_view remote_pubkey = {});
+
     /// Common connection implementation used by proxy_connect/proxy_send.  Returns the socket
     /// and, if a routing prefix is needed, the required prefix (or an empty string if not needed).
     /// For an optional connect that fail, returns nullptr for the socket.
-    std::pair<zmq::socket_t*, std::string> proxy_connect(const std::string& pubkey, const std::string& connect_hint, bool optional, bool incoming_only, std::chrono::milliseconds keep_alive);
+    std::pair<zmq::socket_t*, std::string> proxy_connect_sn(const std::string& pubkey, const std::string& connect_hint, bool optional, bool incoming_only, std::chrono::milliseconds keep_alive);
 
-    /// CONNECT command telling us to connect to a new pubkey.  Returns the socket (which could be
+    /// CONNECT_SN command telling us to connect to a new pubkey.  Returns the socket (which could be
     /// existing or a new one).
-    std::pair<zmq::socket_t*, std::string> proxy_connect(bt_dict&& data);
+    std::pair<zmq::socket_t*, std::string> proxy_connect_sn(bt_dict&& data);
+
+    /// Opens a new connection to a remote, with callbacks.  This is the proxy-side implementation
+    /// of the `connect_remote()` call.
+    void proxy_connect_remote(bt_dict_consumer data);
 
     /// Called to disconnect our remote connection to the given pubkey (if we have one).
     void proxy_disconnect(const std::string& pubkey);
 
     /// SEND command.  Does a connect first, if necessary.
-    void proxy_send(bt_dict&& data);
+    void proxy_send(bt_dict_consumer data);
 
     /// REPLY command.  Like SEND, but only has a listening socket route to send back to and so is
     /// weaker (i.e. it cannot reconnect to the SN if the connection is no longer open).
-    void proxy_reply(bt_dict&& data);
+    void proxy_reply(bt_dict_consumer data);
 
     /// Currently active batches.
     std::unordered_set<detail::Batch*> batches;
@@ -438,6 +486,9 @@ private:
     /// affects outgoing connections; incomings connections are the responsibility of the other end.
     void proxy_expire_idle_peers();
 
+    /// Helper method to actually close a remote connection and update the stuff that needs updating.
+    void proxy_close_remote(int removed, bool linger = true);
+
     /// Closes an outgoing connection immediately, updates internal variables appropriately.
     /// Returns the next iterator (the original may or may not be removed from peers, depending on
     /// whether or not it also has an active incoming connection).
@@ -445,7 +496,7 @@ private:
 
     struct category {
         Access access;
-        std::unordered_map<std::string, CommandCallback> commands;
+        std::unordered_map<std::string, std::pair<CommandCallback, bool /*is_request*/>> commands;
         unsigned int reserved_threads = 0;
         unsigned int active_threads = 0;
         int max_queue = 200;
@@ -466,7 +517,7 @@ private:
     /// Retrieve category and callback from a command name, including alias mapping.  Warns on
     /// invalid commands and returns nullptrs.  The command name will be updated in place if it is
     /// aliased to another command.
-    std::pair<category*, const CommandCallback*> get_command(std::string& command);
+    std::pair<category*, const std::pair<CommandCallback, bool>*> get_command(std::string& command);
 
     /// Checks a peer's authentication level.  Returns true if allowed, warns and returns false if
     /// not.
@@ -479,11 +530,12 @@ private:
         category& cat;
         std::string command;
         std::vector<zmq::message_t> data_parts;
-        const CommandCallback* callback;
+        const std::pair<CommandCallback, bool>* callback;
         std::string pubkey;
+        std::string id;
         bool service_node;
 
-        pending_command(category& cat, std::string command, std::vector<zmq::message_t> data_parts, const CommandCallback* callback, std::string pubkey, bool service_node)
+        pending_command(category& cat, std::string command, std::vector<zmq::message_t> data_parts, const std::pair<CommandCallback, bool>* callback, std::string pubkey, bool service_node)
             : cat{cat}, command{std::move(command)}, data_parts{std::move(data_parts)}, callback{callback}, pubkey{std::move(pubkey)}, service_node{service_node} {}
     };
     std::list<pending_command> pending_commands;
@@ -510,8 +562,8 @@ private:
         int batch_jobno; // >= 0 for a job, -1 for the completion job
 
         union {
-            const CommandCallback* callback; // set if !is_batch_job
-            detail::Batch* batch;            // set if is_batch_job
+            const std::pair<CommandCallback, bool>* callback; // set if !is_batch_job
+            detail::Batch* batch;                             // set if is_batch_job
         };
 
         // These belong to the proxy thread and must not be accessed by a worker:
@@ -577,6 +629,17 @@ public:
             Logger logger = [](LogLevel, const char*, int, std::string) { });
 
     /**
+     * Simplified LokiMQ constructor for a client.  This does not bind, generates ephemeral keys,
+     * and doesn't have peer_lookup capabilities, and treats all remotes as "basic", non-service
+     * node connections (for command authenication purposes).
+     */
+    explicit LokiMQ(Logger logger = [](LogLevel, const char*, int, std::string) { })
+        : LokiMQ("", "", false, {},
+                [](const auto&) { return std::string{}; },
+                [](string_view, string_view) { return Allow{AuthLevel::basic}; },
+                std::move(logger)) {}
+
+    /**
      * Destructor; instructs the proxy to quit.  The proxy tells all workers to quit, waits for them
      * to quit and rejoins the threads then quits itself.  The outer thread (where the destructor is
      * running) rejoins the proxy thread.
@@ -631,6 +694,15 @@ public:
     void add_command(const std::string& category, std::string name, CommandCallback callback);
 
     /**
+     * Adds a new "request" command to an existing category.  These commands are just like normal
+     * commands, but are expected to call `msg.send_reply()` with any data parts on every request,
+     * while normal commands are more general.
+     *
+     * Parameters given here are identical to `add_command()`.
+     */
+    void add_request_command(const std::string& category, std::string name, CommandCallback callback);
+
+    /**
      * Adds a command alias; this is intended for temporary backwards compatibility: if any aliases
      * are defined then every command (not just aliased ones) has to be checked on invocation to see
      * if it is defined in the alias list.  May not be invoked after `start()`.
@@ -648,8 +720,12 @@ public:
 
     /**
      * Sets the number of worker threads reserved for batch jobs.  If not called this defaults to
-     * half the number of hardware threads available (rounded up).  This works exactly like reserved_threads
-     * for a category, but allows to batch jobs.  See category for details.
+     * half the number of hardware threads available (rounded up).  This works exactly like
+     * reserved_threads for a category, but allows to batch jobs.  See category for details.
+     *
+     * Note that some internal jobs are counted as batch jobs: in particular timers added via
+     * add_timer() and replies received in response to request commands currently each take a batch
+     * job slot when invoked.
      *
      * Cannot be called after start()ing the LokiMQ instance.
      */
@@ -697,14 +773,54 @@ public:
      *               guarantee that the hint will be used; it is only usefully specified if the
      *               connection location has already been incidentally determined).
      */
-    void connect(const std::string& pubkey, std::chrono::milliseconds keep_alive = 5min, const std::string& hint = "");
+    void connect_sn(string_view pubkey, std::chrono::milliseconds keep_alive = 5min, string_view hint = {});
 
     /**
-     * Queue a message to be relayed to the SN identified with the given pubkey without expecting a
-     * reply.  LokiMQ will attempt to relay the message (first connecting and handshaking if not
-     * already connected to the given SN).
+     * Establish a connection to the given remote with callbacks invoked on a successful or failed
+     * connection.  The success callback gives you the pubkey of the remote, which can then be used
+     * to send commands to the remote (via `send()`). is generally intended for cases where the remote is
+     * being treated as the "server" and the local connection as a "client"; for connections between
+     * peers (i.e. between SNs) you generally want connect_sn() instead.  If pubkey is non-empty
+     * then the remote must have that pubkey; if empty then any pubkey is allowed.
      *
-     * If a new connection it established it will have a relatively short (30s) idle timeout.  If
+     * Unlike `connect_sn`, the connection established here will be kept open
+     * indefinitely (until you call disconnect).
+     *
+     * The `on_connect` and `on_failure` callbacks are invoked when a connection has been
+     * established or failed to establish.
+     *
+     * @param remote the remote connection address, such as `tcp://localhost:1234`.
+     * @param on_connect called with the identifier and the remote's pubkey after the connection has
+     * been established and handshaked.
+     * @param on_failure called with a failure message if we fail to connect.
+     * @param pubkey the required remote pubkey (empty to accept any).
+     * @param timeout how long to try before aborting the connection attempt and calling the
+     * on_failure callback.  Note that the connection can fail for various reasons before the
+     * timeout.
+     */
+    void connect_remote(string_view remote, ConnectSuccess on_connect, ConnectFailure on_failure,
+            string_view pubkey = {}, std::chrono::milliseconds timeout = REMOTE_CONNECT_TIMEOUT);
+
+    /**
+     * Disconnects an established outgoing connection established with `connect_remote()`.
+     *
+     * @param id the connection id, as returned by `connect_remote()`.
+     *
+     * @param linger how long to allow the connection to linger while there are still pending
+     * outbound messages to it before disconnecting and dropping any pending messages.  (Note that
+     * this lingering is internal; the disconnect_remote() call does not block).  The default is 1
+     * second.
+     */
+    void disconnect_remote(string_view id, std::chrono::milliseconds linger = 1s);
+
+    /**
+     * Queue a message to be relayed to the node identified with the given identifier (for SNs and
+     * incoming connections this is a pubkey; for connections established with `connect()` this will
+     * be the opaque string returned by `connect()`), without expecting a reply.  LokiMQ will
+     * attempt to relay the message (first connecting and handshaking if not already connected
+     * and the given pubkey is a service node's pubkey).
+     *
+     * If a new connection is established it will have a relatively short (30s) idle timeout.  If
      * the connection should stay open longer you should call `connect(pubkey, IDLETIME)` first.
      *
      * Note that this method (along with connect) doesn't block waiting for a connection or for the
@@ -712,7 +828,7 @@ public:
      * generally try hard to deliver it (reconnecting if the connection fails), but if the
      * connection fails persistently the message will eventually be dropped.
      *
-     * @param pubkey - the pubkey to send this to
+     * @param id - the pubkey or identifier returned by `connect()` to send this to
      * @param cmd - the first data frame value which is almost always the remote "category.command" name
      * @param opts - any number of std::string and send options.  Each send option affects
      *               how the send works; each string becomes a serialized message part.
@@ -728,19 +844,20 @@ public:
     template <typename... T>
     void send(const std::string& pubkey, const std::string& cmd, const T&... opts);
 
-    /**
-     * Similar to the above, but takes an iterator pair of message parts to send after the value.
+    /** Send a command configured as a "REQUEST" command: the data parts will be prefixed with a
+     * random identifier.  The remote is expected to reply with a ["REPLY", <identifier>, ...]
+     * message, at which point we invoke the given callback with any [...] parts of the reply.
      *
-     * @param pubkey - the pubkey to send this to
-     * @param cmd - the value of the first message part (i.e. the remote command)
-     * @param first - an input iterator to std::string values
-     * @param last - the beyond-the-end iterator
-     * @param opts - any number of send options.  This may also contain additional message strings
-     * which will be appended after the `[first, last)` message parts.
+     * @param pubkey - the pubkey to send this request to
+     * @param cmd - the command name
+     * @param callback - the callback to invoke when we get a reply.  Called with a true value and
+     * the data strings when a reply is received, or false and an empty vector of data parts if we
+     * get no reply in the timeout interval.
+     * @param opts - anything else (i.e. strings, send_options) is forwarded to send().
      */
-    template <typename InputIt, typename... T>
-    void send(const std::string& pubkey, const std::string& cmd, InputIt first, InputIt end, const T&... opts);
-
+    template <typename... T>
+    void request(const std::string& pubkey, const std::string& cmd, ReplyCallback callback,
+            const T&... opts);
 
     /// The key pair this LokiMQ was created with; if empty keys were given during construction then
     /// this returns the generated keys.
@@ -760,19 +877,30 @@ public:
      * submitting a single-job, no-completion batch.
      */
     void job(std::function<void()> f);
+
+    /**
+     * Adds a timer that gets scheduled periodically in the job queue.  Normally jobs are not
+     * double-booked: that is, a new timed job will not be scheduled if the timer fires before a
+     * previously scheduled callback of the job has not yet completed.  If you want to override this
+     * (so that, under heavy load or long jobs, there can be more than one of the same job scheduled
+     * or running at a time) then specify `squelch` as `false`.
+     */
+    void add_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch = true);
 };
 
 /// Namespace for options to the send() method
 namespace send_option {
 
-/// `serialized` lets you serialize once when sending the same data to many peers by constructing a
-/// single serialized option and passing it repeatedly rather than needing to reserialize on each
-/// send.
-struct serialized {
-    std::string data;
-    template <typename T>
-    serialized(const T& arg) : data{lokimq::bt_serialize(arg)} {}
+template <typename InputIt>
+struct data_parts_impl {
+    InputIt begin, end;
+    data_parts_impl(InputIt begin, InputIt end) : begin{std::move(begin)}, end{std::move(end)} {}
 };
+
+/// Specifies an iterator pair of data options to send, for when the number of arguments to send()
+/// cannot be determined at compile time.
+template <typename InputIt>
+data_parts_impl<InputIt> data_parts(InputIt begin, InputIt end) { return {std::move(begin), std::move(end)}; }
 
 /// Specifies a connection hint when passed in to send().  If there is no current connection to the
 /// peer then the hint is used to save a call to the SNRemoteAddress to get the connection location.
@@ -780,7 +908,7 @@ struct serialized {
 /// will not also be done.)
 struct hint {
     std::string connect_hint;
-    hint(std::string connect_hint) : connect_hint{std::move(connect_hint)} {}
+    explicit hint(std::string connect_hint) : connect_hint{std::move(connect_hint)} {}
 };
 
 /// Does a send() if we already have a connection (incoming or outgoing) with the given peer,
@@ -806,74 +934,91 @@ namespace detail {
 // data (only sent if the data is non-empty).
 void send_control(zmq::socket_t& sock, string_view cmd, std::string data = {});
 
-/// Base case: takes a serializable value and appends it to the message parts
-template <typename T>
-void apply_send_option(bt_list& parts, bt_dict&, const T& arg) {
-    parts.push_back(lokimq::bt_serialize(arg));
+/// Base case: takes a string-like value and appends it to the message parts
+inline void apply_send_option(bt_list& parts, bt_dict&, string_view arg) {
+    parts.push_back(arg);
 }
 
-/// `serialized` specialization: lets you serialize once when sending the same data to many peers
-template <> inline void apply_send_option(bt_list& parts, bt_dict& , const send_option::serialized& serialized) {
-    parts.push_back(serialized.data);
+/// `data_parts` specialization: appends a range of serialized data parts to the parts to send
+template <typename InputIt>
+void apply_send_option(bt_list& parts, bt_dict&, const send_option::data_parts_impl<InputIt> data) {
+    for (auto it = data.begin; it != data.end; ++it)
+        parts.push_back(lokimq::bt_deserialize(*it));
 }
 
 /// `hint` specialization: sets the hint in the control data
-template <> inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::hint& hint) {
+inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::hint& hint) {
     control_data["hint"] = hint.connect_hint;
 }
 
 /// `optional` specialization: sets the optional flag in the control data
-template <> inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::optional &) {
+inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::optional &) {
     control_data["optional"] = 1;
 }
 
 /// `incoming` specialization: sets the optional flag in the control data
-template <> inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::incoming &) {
+inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::incoming &) {
     control_data["incoming"] = 1;
 }
 
 /// `keep_alive` specialization: increases the outgoing socket idle timeout (if shorter)
-template <> inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::keep_alive& timeout) {
+inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::keep_alive& timeout) {
     control_data["keep-alive"] = timeout.time.count();
 }
 
-/// Calls apply_send_option on each argument and returns a bt_dict with the command plus data stored
-/// in the "send" key plus whatever else is implied by any given option arguments.
-template <typename InputIt, typename... T>
-bt_dict send_control_data(const std::string& cmd, InputIt begin, InputIt end, const T &...opts) {
+} // namespace detail
+
+template <typename... T>
+void LokiMQ::send(const std::string& pubkey, const std::string& cmd, const T &...opts) {
     bt_dict control_data;
     bt_list parts{{cmd}};
-    parts.insert(parts.end(), std::move(begin), std::move(end));
 #ifdef __cpp_fold_expressions
     (detail::apply_send_option(parts, control_data, opts),...);
 #else
     (void) std::initializer_list<int>{(detail::apply_send_option(parts, control_data, opts), 0)...};
 #endif
 
-    control_data["send"] = std::move(parts);
-    return control_data;
-}
-
-} // namespace detail
-
-template <typename InputIt, typename... T>
-void LokiMQ::send(const std::string& pubkey, const std::string& cmd, InputIt first, InputIt last, const T &...opts) {
-    bt_dict control_data = detail::send_control_data(cmd, std::move(first), std::move(last), opts...);
     control_data["pubkey"] = pubkey;
+    control_data["send"] = std::move(parts);
     detail::send_control(get_control_socket(), "SEND", bt_serialize(control_data));
 }
 
+std::string make_random_string(size_t size);
+
 template <typename... T>
-void LokiMQ::send(const std::string& pubkey, const std::string& cmd, const T &...opts) {
-    const std::string* no_it = nullptr;
-    send(pubkey, cmd, no_it, no_it, opts...);
+void LokiMQ::request(const std::string& pubkey, const std::string& cmd, ReplyCallback callback, const T &...opts) {
+    auto reply_tag = make_random_string(15); // 15 should keep us in most stl implementations' small string optimization
+    bt_dict control_data;
+    bt_list parts{{cmd, reply_tag}};
+#ifdef __cpp_fold_expressions
+    (detail::apply_send_option(parts, control_data, opts),...);
+#else
+    (void) std::initializer_list<int>{(detail::apply_send_option(parts, control_data, opts), 0)...};
+#endif
+
+    control_data["pubkey"] = pubkey;
+    control_data["send"] = std::move(parts);
+    control_data["request"] = true;
+    control_data["request_callback"] = reinterpret_cast<uintptr_t>(new ReplyCallback{std::move(callback)});
+    control_data["request_tag"] = std::move(reply_tag);
+    detail::send_control(get_control_socket(), "SEND", bt_serialize(control_data));
 }
 
 template <typename... Args>
-void Message::reply(const std::string& command, Args&&... args) {
+void Message::send_back(const std::string& command, Args&&... args) {
+    assert(reply_tag.empty());
     if (service_node) lokimq.send(pubkey, command, std::forward<Args>(args)...);
     else lokimq.send(pubkey, command, send_option::optional{}, std::forward<Args>(args)...);
 }
+
+template <typename... Args>
+void Message::send_reply(Args&&... args) {
+    assert(!reply_tag.empty());
+    if (service_node) lokimq.send(pubkey, "REPLY", reply_tag, std::forward<Args>(args)...);
+    else lokimq.send(pubkey, "REPLY", reply_tag, send_option::optional{}, std::forward<Args>(args)...);
+}
+
+
 
 
 template <typename... T>
@@ -890,16 +1035,7 @@ void LokiMQ::log_(LogLevel lvl, const char* file, int line, const T&... stuff) {
     logger(lvl, file, line, os.str());
 }
 
-std::ostream &operator<<(std::ostream &os, LogLevel lvl) {
-    os <<  (lvl == LogLevel::trace ? "trace" :
-            lvl == LogLevel::debug ? "debug" :
-            lvl == LogLevel::info  ? "info"  :
-            lvl == LogLevel::warn  ? "warn"  :
-            lvl == LogLevel::error ? "ERROR" :
-            lvl == LogLevel::fatal ? "FATAL" :
-            "unknown");
-    return os;
-}
+std::ostream &operator<<(std::ostream &os, LogLevel lvl);
 
 }
 
