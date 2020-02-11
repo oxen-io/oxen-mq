@@ -38,7 +38,8 @@ namespace detail {
 
 enum class BatchStatus {
     running, // there are still jobs to run (or running)
-    complete, // the batch is complete but still has a completion function to call
+    complete, // the batch is complete but still has a completion job to call
+    complete_proxy, // same as `complete`, but the completion job should be invoked immediately in the proxy thread (be very careful)
     done // the batch is complete and has no completion function
 };
 
@@ -154,6 +155,7 @@ private:
     std::vector<job_result<R>> results;
     CompletionFunc complete;
     std::size_t jobs_outstanding = 0;
+    bool complete_in_proxy = false;
     bool started = false;
 
     void check_not_started() {
@@ -184,7 +186,20 @@ public:
     /// then jobs simply run and results are discarded.
     void completion(CompletionFunc comp) {
         check_not_started();
+        if (complete)
+            throw std::logic_error("Completion function can only be set once");
         complete = std::move(comp);
+    }
+
+    /// Sets a completion function to invoke *IN THE PROXY THREAD* after all jobs have finished.  Be
+    /// very, very careful: this should not be a job that takes any significant amount of CPU time
+    /// or can block for any reason (NO MUTEXES).
+    void completion_proxy(CompletionFunc comp) {
+        check_not_started();
+        if (complete)
+            throw std::logic_error("Completion function can only be set once");
+        complete = std::move(comp);
+        complete_in_proxy = true;
     }
 
 private:
@@ -212,7 +227,9 @@ private:
         if (jobs_outstanding)
             return detail::BatchStatus::running;
         if (complete)
-            return detail::BatchStatus::complete;
+            return complete_in_proxy
+                ? detail::BatchStatus::complete_proxy
+                : detail::BatchStatus::complete;
         return detail::BatchStatus::done;
     }
 

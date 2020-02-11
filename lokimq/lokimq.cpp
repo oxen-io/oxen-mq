@@ -1001,6 +1001,17 @@ void LokiMQ::proxy_worker_message(std::vector<zmq::message_t>& parts) {
                 auto status = run.batch->job_finished();
                 if (status == detail::BatchStatus::complete) {
                     batch_jobs.emplace(run.batch, -1);
+                } else if (status == detail::BatchStatus::complete_proxy) {
+                    try {
+                        run.batch->job_completion(); // RUN DIRECTLY IN PROXY THREAD
+                    } catch (const std::exception &e) {
+                        // Raise these to error levels: you really shouldn't be doing anything
+                        // complicated in an in-proxy completion function!
+                        LMQ_LOG(error, "proxy thread caught exception when processing in-proxy completion command: ", e.what());
+                    } catch (...) {
+                        LMQ_LOG(error, "proxy thread caught non-standard exception when processing in-proxy completion command");
+                    }
+                    clear_job = true;
                 } else if (status == detail::BatchStatus::done) {
                     clear_job = true;
                 }
