@@ -2,5 +2,3 @@
 - split out proxy code & data into a private lokimq/proxy.h header so that the main header doesn't
   need to include so much.
 
-- timed, i.e. schedule this job to run in X time.  This requires dynamically adjusting the polling
-  timeout to use the current value *or* the next timer (if sooner).

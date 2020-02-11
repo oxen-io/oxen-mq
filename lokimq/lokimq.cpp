@@ -697,6 +697,38 @@ void LokiMQ::proxy_batch(detail::Batch* batchptr) {
         batch_jobs.emplace(batch, i);
 }
 
+Batch<void>* LokiMQ::proxy_schedule_job(std::function<void()> f) {
+    auto* b = new Batch<void>;
+    b->add_job(std::move(f));
+    batches.insert(b);
+    batch_jobs.emplace(static_cast<detail::Batch*>(b), 0);
+    return b;
+}
+
+// Called either within the proxy thread, or before the proxy thread has been created; actually adds
+// the timer.  If the timer object hasn't been set up yet it gets set up here.
+void LokiMQ::proxy_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch) {
+    if (!timers)
+        timers.reset(zmq_timers_new());
+
+    int timer_id = zmq_timers_add(timers.get(),
+            interval.count(),
+            [](int timer_id, void* self) { static_cast<LokiMQ*>(self)->_queue_timer_job(timer_id); },
+            this);
+    if (timer_id == -1)
+        throw zmq::error_t{};
+    timer_jobs[timer_id] = {std::move(job), squelch, false};
+}
+
+void LokiMQ::proxy_timer(bt_list_consumer timer_data) {
+    std::unique_ptr<std::function<void()>> func{reinterpret_cast<std::function<void()>*>(timer_data.consume_integer<uintptr_t>())};
+    auto interval = std::chrono::milliseconds{timer_data.consume_integer<uint64_t>()};
+    auto squelch = timer_data.consume_integer<bool>();
+    if (!timer_data.is_finished())
+        throw std::runtime_error("Internal error: proxied timer request contains unexpected data");
+    proxy_timer(std::move(*func), interval, squelch);
+}
+
 void LokiMQ::proxy_control_message(std::vector<zmq::message_t>& parts) {
     if (parts.size() < 2)
         throw std::logic_error("Expected 2-3 message parts for a proxy control message");
@@ -716,6 +748,8 @@ void LokiMQ::proxy_control_message(std::vector<zmq::message_t>& parts) {
         } else if (cmd == "CONNECT") {
             proxy_connect(bt_deserialize<bt_dict>(view(parts[2])));
             return;
+        } else if (cmd == "TIMER") {
+            return proxy_timer(view(parts[2]));
         }
     } else if (parts.size() == 2) {
         if (cmd == "START") {
@@ -845,18 +879,23 @@ void LokiMQ::proxy_loop() {
 
     assert(pollitems.size() == poll_remote_offset);
 
-    constexpr auto poll_timeout = 5000ms; // Maximum time we spend in each poll
     constexpr auto timeout_check_interval = 10000ms; // Minimum time before for checking for connections to close since the last check
     auto last_conn_timeout = std::chrono::steady_clock::now();
+    if (!timers)
+        timers.reset(zmq_timers_new());
 
     std::vector<zmq::message_t> parts;
 
     while (true) {
+        std::chrono::milliseconds poll_timeout;
         if (max_workers == 0) { // Will be 0 only if we are quitting
             if (std::none_of(workers.begin(), workers.end(), [](auto &w) { return w.thread.joinable(); })) {
                 // All the workers have finished, so we can finish shutting down
                 return proxy_quit();
             }
+            poll_timeout = 1s; // We don't keep running timers when we're quitting, so don't have a timer to check
+        } else {
+            poll_timeout = std::chrono::milliseconds{zmq_timers_timeout(timers.get())};
         }
 
         // We poll the control socket and worker socket for any incoming messages.  If we have
@@ -875,6 +914,9 @@ void LokiMQ::proxy_loop() {
         for (parts.clear(); recv_message_parts(workers_socket, parts, zmq::recv_flags::dontwait); parts.clear()) {
             proxy_worker_message(parts);
         }
+
+        LMQ_LOG(trace, "processing timers");
+        zmq_timers_execute(timers.get());
 
         // Handle any zap authentication
         LMQ_LOG(trace, "processing zap requests");
@@ -1380,6 +1422,62 @@ inline void LokiMQ::job(std::function<void()> f) {
     detail::send_control(get_control_socket(), "BATCH", bt_serialize(reinterpret_cast<uintptr_t>(baseptr)));
 }
 
+void LokiMQ::_queue_timer_job(int timer_id) {
+    auto it = timer_jobs.find(timer_id);
+    if (it == timer_jobs.end()) {
+        LMQ_LOG(warn, "Could not find timer job ", timer_id);
+        return;
+    }
+    auto& timer = it->second;
+    auto& squelch = std::get<1>(timer);
+    auto& running = std::get<2>(timer);
+    if (squelch && running) {
+        LMQ_LOG(debug, "Not running timer job ", timer_id, " because a job for that timer is still running");
+        return;
+    }
+
+    auto* b = new Batch<void>;
+    b->add_job(std::get<0>(timer));
+    if (squelch) {
+        running = true;
+        b->completion_proxy([this,timer_id](auto results) {
+            try { results[0].get(); }
+            catch (const std::exception &e) { LMQ_LOG(warn, "timer job ", timer_id, " raised an exception: ", e.what()); }
+            catch (...) { LMQ_LOG(warn, "timer job ", timer_id, " raised a non-std exception"); }
+            auto it = timer_jobs.find(timer_id);
+            if (it != timer_jobs.end())
+                std::get<2>(it->second)/*running*/ = false;
+        });
+    }
+    batches.insert(b);
+    batch_jobs.emplace(static_cast<detail::Batch*>(b), 0);
+    assert(b->size() == 1);
+}
+
+void LokiMQ::add_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch) {
+    if (proxy_thread.joinable()) {
+        auto *jobptr = new std::function<void()>{std::move(job)};
+        detail::send_control(get_control_socket(), "TIMER", bt_serialize(bt_list{{
+                    reinterpret_cast<uintptr_t>(jobptr),
+                    interval.count(),
+                    squelch}}));
+    } else {
+        proxy_timer(std::move(job), interval, squelch);
+    }
+}
+
+void LokiMQ::TimersDeleter::operator()(void* timers) { zmq_timers_destroy(&timers); }
+
+std::ostream &operator<<(std::ostream &os, LogLevel lvl) {
+    os <<  (lvl == LogLevel::trace ? "trace" :
+            lvl == LogLevel::debug ? "debug" :
+            lvl == LogLevel::info  ? "info"  :
+            lvl == LogLevel::warn  ? "warn"  :
+            lvl == LogLevel::error ? "ERROR" :
+            lvl == LogLevel::fatal ? "FATAL" :
+            "unknown");
+    return os;
+}
 
 }
 

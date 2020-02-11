@@ -44,6 +44,11 @@
 #include "bt_serialize.h"
 #include "string_view.h"
 
+#if ZMQ_VERSION < ZMQ_MAKE_VERSION (4, 3, 0)
+// Timers were not added until 4.3.0
+#error "ZMQ >= 4.3.0 required"
+#endif
+
 namespace lokimq {
 
 using namespace std::literals;
@@ -312,6 +317,16 @@ private:
     /// or send a message.
     zmq::socket_t command{context, zmq::socket_type::router};
 
+    /// Timers.  TODO: once cppzmq adds an interface around the zmq C timers API then switch to it.
+    struct TimersDeleter { void operator()(void* timers); };
+    std::unordered_map<int, std::tuple<std::function<void()>, bool, bool>> timer_jobs; // id => {func, squelch, running}
+    std::unique_ptr<void, TimersDeleter> timers;
+public:
+    // This needs to be public because we have to be able to call it from a plain C function.
+    // Nothing external may call it!
+    void _queue_timer_job(int);
+private:
+
     /// Router socket to reach internal worker threads from proxy
     zmq::socket_t workers_socket{context, zmq::socket_type::router};
 
@@ -339,6 +354,8 @@ private:
     void proxy_worker_message(std::vector<zmq::message_t>& parts);
 
     void proxy_process_queue();
+
+    Batch<void>* proxy_schedule_job(std::function<void()> f);
 
     /// Looks up a peers element given a zmq message (which has the pubkey and sn status metadata
     /// set during initial connection authentication), creating a new peer element if required.
@@ -400,6 +417,14 @@ private:
     /// BATCH command.  Called with a Batch<R> (see lokimq/batch.h) object pointer for the proxy to
     /// take over and queue batch jobs.
     void proxy_batch(detail::Batch* batch);
+
+    /// TIMER command.  Called with a serialized list containing: function pointer to assume
+    /// ownership of, an interval count (in ms), and whether or not jobs should be squelched (see
+    /// `add_timer()`).
+    void proxy_timer(bt_list_consumer timer_data);
+
+    /// Same, but deserialized
+    void proxy_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch);
 
     /// ZAP (https://rfc.zeromq.org/spec:27/ZAP/) authentication handler; this is called with the
     /// zap auth socket to do non-blocking processing of any waiting authentication requests waiting
