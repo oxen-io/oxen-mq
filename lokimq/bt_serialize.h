@@ -693,12 +693,12 @@ public:
 
     /// Attempt to parse the next value as a string->string pair (and advance just past it).  Throws
     /// if the next value is not a string.
-    std::pair<string_view, string_view> consume_string();
+    std::pair<string_view, string_view> next_string();
 
     /// Attempts to parse the next value as an string->integer pair (and advance just past it).
     /// Throws if the next value is not an integer.
     template <typename IntType>
-    std::pair<string_view, IntType> consume_integer() {
+    std::pair<string_view, IntType> next_integer() {
         if (!is_integer()) throw bt_deserialize_invalid_type{"next bt dict value is not an integer"};
         std::pair<string_view, IntType> ret;
         ret.second = bt_list_consumer::consume_integer<IntType>();
@@ -711,7 +711,7 @@ public:
     /// which allows alloc-free traversal, but requires parsing twice (if the contents are to be
     /// used).
     template <typename T = bt_list>
-    std::pair<string_view, T> consume_list() {
+    std::pair<string_view, T> next_list() {
         std::pair<string_view, T> pair;
         pair.first = consume_list(pair.second);
         return pair;
@@ -719,7 +719,7 @@ public:
 
     /// Same as above, but takes a pre-existing list-like data type.  Returns the key.
     template <typename T>
-    string_view consume_list(T& list) {
+    string_view next_list(T& list) {
         if (!is_list()) throw bt_deserialize_invalid_type{"next bt value is not a list"};
         bt_list_consumer::consume_list(list);
         return flush_key();
@@ -730,7 +730,7 @@ public:
     /// which allows alloc-free traversal, but requires parsing twice (if the contents are to be
     /// used).
     template <typename T = bt_dict>
-    std::pair<string_view, T> consume_dict() {
+    std::pair<string_view, T> next_dict() {
         std::pair<string_view, T> pair;
         pair.first = consume_dict(pair.second);
         return pair;
@@ -738,7 +738,7 @@ public:
 
     /// Same as above, but takes a pre-existing dict-like data type.  Returns the key.
     template <typename T>
-    string_view consume_dict(T& dict) {
+    string_view next_dict(T& dict) {
         if (!is_dict()) throw bt_deserialize_invalid_type{"next bt value is not a dict"};
         bt_list_consumer::consume_dict(dict);
         return flush_key();
@@ -748,19 +748,25 @@ public:
     /// contains the entire thing.  This is recursive into both lists and dicts and likely to be
     /// quite inefficient for large, nested structures (unless the values only need to be skipped
     /// but aren't separately needed).  This, however, does not require dynamic memory allocation.
-    std::pair<string_view, string_view> consume_list_data() {
+    std::pair<string_view, string_view> next_list_data() {
         if (data.size() < 2 || !is_list()) throw bt_deserialize_invalid_type{"next bt dict value is not a list"};
         return {flush_key(), bt_list_consumer::consume_list_data()};
     }
+
+    /// Same as next_list_data(), but wraps the value in a bt_list_consumer for convenience
+    std::pair<string_view, bt_list_consumer> next_list_consumer() { return next_list_data(); }
 
     /// Attempts to parse the next value as a string->dict pair and returns the string_view that
     /// contains the entire thing.  This is recursive into both lists and dicts and likely to be
     /// quite inefficient for large, nested structures (unless the values only need to be skipped
     /// but aren't separately needed).  This, however, does not require dynamic memory allocation.
-    std::pair<string_view, string_view> consume_dict_data() {
+    std::pair<string_view, string_view> next_dict_data() {
         if (data.size() < 2 || !is_dict()) throw bt_deserialize_invalid_type{"next bt dict value is not a dict"};
         return {flush_key(), bt_list_consumer::consume_dict_data()};
     }
+
+    /// Same as next_dict_data(), but wraps the value in a bt_dict_consumer for convenience
+    std::pair<string_view, bt_dict_consumer> next_dict_consumer() { return next_dict_data(); }
 
     /// Skips ahead until we find the first key >= the given key or reach the end of the dict.
     /// Returns true if we found an exact match, false if we reached some greater value or the end.
@@ -782,6 +788,38 @@ public:
         }
         return key_ == find;
     }
+
+    /// The `consume_*` functions are wrappers around next_whatever that discard the returned key.
+    ///
+    /// Intended for use with skip_until such as:
+    ///
+    ///     std::string value;
+    ///     if (d.skip_until("key"))
+    ///         value = d.consume_string();
+    ///
+
+    auto consume_string() { return next_string().second; }
+
+    template <typename IntType>
+    auto consume_integer() { return next_integer<IntType>().second; }
+
+    template <typename T = bt_list>
+    auto consume_list() { return next_list<T>().second; }
+
+    template <typename T>
+    void consume_list(T& list) { next_list(list); }
+
+    template <typename T = bt_dict>
+    auto consume_dict() { return next_dict<T>().second; }
+
+    template <typename T>
+    void consume_dict(T& dict) { next_dict(dict); }
+
+    string_view consume_list_data() { return next_list_data().second; }
+    string_view consume_dict_data() { return next_dict_data().second; }
+
+    bt_list_consumer consume_list_consumer() { return consume_list_data(); }
+    bt_dict_consumer consume_dict_consumer() { return consume_dict_data(); }
 };
 
 

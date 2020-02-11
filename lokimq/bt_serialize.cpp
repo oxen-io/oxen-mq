@@ -216,5 +216,14 @@ bool bt_dict_consumer::consume_key() {
     return true;
 }
 
+std::pair<string_view, string_view> bt_dict_consumer::next_string() {
+    if (!is_string())
+        throw bt_deserialize_invalid_type{"expected a string, but found "s + data.front()};
+    std::pair<string_view, string_view> ret;
+    ret.second = bt_list_consumer::consume_string();
+    ret.first = flush_key();
+    return ret;
+}
+
 
 } // namespace lokimq
