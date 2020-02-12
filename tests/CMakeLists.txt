@@ -13,4 +13,7 @@ add_executable(tests ${LMQ_TEST_SRC})
 
 target_link_libraries(tests Catch2::Catch2 lokimq)
 
+set_property(TARGET tests PROPERTY CXX_STANDARD 14)
+set_property(TARGET tests PROPERTY CXX_STANDARD_REQUIRED ON)
+
 add_custom_target(check COMMAND tests)
