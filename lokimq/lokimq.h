@@ -40,6 +40,7 @@
 #include <iostream>
 #include <chrono>
 #include <atomic>
+#include <cassert>
 #include <zmq.hpp>
 #include "bt_serialize.h"
 #include "string_view.h"

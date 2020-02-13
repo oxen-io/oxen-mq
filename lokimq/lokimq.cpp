@@ -1,12 +1,10 @@
-#include <queue>
+#include "lokimq.h"
 #include <map>
-#include <cassert>
 #include <random>
 
 extern "C" {
 #include <sodium.h>
 }
-#include "lokimq.h"
 #include "batch.h"
 #include "hex.h"
 
@@ -43,14 +41,6 @@ zmq::message_t create_message(std::string &&data) {
 zmq::message_t create_message(string_view data) {
     return zmq::message_t{data.begin(), data.end()};
 }
-
-/*
-/// Create a message that references the existing data.  In order to use this safely you need to be
-/// sure that the referenced data lasts sufficiently long, which can be tricky.
-zmq::message_t create_message_reference(string_view data) {
-    return zmq::message_t{const_cast<char*>(&data[0]), data.size(), (zmq::free_fn*) nullptr, nullptr};
-}
-*/
 
 /// Creates a message by bt-serializing the given value (string, number, list, or dict)
 template <typename T>
