@@ -54,8 +54,9 @@ namespace lokimq {
 
 using namespace std::literals;
 
-/// Logging levels passed into LogFunc
-enum class LogLevel { trace, debug, info, warn, error, fatal };
+/// Logging levels passed into LogFunc.  (Note that trace does nothing more than debug in a release
+/// build).
+enum class LogLevel { fatal, error, warn, info, debug, trace };
 
 /// Authentication levels for command categories and connections
 enum class AuthLevel {
@@ -1028,7 +1029,7 @@ void Message::send_reply(Args&&... args) {
 
 template <typename... T>
 void LokiMQ::log_(LogLevel lvl, const char* file, int line, const T&... stuff) {
-    if (lvl < log_level())
+    if (log_level() < lvl)
         return;
 
     std::ostringstream os;
