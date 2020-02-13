@@ -373,7 +373,7 @@ LokiMQ::LokiMQ(
         // for ourselves, but this provides an extra check to make sure we and the caller agree
         // cryptographically (e.g. to make sure they don't pass us an ed25519 keypair by mistake)
         std::string verify_pubkey{crypto_box_PUBLICKEYBYTES, 0};
-        crypto_scalarmult_base(reinterpret_cast<unsigned char*>(&verify_pubkey), reinterpret_cast<unsigned char*>(&privkey[0]));
+        crypto_scalarmult_base(reinterpret_cast<unsigned char*>(&verify_pubkey[0]), reinterpret_cast<unsigned char*>(&privkey[0]));
         if (verify_pubkey != pubkey)
             throw std::invalid_argument("Invalid pubkey/privkey values given to LokiMQ construction: pubkey verification failed");
     }
