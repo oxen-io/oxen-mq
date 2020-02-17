@@ -178,8 +178,8 @@ void extract_pubkey(zmq::message_t& msg, std::string& pubkey, bool& service_node
     if (pubkey_hex.size() != 64)
         throw std::logic_error("bad user-id");
     assert(is_hex(pubkey_hex.begin(), pubkey_hex.end()));
-    pubkey.reserve(32);
-    from_hex(pubkey_hex.begin() + 2, pubkey_hex.end(), std::back_inserter(pubkey));
+    pubkey.resize(32, 0);
+    from_hex(pubkey_hex.begin(), pubkey_hex.end(), pubkey.begin());
 
     service_node = false;
     try {
@@ -438,6 +438,8 @@ void LokiMQ::worker_thread(unsigned int index) {
                 message.pubkey = run.pubkey;
                 message.service_node = run.service_node;
                 message.data.clear();
+
+                LMQ_TRACE("Got incoming command from pubkey ", to_hex(message.pubkey), " (SN=", (int) message.service_node, ")");
 
                 if (run.callback->second /*is_request*/) {
                     message.reply_tag = {run.data_parts[0].data<char>(), run.data_parts[0].size()};
@@ -1568,7 +1570,7 @@ void LokiMQ::process_zap_requests(zmq::socket_t &zap_auth) {
                 }
                 LMQ_LOG(info, "Accepted incoming ", (sn ? "service node" : "non-SN client"),
                         " connection with authentication level ", to_string(result.auth),
-                        " from ", string_view{&user_id[2], user_id.size()-2}, " at ", ip);
+                        " from ", user_id, " at ", ip);
 
                 auto& metadata = response_vals[5];
                 if (result.remote_sn)

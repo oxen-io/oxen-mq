@@ -23,6 +23,11 @@ TEST_CASE("basic commands", "[commands]") {
             if (hellos++ % 2 == 0)
                 m.send_back("public.hi");
     });
+    std::string client_pubkey;
+    server.add_command("public", "client.pubkey", [&](Message& m) {
+            client_pubkey = m.pubkey;
+    });
+
     server.start();
 
     LokiMQ client{
@@ -54,9 +59,12 @@ TEST_CASE("basic commands", "[commands]") {
     REQUIRE( pubkey == server.get_pubkey() );
 
     client.send(pubkey, "public.hello");
+    client.send(pubkey, "public.client.pubkey");
+
     std::this_thread::sleep_for(50ms);
     REQUIRE( hellos == 1 );
     REQUIRE( his == 1 );
+    REQUIRE( client_pubkey == client.get_pubkey() );
 
     for (int i = 0; i < 50; i++)
         client.send(pubkey, "public.hello");
