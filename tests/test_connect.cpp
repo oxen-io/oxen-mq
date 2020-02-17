@@ -1,7 +1,11 @@
 #include "common.h"
 #include <future>
+extern "C" {
+#include <sodium.h>
+}
 
-TEST_CASE("connections", "[curve][connect]") {
+
+TEST_CASE("connections", "[connect][curve]") {
     std::string listen = "tcp://127.0.0.1:4455";
     LokiMQ server{
         "", "", // generate ephemeral keys
@@ -46,3 +50,35 @@ TEST_CASE("connections", "[curve][connect]") {
 
 }
 
+TEST_CASE("self-connection SN optimization", "[connect][self]") {
+    std::string pubkey, privkey;
+    pubkey.resize(crypto_box_PUBLICKEYBYTES);
+    privkey.resize(crypto_box_SECRETKEYBYTES);
+    crypto_box_keypair(reinterpret_cast<unsigned char*>(&pubkey[0]), reinterpret_cast<unsigned char*>(&privkey[0]));
+    LokiMQ sn{
+        pubkey, privkey,
+        true,
+        {"tcp://127.0.0.1:5544"},
+        [&](auto pk) { if (pk == pubkey) return "tcp://127.0.0.1:5544"; else return ""; },
+        [&](auto ip, auto pk) { REQUIRE(ip == "127.0.0.1"); return Allow{AuthLevel::none, pk == pubkey}; },
+        get_logger("S» ")
+    };
+
+    sn.add_category("a", Access{AuthLevel::none});
+    bool invoked = false;
+    sn.add_command("a", "b", [&](const Message& m) {
+            invoked = true;
+            auto lock = catch_lock();
+            REQUIRE(m.pubkey == pubkey);
+            REQUIRE(m.service_node);
+            REQUIRE(!m.data.empty());
+            REQUIRE(m.data[0] == "my data");
+    });
+    sn.log_level(LogLevel::trace);
+
+    sn.start();
+    std::this_thread::sleep_for(50ms);
+    sn.send(pubkey, "a.b", "my data");
+    std::this_thread::sleep_for(50ms);
+    REQUIRE(invoked);
+}

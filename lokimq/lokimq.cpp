@@ -608,7 +608,9 @@ LokiMQ::proxy_connect_sn(const std::string &remote, const std::string &connect_h
     // No connection so establish a new one
     LMQ_LOG(debug, "proxy establishing new outbound connection to ", to_hex(remote));
     std::string addr;
-    if (remote == pubkey) {
+    bool to_self = false && remote == pubkey; // FIXME; need to use a separate listening socket for this, otherwise we can't easily
+                                              // tell it wasn't from a remote.
+    if (to_self) {
         // special inproc connection if self that doesn't need any external connection
         addr = SN_ADDR_SELF;
     } else {
@@ -981,7 +983,8 @@ void LokiMQ::proxy_loop() {
         // Also add an internal connection to self so that calling code can avoid needing to
         // special-case rare situations where we are supposed to talk to a quorum member that happens to
         // be ourselves (which can happen, for example, with cross-quoum Blink communication)
-        listener.bind(SN_ADDR_SELF);
+        // FIXME: not working
+        //listener.bind(SN_ADDR_SELF);
 
         add_pollitem(listener);
     }
