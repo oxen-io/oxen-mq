@@ -1246,7 +1246,7 @@ bool LokiMQ::proxy_handle_builtin(int conn_index, std::vector<zmq::message_t>& p
         std::string reply_tag = view(parts[tag_pos]);
         auto it = pending_requests.find(reply_tag);
         if (it != pending_requests.end()) {
-            LMQ_LOG(debug, "Received REPLY for pending command; scheduling callback");
+            LMQ_LOG(debug, "Received REPLY for pending command", to_hex(reply_tag), "; scheduling callback");
             std::vector<std::string> data;
             data.reserve(parts.size() - (tag_pos + 1));
             for (auto it = parts.begin() + (tag_pos + 1); it != parts.end(); ++it)
@@ -1254,6 +1254,7 @@ bool LokiMQ::proxy_handle_builtin(int conn_index, std::vector<zmq::message_t>& p
             proxy_schedule_job([callback=std::move(it->second.second), data=std::move(data)] {
                     callback(true, std::move(data));
             });
+            pending_requests.erase(it);
         } else {
             LMQ_LOG(warn, "Received REPLY with unknown or already handled reply tag (", to_hex(reply_tag), "); ignoring");
         }
