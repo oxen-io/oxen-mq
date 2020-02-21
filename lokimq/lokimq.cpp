@@ -699,6 +699,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
     }
 
     if (request) {
+        LMQ_LOG(debug, "Added new pending request ", to_hex(request_tag));
         pending_requests.insert({ request_tag, {
             std::chrono::steady_clock::now() + REQUEST_TIMEOUT, std::move(*request_cbptr) }});
     }
@@ -921,6 +922,7 @@ void LokiMQ::proxy_conn_cleanup() {
     for (auto it = pending_requests.begin(); it != pending_requests.end(); ) {
         auto& callback = it->second;
         if (callback.first < now) {
+            LMQ_LOG(debug, "pending request ", to_hex(it->first), " expired, invoking callback with failure status and removing");
             job([callback = std::move(callback.second)] { callback(false, {}); });
             it = pending_requests.erase(it);
         } else {
