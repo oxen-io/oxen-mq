@@ -1243,7 +1243,7 @@ bool LokiMQ::proxy_handle_builtin(int conn_index, std::vector<zmq::message_t>& p
             LMQ_LOG(warn, "Received REPLY without a reply tag; ignoring");
             return true;
         }
-        std::string reply_tag = view(parts[1]);
+        std::string reply_tag = view(parts[tag_pos]);
         auto it = pending_requests.find(reply_tag);
         if (it != pending_requests.end()) {
             LMQ_LOG(debug, "Received REPLY for pending command; scheduling callback");
