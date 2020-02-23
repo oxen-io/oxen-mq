@@ -7,6 +7,7 @@ set(LMQ_TEST_SRC
     test_connect.cpp
     test_commands.cpp
     test_requests.cpp
+    test_string_view.cpp
     )
 
 add_executable(tests ${LMQ_TEST_SRC})
