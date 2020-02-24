@@ -1210,7 +1210,7 @@ decltype(LokiMQ::peers)::iterator LokiMQ::proxy_lookup_peer(int conn_index, zmq:
             throw std::out_of_range("message pubkey metadata invalid");
         }
     } else {
-        pubkey = remotes[conn_index].first;
+        pubkey = remotes[conn_index - listener.connected()].first;
     }
 
     auto it = peers.find(pubkey);
@@ -1280,6 +1280,8 @@ bool LokiMQ::proxy_handle_builtin(int conn_index, std::vector<zmq::message_t>& p
         }
         LMQ_LOG(info, "Got initial HELLO server response from ", peer_address(parts.back()));
         size_t pksize = 32;
+        if (listener.connected())
+            conn_index--; // convert to `remotes` index.
         remotes[conn_index].first.resize(pksize);
         remotes[conn_index].second.getsockopt(ZMQ_CURVE_SERVERKEY, &remotes[conn_index].first[0], &pksize);
         auto &peer = peers[remotes[conn_index].first];
