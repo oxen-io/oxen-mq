@@ -11,11 +11,11 @@ TEST_CASE("connections", "[connect][curve]") {
         "", "", // generate ephemeral keys
         false, // not a service node
         {listen},
-        [](auto &) { return ""; },
+        [](auto) { return ""; },
         [](auto /*ip*/, auto /*pk*/) { return Allow{AuthLevel::none, false}; },
         get_logger("S» ")
     };
-//    server.log_level(LogLevel::trace);
+    server.log_level(LogLevel::trace);
 
     server.add_category("public", Access{AuthLevel::none});
     server.add_request_command("public", "hello", [&](Message& m) { m.send_reply("hi"); });

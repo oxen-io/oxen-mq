@@ -73,7 +73,7 @@ public:
     constexpr size_t length() const noexcept { return size_; }
     constexpr size_t max_size() const noexcept { return std::numeric_limits<size_t>::max(); }
     constexpr bool empty() const noexcept { return size_ == 0; }
-    operator std::string() const { return {data_, size_}; }
+    explicit operator std::string() const { return {data_, size_}; }
     constexpr const char* begin() const noexcept { return data_; }
     constexpr const char* cbegin() const noexcept { return data_; }
     constexpr const char* end() const noexcept { return data_ + size_; }

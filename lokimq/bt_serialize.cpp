@@ -145,7 +145,7 @@ bt_list_consumer::bt_list_consumer(string_view data_) : data{std::move(data_)} {
 
 /// Attempt to parse the next value as a string (and advance just past it).  Throws if the next
 /// value is not a string.
-string_view bt_list_consumer::consume_string() {
+string_view bt_list_consumer::consume_string_view() {
     if (data.empty())
         throw bt_deserialize_invalid{"expected a string, but reached end of data"};
     else if (!is_string())
@@ -156,10 +156,14 @@ string_view bt_list_consumer::consume_string() {
     return result;
 }
 
+std::string bt_list_consumer::consume_string() {
+    return std::string{consume_string_view()};
+}
+
 /// Consumes a value without returning it.
 void bt_list_consumer::skip_value() {
     if (is_string())
-        consume_string();
+        consume_string_view();
     else if (is_integer())
         detail::bt_deserialize_integer(data);
     else if (is_list())
@@ -188,7 +192,7 @@ string_view bt_list_consumer::consume_dict_data() {
     if (data.size() < 2 || !is_dict()) throw bt_deserialize_invalid_type{"next bt value is not a dict"};
     data.remove_prefix(1); // Descent into the dict, consumer the "d"
     while (!is_finished()) {
-        consume_string(); // Key is always a string
+        consume_string_view(); // Key is always a string
         if (!data.empty())
             skip_value();
         if (data.empty())
@@ -210,7 +214,7 @@ bool bt_dict_consumer::consume_key() {
         return true;
     if (data.empty()) throw bt_deserialize_invalid_type{"expected a key or dict end, found end of string"};
     if (data[0] == 'e') return false;
-    key_ = bt_list_consumer::consume_string();
+    key_ = bt_list_consumer::consume_string_view();
     if (data.empty() || data[0] == 'e')
         throw bt_deserialize_invalid{"dict key isn't followed by a value"};
     return true;
@@ -220,7 +224,7 @@ std::pair<string_view, string_view> bt_dict_consumer::next_string() {
     if (!is_string())
         throw bt_deserialize_invalid_type{"expected a string, but found "s + data.front()};
     std::pair<string_view, string_view> ret;
-    ret.second = bt_list_consumer::consume_string();
+    ret.second = bt_list_consumer::consume_string_view();
     ret.first = flush_key();
     return ret;
 }

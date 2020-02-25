@@ -86,6 +86,7 @@ class bt_dict;
 /// Recursive generic type that can fully represent everything valid for a BT serialization.
 using bt_value = mapbox::util::variant<
     std::string,
+    string_view,
     int64_t,
     mapbox::util::recursive_wrapper<bt_list>,
     mapbox::util::recursive_wrapper<bt_dict>
@@ -572,7 +573,8 @@ public:
 
     /// Attempt to parse the next value as a string (and advance just past it).  Throws if the next
     /// value is not a string.
-    string_view consume_string();
+    std::string consume_string();
+    string_view consume_string_view();
 
     /// Attempts to parse the next value as an integer (and advance just past it).  Throws if the
     /// next value is not an integer.
@@ -798,7 +800,8 @@ public:
     ///         value = d.consume_string();
     ///
 
-    auto consume_string() { return next_string().second; }
+    auto consume_string_view() { return next_string().second; }
+    auto consume_string() { return std::string{consume_string_view()}; }
 
     template <typename IntType>
     auto consume_integer() { return next_integer<IntType>().second; }

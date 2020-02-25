@@ -170,8 +170,14 @@ TEST_CASE("string view", "[string_view]") {
     REQUIRE( string_view{"abc"} != string_view{"abcd"} );
     REQUIRE( string_view{"abc"} < string_view{"abcd"} );
     REQUIRE( string_view{"abc"} < string_view{"abd"} );
+    REQUIRE_FALSE( string_view{"abd"} < string_view{"abc"} );
+    REQUIRE_FALSE( string_view{"abcd"} < string_view{"abc"} );
+    REQUIRE_FALSE( string_view{"abc"} < string_view{"abc"} );
     REQUIRE( string_view{"abd"} > string_view{"abc"} );
     REQUIRE( string_view{"abcd"} > string_view{"abc"} );
+    REQUIRE_FALSE( string_view{"abc"} > string_view{"abd"} );
+    REQUIRE_FALSE( string_view{"abc"} > string_view{"abcd"} );
+    REQUIRE_FALSE( string_view{"abc"} > string_view{"abc"} );
     REQUIRE( string_view{"abc"} <= string_view{"abcd"} );
     REQUIRE( string_view{"abc"} <= string_view{"abc"} );
     REQUIRE( string_view{"abc"} <= string_view{"abd"} );

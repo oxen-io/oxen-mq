@@ -25,7 +25,7 @@ TEST_CASE("basic commands", "[commands]") {
     });
     std::string client_pubkey;
     server.add_command("public", "client.pubkey", [&](Message& m) {
-            client_pubkey = m.pubkey;
+            client_pubkey = std::string{m.pubkey};
     });
 
     server.start();

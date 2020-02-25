@@ -119,11 +119,15 @@ std::vector<std::string> as_strings(const MessageContainer& msgs) {
     return result;
 }
 
-// Returns a string view of the given message data.  If real std::string_views are available,
-// returns one, otherwise returns a simple partial implementation of string_view.  It's the caller's
-// responsibility to keep the referenced message alive.
-string_view view(const zmq::message_t &m) {
+// Returns a string view of the given message data.  It's the caller's responsibility to keep the
+// referenced message alive.
+string_view view(const zmq::message_t& m) {
     return {m.data<char>(), m.size()};
+}
+
+// Like the above, but copies the data into a string.
+std::string string(const zmq::message_t& m) {
+    return std::string{view(m)};
 }
 
 // Builds a ZMTP metadata key-value pair.  These will be available on every message from that peer.
@@ -575,7 +579,8 @@ void LokiMQ::setup_outgoing_socket(zmq::socket_t& socket, string_view remote_pub
 }
 
 std::pair<zmq::socket_t *, std::string>
-LokiMQ::proxy_connect_sn(const std::string &remote, const std::string &connect_hint, bool optional, bool incoming_only, std::chrono::milliseconds keep_alive) {
+LokiMQ::proxy_connect_sn(string_view remote_sv, string_view connect_hint, bool optional, bool incoming_only, std::chrono::milliseconds keep_alive) {
+    std::string remote{remote_sv};
     auto &peer = peers[remote]; // We may auto-vivify here, but that's okay; it'll get cleaned up in idle_expiry if no connection gets established
 
     std::pair<zmq::socket_t *, std::string> result = {nullptr, ""s};
@@ -614,7 +619,7 @@ LokiMQ::proxy_connect_sn(const std::string &remote, const std::string &connect_h
         // special inproc connection if self that doesn't need any external connection
         addr = SN_ADDR_SELF;
     } else {
-        addr = connect_hint;
+        addr = std::string{connect_hint};
         if (addr.empty())
             addr = peer_lookup(remote);
         else
@@ -657,7 +662,7 @@ std::pair<zmq::socket_t *, std::string> LokiMQ::proxy_connect_sn(bt_dict &&data)
 
 void LokiMQ::proxy_send(bt_dict_consumer data) {
     // NB: bt_dict_consumer goes in alphabetical order
-    std::string hint;
+    string_view hint;
     std::chrono::milliseconds keep_alive{DEFAULT_SEND_KEEP_ALIVE};
     bool optional = false;
     bool incoming = false;
@@ -665,7 +670,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
     std::string request_tag;
     std::unique_ptr<ReplyCallback> request_cbptr;
     if (data.skip_until("hint"))
-        hint = data.consume_string();
+        hint = data.consume_string_view();
     if (data.skip_until("incoming"))
         incoming = data.consume_integer<bool>();
     if (data.skip_until("keep-alive"))
@@ -674,7 +679,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
         optional = data.consume_integer<bool>();
     if (!data.skip_until("pubkey"))
         throw std::runtime_error("Internal error: Invalid proxy send command; pubkey missing");
-    std::string remote_pubkey = data.consume_string();
+    string_view remote_pubkey = data.consume_string_view();
     if (data.skip_until("request"))
         request = data.consume_integer<bool>();
     if (request) {
@@ -710,7 +715,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
         if (e.num() == EHOSTUNREACH && sock_route.first == &listener && !sock_route.second.empty()) {
             // We *tried* to route via the incoming connection but it is no longer valid.  Drop it,
             // establish a new connection, and try again.
-            auto &peer = peers[remote_pubkey];
+            auto &peer = peers[std::string{remote_pubkey}];
             peer.incoming.clear(); // Don't worry about cleaning the map entry if outgoing is also < 0: that will happen at the next idle cleanup
             LMQ_LOG(debug, "Could not route back to SN ", to_hex(remote_pubkey), " via listening socket; trying via new outgoing connection");
             return proxy_send(std::move(data));
@@ -949,7 +954,7 @@ void LokiMQ::proxy_loop() {
 
 #ifndef NDEBUG
     if (log_level() >= LogLevel::trace) {
-        LMQ_TRACE("Reserving space for ", max_workers, " max workers = ", general_workers, " general + reserved:");
+        LMQ_TRACE("Reserving space for ", max_workers, " max workers = ", general_workers, " general plus reservations for:");
         for (const auto& cat : categories)
             LMQ_TRACE("    - ", cat.first, ": ", cat.second.reserved_threads);
         LMQ_TRACE("    - (batch jobs): ", batch_jobs_reserved);
@@ -1106,7 +1111,7 @@ std::pair<LokiMQ::category*, const std::pair<LokiMQ::CommandCallback, bool>*> Lo
         LMQ_LOG(warn, "Invalid command '", command, "': expected <category>.<command>");
         return {};
     }
-    string_view catname{&command[0], dot};
+    std::string catname = command.substr(0, dot);
     std::string cmd = command.substr(dot + 1);
 
     auto catit = categories.find(catname);
@@ -1243,7 +1248,7 @@ bool LokiMQ::proxy_handle_builtin(int conn_index, std::vector<zmq::message_t>& p
             LMQ_LOG(warn, "Received REPLY without a reply tag; ignoring");
             return true;
         }
-        std::string reply_tag = view(parts[tag_pos]);
+        std::string reply_tag{view(parts[tag_pos])};
         auto it = pending_requests.find(reply_tag);
         if (it != pending_requests.end()) {
             LMQ_LOG(debug, "Received REPLY for pending command", to_hex(reply_tag), "; scheduling callback");
@@ -1265,7 +1270,7 @@ bool LokiMQ::proxy_handle_builtin(int conn_index, std::vector<zmq::message_t>& p
             return true;
         }
         LMQ_LOG(info, "Incoming client from ", peer_address(parts.back()), " sent HI, replying with HELLO");
-        send_routed_message(listener, route, "HELLO");
+        send_routed_message(listener, std::string{route}, "HELLO");
         return true;
     } else if (cmd == "HELLO") {
         if (!is_outgoing_conn) {
@@ -1394,7 +1399,7 @@ void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
         if (is_outgoing_conn)
             send_direct_message(remotes[conn_index - listener.connected()].second, "UNKNOWNCOMMAND", command);
         else
-            send_routed_message(listener, pubkey, "UNKNOWNCOMMAND", command);
+            send_routed_message(listener, std::string{pubkey}, "UNKNOWNCOMMAND", command);
         return;
     }
 
@@ -1419,7 +1424,7 @@ void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
         }
 
         LMQ_LOG(debug, "No available free workers, queuing ", command, " for later");
-        pending_commands.emplace_back(category, std::move(command), std::move(data_parts), cat_call.second, pubkey, peer_info.service_node);
+        pending_commands.emplace_back(category, std::move(command), std::move(data_parts), cat_call.second, std::string{pubkey}, peer_info.service_node);
         category.queued++;
         return;
     }
@@ -1433,7 +1438,7 @@ void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
     run.is_batch_job = false;
     run.cat = &category;
     run.command = std::move(command);
-    run.pubkey = pubkey;
+    run.pubkey = std::string{pubkey};
     run.service_node = peer_info.service_node;
     run.data_parts = std::move(data_parts);
     run.callback = cat_call.second;
@@ -1445,7 +1450,7 @@ void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
         // it has changed (e.g. new connection).
         auto route = view(parts[0]);
         if (string_view(peer_info.incoming) != route)
-            peer_info.incoming = route;
+            peer_info.incoming = std::string{route};
     }
 
     LMQ_TRACE("Forwarding incoming ", run.command, " from ", run.service_node ? "SN " : "non-SN ",
@@ -1475,9 +1480,9 @@ bool LokiMQ::proxy_check_auth(string_view pubkey, size_t conn_index, const peer_
         // issuing.  Drop the connection; if the remote has something important to relay it will
         // reconnect, at which point we will reassess the SN status on the new incoming connection.
         if (!is_outgoing_conn)
-            send_routed_message(listener, pubkey, "BYE");
+            send_routed_message(listener, std::string{pubkey}, "BYE");
         else
-            proxy_disconnect(pubkey);
+            proxy_disconnect(std::string{pubkey});
         return false;
     }
 
@@ -1487,7 +1492,7 @@ bool LokiMQ::proxy_check_auth(string_view pubkey, size_t conn_index, const peer_
     if (is_outgoing_conn)
         send_direct_message(remotes[conn_index - listener.connected()].second, std::move(reply), command);
     else
-        send_routed_message(listener, pubkey, std::move(reply), command);
+        send_routed_message(listener, std::string{pubkey}, std::move(reply), command);
     return true;
 }
 
@@ -1537,7 +1542,7 @@ void LokiMQ::process_zap_requests(zmq::socket_t &zap_auth) {
         std::vector<std::string> response_vals(6);
         response_vals[0] = "1.0"; // version
         if (frames.size() >= 2)
-            response_vals[1] = view(frames[1]); // unique identifier
+            response_vals[1] = std::string{view(frames[1])}; // unique identifier
         std::string &status_code = response_vals[2], &status_text = response_vals[3];
 
         if (frames.size() < 6 || view(frames[0]) != "1.0") {
@@ -1562,7 +1567,7 @@ void LokiMQ::process_zap_requests(zmq::socket_t &zap_auth) {
                 status_code = "400";
                 status_text = "Unknown authentication domain: " + std::string{domain};
             } else {
-                auto ip = view(frames[3]), pubkey = view(frames[6]);
+                auto ip = string(frames[3]), pubkey = string(frames[6]);
                 auto result = allow_connection(ip, pubkey);
                 bool sn = result.remote_sn;
                 auto& user_id = response_vals[4];
@@ -1649,8 +1654,9 @@ void LokiMQ::proxy_connect_remote(bt_dict_consumer data) {
         remote_pubkey = data.consume_string();
         assert(remote_pubkey.size() == 32 || remote_pubkey.empty());
     }
-    if (data.skip_until("remote"))
+    if (data.skip_until("remote")) {
         remote = data.consume_string();
+    }
     if (data.skip_until("timeout"))
         timeout = std::chrono::milliseconds{data.consume_integer<uint64_t>()};
 

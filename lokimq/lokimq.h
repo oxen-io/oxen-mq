@@ -115,7 +115,7 @@ public:
     /// If you want to send a non-strong reply even when the remote is a service node then add
     /// an explicit `send_option::optional()` argument.
     template <typename... Args>
-    void send_back(const std::string& command, Args&&... args);
+    void send_back(string_view, Args&&... args);
 
     /// Sends a reply to a request.  This takes no command: the command is always the built-in
     /// "REPLY" command, followed by the unique reply tag, then any reply data parts.  All other
@@ -204,12 +204,12 @@ public:
     ///
     /// @returns an `AuthLevel` enum value indicating the default auth level for the incoming
     /// connection, or AuthLevel::denied if the connection should be refused.
-    using AllowFunc = std::function<Allow(string_view ip, string_view pubkey)>;
+    using AllowFunc = std::function<Allow(const std::string &ip, const std::string &pubkey)>;
 
     /// Callback that is invoked when we need to send a "strong" message to a SN that we aren't
     /// already connected to and need to establish a connection.  This callback returns the ZMQ
     /// connection string we should use which is typically a string such as `tcp://1.2.3.4:5678`.
-    using SNRemoteAddress = std::function<std::string(const std::string& pubkey)>;
+    using SNRemoteAddress = std::function<std::string(const std::string &pubkey)>;
 
     /// The callback type for registered commands.
     using CommandCallback = std::function<void(Message& message)>;
@@ -440,7 +440,7 @@ private:
     /// Common connection implementation used by proxy_connect/proxy_send.  Returns the socket
     /// and, if a routing prefix is needed, the required prefix (or an empty string if not needed).
     /// For an optional connect that fail, returns nullptr for the socket.
-    std::pair<zmq::socket_t*, std::string> proxy_connect_sn(const std::string& pubkey, const std::string& connect_hint, bool optional, bool incoming_only, std::chrono::milliseconds keep_alive);
+    std::pair<zmq::socket_t*, std::string> proxy_connect_sn(string_view pubkey, string_view connect_hint, bool optional, bool incoming_only, std::chrono::milliseconds keep_alive);
 
     /// CONNECT_SN command telling us to connect to a new pubkey.  Returns the socket (which could be
     /// existing or a new one).
@@ -848,7 +848,7 @@ public:
      * performing a connection address lookup on the pubkey.
      */
     template <typename... T>
-    void send(const std::string& pubkey, const std::string& cmd, const T&... opts);
+    void send(string_view pubkey, string_view cmd, const T&... opts);
 
     /** Send a command configured as a "REQUEST" command: the data parts will be prefixed with a
      * random identifier.  The remote is expected to reply with a ["REPLY", <identifier>, ...]
@@ -862,8 +862,7 @@ public:
      * @param opts - anything else (i.e. strings, send_options) is forwarded to send().
      */
     template <typename... T>
-    void request(const std::string& pubkey, const std::string& cmd, ReplyCallback callback,
-            const T&... opts);
+    void request(string_view pubkey, string_view cmd, ReplyCallback callback, const T&... opts);
 
     /// The key pair this LokiMQ was created with; if empty keys were given during construction then
     /// this returns the generated keys.
@@ -942,7 +941,7 @@ void send_control(zmq::socket_t& sock, string_view cmd, std::string data = {});
 
 /// Base case: takes a string-like value and appends it to the message parts
 inline void apply_send_option(bt_list& parts, bt_dict&, string_view arg) {
-    parts.push_back(arg);
+    parts.emplace_back(arg);
 }
 
 /// `data_parts` specialization: appends a range of serialized data parts to the parts to send
@@ -975,7 +974,7 @@ inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option
 } // namespace detail
 
 template <typename... T>
-void LokiMQ::send(const std::string& pubkey, const std::string& cmd, const T &...opts) {
+void LokiMQ::send(string_view pubkey, string_view cmd, const T &...opts) {
     bt_dict control_data;
     bt_list parts{{cmd}};
 #ifdef __cpp_fold_expressions
@@ -992,7 +991,7 @@ void LokiMQ::send(const std::string& pubkey, const std::string& cmd, const T &..
 std::string make_random_string(size_t size);
 
 template <typename... T>
-void LokiMQ::request(const std::string& pubkey, const std::string& cmd, ReplyCallback callback, const T &...opts) {
+void LokiMQ::request(string_view pubkey, string_view cmd, ReplyCallback callback, const T &...opts) {
     auto reply_tag = make_random_string(15); // 15 should keep us in most stl implementations' small string optimization
     bt_dict control_data;
     bt_list parts{{cmd, reply_tag}};
@@ -1011,7 +1010,7 @@ void LokiMQ::request(const std::string& pubkey, const std::string& cmd, ReplyCal
 }
 
 template <typename... Args>
-void Message::send_back(const std::string& command, Args&&... args) {
+void Message::send_back(string_view command, Args&&... args) {
     assert(reply_tag.empty());
     if (service_node) lokimq.send(pubkey, command, std::forward<Args>(args)...);
     else lokimq.send(pubkey, command, send_option::optional{}, std::forward<Args>(args)...);
@@ -1034,7 +1033,7 @@ void LokiMQ::log_(LogLevel lvl, const char* file, int line, const T&... stuff) {
 
     std::ostringstream os;
 #ifdef __cpp_fold_expressions
-    os << ... << stuff;
+    (os << ... << stuff);
 #else
     (void) std::initializer_list<int>{(os << stuff, 0)...};
 #endif
