@@ -26,9 +26,6 @@ constexpr char ZMQ_ADDR_ZAP[] = "inproc://zeromq.zap.01";
 #  define LMQ_TRACE(...)
 #endif
 
-// This is the domain used for listening service nodes.
-constexpr const char AUTH_DOMAIN_SN[] = "loki.sn";
-
 
 
 namespace {
@@ -93,6 +90,7 @@ void send_message_parts(zmq::socket_t &sock, Container &&c) {
 /// Sends a message with an initial route.  `msg` and `data` can be empty: if `msg` is empty then
 /// the msg frame will be an empty message; if `data` is empty then the data frame will be omitted.
 void send_routed_message(zmq::socket_t &socket, std::string route, std::string msg = {}, std::string data = {}) {
+    assert(!route.empty());
     std::array<zmq::message_t, 3> msgs{{create_message(std::move(route))}};
     if (!msg.empty())
         msgs[1] = create_message(std::move(msg));
@@ -120,14 +118,9 @@ std::vector<std::string> as_strings(const MessageContainer& msgs) {
 }
 
 // Returns a string view of the given message data.  It's the caller's responsibility to keep the
-// referenced message alive.
+// referenced message alive.  If you want a std::string instead just call `m.to_string()`
 string_view view(const zmq::message_t& m) {
     return {m.data<char>(), m.size()};
-}
-
-// Like the above, but copies the data into a string.
-std::string string(const zmq::message_t& m) {
-    return std::string{view(m)};
 }
 
 // Builds a ZMTP metadata key-value pair.  These will be available on every message from that peer.
@@ -175,27 +168,52 @@ std::string to_string(AuthLevel a) {
         default:                return "(unknown)";
     }
 }
+AuthLevel auth_from_string(string_view a) {
+    if (a == "none") return AuthLevel::none;
+    if (a == "basic") return AuthLevel::basic;
+    if (a == "admin") return AuthLevel::admin;
+    return AuthLevel::denied;
+}
 
-/// Extracts a pubkey and SN status from a zmq message properties.  Throws on failure.
-void extract_pubkey(zmq::message_t& msg, std::string& pubkey, bool& service_node) {
-    string_view pubkey_hex{msg.gets("User-Id")};
-    if (pubkey_hex.size() != 64)
-        throw std::logic_error("bad user-id");
-    assert(is_hex(pubkey_hex.begin(), pubkey_hex.end()));
-    pubkey.resize(32, 0);
-    from_hex(pubkey_hex.begin(), pubkey_hex.end(), pubkey.begin());
+/// Extracts a pubkey, SN status, and auth level from a zmq message received on a *listening*
+/// socket.
+std::tuple<std::string, bool, AuthLevel> extract_metadata(zmq::message_t& msg) {
+    auto result = std::make_tuple(""s, false, AuthLevel::none);
+    try {
+        string_view pubkey_hex{msg.gets("User-Id")};
+        if (pubkey_hex.size() != 64)
+            throw std::logic_error("bad user-id");
+        assert(is_hex(pubkey_hex.begin(), pubkey_hex.end()));
+        auto& pubkey = std::get<std::string>(result);
+        pubkey.resize(32, 0);
+        from_hex(pubkey_hex.begin(), pubkey_hex.end(), pubkey.begin());
+    } catch (...) {}
 
-    service_node = false;
     try {
         string_view is_sn{msg.gets("X-SN")};
         if (is_sn.size() == 1 && is_sn[0] == '1')
-            service_node = true;
-    } catch (...) { /* property not set, ignore */ }
+            std::get<bool>(result) = true;
+    } catch (...) {}
+
+    try {
+        string_view auth_level{msg.gets("X-AuthLevel")};
+        std::get<AuthLevel>(result) = auth_from_string(auth_level);
+    } catch (...) {}
+
+    return result;
 }
 
 const char* peer_address(zmq::message_t& msg) {
     try { return msg.gets("Peer-Address"); } catch (...) {}
     return "(unknown)";
+}
+
+void add_pollitem(std::vector<zmq::pollitem_t>& pollitems, zmq::socket_t& sock) {
+    pollitems.emplace_back();
+    auto &p = pollitems.back();
+    p.socket = static_cast<void *>(sock);
+    p.fd = 0;
+    p.events = ZMQ_POLLIN;
 }
 
 } // anonymous namespace
@@ -219,13 +237,22 @@ void send_control(zmq::socket_t& sock, string_view cmd, std::string data) {
 } // namespace detail
 
 
+std::ostream& operator<<(std::ostream& o, const ConnectionID& conn) {
+    if (!conn.pk.empty())
+        return o << (conn.sn() ? "SN " : "non-SN authenticated remote ") << to_hex(conn.pk);
+    else
+        return o << "unauthenticated remote [" << conn.id << "]";
+}
 
-void LokiMQ::add_pollitem(zmq::socket_t& sock) {
-    pollitems.emplace_back();
-    auto &p = pollitems.back();
-    p.socket = static_cast<void *>(sock);
-    p.fd = 0;
-    p.events = ZMQ_POLLIN;
+
+void LokiMQ::rebuild_pollitems() {
+    pollitems.clear();
+    add_pollitem(pollitems, command);
+    add_pollitem(pollitems, workers_socket);
+    add_pollitem(pollitems, zap_auth);
+
+    for (auto& s : connections)
+        add_pollitem(pollitems, s);
 }
 
 void LokiMQ::log_level(LogLevel level) {
@@ -349,13 +376,11 @@ LokiMQ::LokiMQ(
         std::string pubkey_,
         std::string privkey_,
         bool service_node,
-        std::vector<std::string> bind_,
         SNRemoteAddress lookup,
-        AllowFunc allow,
         Logger logger)
     : object_id{next_id++}, pubkey{std::move(pubkey_)}, privkey{std::move(privkey_)}, local_service_node{service_node},
-        bind{std::move(bind_)}, peer_lookup{std::move(lookup)}, allow_connection{std::move(allow)}, logger{std::move(logger)},
-        poll_remote_offset{poll_internal_size + (bind.empty() ? 0 : 1)} {
+        sn_lookup{std::move(lookup)}, logger{std::move(logger)}
+{
 
     LMQ_TRACE("Constructing listening LokiMQ, id=", object_id, ", this=", this);
 
@@ -381,17 +406,17 @@ LokiMQ::LokiMQ(
         if (verify_pubkey != pubkey)
             throw std::invalid_argument("Invalid pubkey/privkey values given to LokiMQ construction: pubkey verification failed");
     }
-
-    // If we're not binding to anything then we don't listen, i.e. we can only establish outbound
-    // connections.  Don't allow this if we are in service_node mode because, if we aren't
-    // listening, we are useless as a service node.
-    if (bind.empty() && service_node)
-        throw std::invalid_argument{"Cannot create a service node listener with no address(es) to bind"};
 }
 
 void LokiMQ::start() {
     if (proxy_thread.joinable())
         throw std::logic_error("Cannot call start() multiple times!");
+
+    // If we're not binding to anything then we don't listen, i.e. we can only establish outbound
+    // connections.  Don't allow this if we are in service_node mode because, if we aren't
+    // listening, we are useless as a service node.
+    if (bind.empty() && local_service_node)
+        throw std::invalid_argument{"Cannot create a service node listener with no address(es) to bind"};
 
     LMQ_LOG(info, "Initializing LokiMQ ", bind.empty() ? "remote-only" : "listener", " with pubkey ", to_hex(pubkey));
 
@@ -424,7 +449,7 @@ void LokiMQ::worker_thread(unsigned int index) {
     LMQ_LOG(debug, "New worker thread ", worker_id, " started");
     sock.connect(SN_ADDR_WORKERS);
 
-    Message message{*this};
+    Message message{*this, 0};
     std::vector<zmq::message_t> parts;
     run_info& run = workers[index]; // This contains our first job, and will be updated later with subsequent jobs
 
@@ -439,11 +464,11 @@ void LokiMQ::worker_thread(unsigned int index) {
                     run.batch->job_completion();
                 }
             } else {
-                message.pubkey = run.pubkey;
-                message.service_node = run.service_node;
+                message.conn = run.conn;
+                message.route = run.conn_route;
                 message.data.clear();
 
-                LMQ_TRACE("Got incoming command from pubkey ", to_hex(message.pubkey), " (SN=", (int) message.service_node, ")");
+                LMQ_TRACE("Got incoming command from ", message.conn, message.route.empty() ? "(outgoing)" : "(incoming)");
 
                 if (run.callback->second /*is_request*/) {
                     message.reply_tag = {run.data_parts[0].data<char>(), run.data_parts[0].size()};
@@ -457,43 +482,6 @@ void LokiMQ::worker_thread(unsigned int index) {
                 LMQ_TRACE("worker thread ", worker_id, " invoking ", run.command, " callback with ", message.data.size(), " message parts");
                 run.callback->first(message);
             }
-
-            /*
-             * FIXME: BYE should be handled by the proxy thread, not the worker.
-             */
-            /*
-            if (msg.command == "BYE") {
-                LMQ_LOG(info, "peer asked us to disconnect");
-                detail::send_control(get_control_socket(), "DISCONNECT", msg.pubkey);
-                continue;
-            }
-            */
-
-            /* FIXME: this lookup and auth check belongs in the proxy */
-            /*
-            auto cmdit = commands.find(msg.command);
-            if (cmdit == commands.end()) {
-                LMQ_LOG(warn, worker_id, " received unknown command '", msg.command, "' from " <<
-                        (msg.sn ? "SN " : "non-SN ") << to_hex(msg.pubkey));
-                continue;
-            }
-
-            auto cmd_type = cmdit->second.second;
-            const bool command_accepted = (
-                cmd_type == command_type::response ? msg.sn :
-                cmd_type == command_type::quorum ? msg.sn && is_service_node() :
-                cmd_type == command_type::public_ ? is_service_node() :
-                false);
-            if (!command_accepted) {
-                // If they aren't valid, tell them so that they can disconnect (and attempt to reconnect later with appropriate authentication)
-                LMQ_LOG(warn, worker_id, "/", object_id, " received disallowed ", cmd_type, " command ", msg.command <<
-                        " from " << (msg.sn ? "non-" : "") << "SN remote " << to_hex(msg.pubkey) << "; replying with a BYE");
-                send(msg.pubkey, "BYE", send_option::incoming{});
-                detail::send_control(get_control_socket(), "DISCONNECT", msg.pubkey);
-                continue;
-            }
-
-            */
         }
         catch (const bt_deserialize_invalid& e) {
             LMQ_LOG(warn, worker_id, " deserialization failed: ", e.what(), "; ignoring request");
@@ -543,7 +531,7 @@ void LokiMQ::worker_thread(unsigned int index) {
 void LokiMQ::proxy_quit() {
     LMQ_LOG(debug, "Received quit command, shutting down proxy thread");
 
-    assert(std::none_of(workers.begin(), workers.end(), [](auto& worker) { return worker.thread.joinable(); }));
+    assert(std::none_of(workers.begin(), workers.end(), [](auto& worker) { return worker.worker_thread.joinable(); }));
 
     command.setsockopt<int>(ZMQ_LINGER, 0);
     command.close();
@@ -555,59 +543,51 @@ void LokiMQ::proxy_quit() {
     }
     workers_socket.close();
     int linger = std::chrono::milliseconds{CLOSE_LINGER}.count();
-    if (listener.connected()) {
-        listener.setsockopt(ZMQ_LINGER, linger);
-        listener.close();
-    }
-    for (auto &r : remotes)
-        r.second.setsockopt(ZMQ_LINGER, linger);
-    remotes.clear();
-    peers.clear(); 
+    for (auto& s : connections)
+        s.setsockopt(ZMQ_LINGER, linger);
+    connections.clear();
+    peers.clear();
 
     LMQ_LOG(debug, "Proxy thread teardown complete");
 }
 
 void LokiMQ::setup_outgoing_socket(zmq::socket_t& socket, string_view remote_pubkey) {
-    // FIXME: not passing a remote_pubkey is a problem
-    if (!remote_pubkey.empty())
+    if (!remote_pubkey.empty()) {
         socket.setsockopt(ZMQ_CURVE_SERVERKEY, remote_pubkey.data(), remote_pubkey.size());
-    socket.setsockopt(ZMQ_CURVE_PUBLICKEY, pubkey.data(), pubkey.size());
-    socket.setsockopt(ZMQ_CURVE_SECRETKEY, privkey.data(), privkey.size());
+        socket.setsockopt(ZMQ_CURVE_PUBLICKEY, pubkey.data(), pubkey.size());
+        socket.setsockopt(ZMQ_CURVE_SECRETKEY, privkey.data(), privkey.size());
+    }
     socket.setsockopt(ZMQ_HANDSHAKE_IVL, (int) HANDSHAKE_TIME.count());
     socket.setsockopt<int64_t>(ZMQ_MAXMSGSIZE, MAX_MSG_SIZE);
     socket.setsockopt(ZMQ_ROUTING_ID, pubkey.data(), pubkey.size());
 }
 
 std::pair<zmq::socket_t *, std::string>
-LokiMQ::proxy_connect_sn(string_view remote_sv, string_view connect_hint, bool optional, bool incoming_only, std::chrono::milliseconds keep_alive) {
-    std::string remote{remote_sv};
-    auto &peer = peers[remote]; // We may auto-vivify here, but that's okay; it'll get cleaned up in idle_expiry if no connection gets established
-
-    std::pair<zmq::socket_t *, std::string> result = {nullptr, ""s};
-
-    bool outgoing = false;
-    if (peer.outgoing >= 0 && !incoming_only) {
-        result.first = &remotes[peer.outgoing].second;
-        outgoing = true;
-    } else if (!peer.incoming.empty() && listener.connected()) {
-        result.first = &listener;
-        result.second = peer.incoming;
+LokiMQ::proxy_connect_sn(string_view remote, string_view connect_hint, bool optional, bool incoming_only, std::chrono::milliseconds keep_alive) {
+    ConnectionID remote_cid{remote};
+    auto its = peers.equal_range(remote_cid);
+    peer_info* peer = nullptr;
+    for (auto it = its.first; it != its.second; ++it) {
+        if (incoming_only && it->second.route.empty())
+            continue; // outgoing connection but we were asked to only use incoming connections
+        peer = &it->second;
+        break;
     }
 
-    if (result.first) {
+    if (peer) {
         LMQ_TRACE("proxy asked to connect to ", to_hex(remote), "; reusing existing connection");
-        if (outgoing) {
-            if (peer.idle_expiry < keep_alive) {
+        if (peer->route.empty() /* == outgoing*/) {
+            if (peer->idle_expiry < keep_alive) {
                 LMQ_LOG(debug, "updating existing outgoing peer connection idle expiry time from ",
-                        peer.idle_expiry.count(), "ms to ", keep_alive.count(), "ms");
-                peer.idle_expiry = keep_alive;
+                        peer->idle_expiry.count(), "ms to ", keep_alive.count(), "ms");
+                peer->idle_expiry = keep_alive;
             }
-            peer.activity();
+            peer->activity();
         }
-        return result;
+        return {&connections[peer->conn_index], peer->route};
     } else if (optional || incoming_only) {
-        LMQ_LOG(debug, "proxy asked for optional or incoming connection, but no appropriate connection exists so cancelling connection attempt");
-        return result;
+        LMQ_LOG(debug, "proxy asked for optional or incoming connection, but no appropriate connection exists so aborting connection attempt");
+        return {nullptr, ""s};
     }
 
     // No connection so establish a new one
@@ -621,43 +601,51 @@ LokiMQ::proxy_connect_sn(string_view remote_sv, string_view connect_hint, bool o
     } else {
         addr = std::string{connect_hint};
         if (addr.empty())
-            addr = peer_lookup(remote);
+            addr = sn_lookup(remote);
         else
             LMQ_LOG(debug, "using connection hint ", connect_hint);
 
         if (addr.empty()) {
             LMQ_LOG(error, "peer lookup failed for ", to_hex(remote));
-            return result;
+            return {nullptr, ""s};
         }
     }
 
-    LMQ_LOG(debug, to_hex(pubkey), " connecting to ", addr, " to reach ", to_hex(remote));
+    LMQ_LOG(debug, to_hex(pubkey), " (me) connecting to ", addr, " to reach ", to_hex(remote));
     zmq::socket_t socket{context, zmq::socket_type::dealer};
     setup_outgoing_socket(socket, remote);
     socket.connect(addr);
-    peer.idle_expiry = keep_alive;
+    peer_info p{};
+    p.service_node = true;
+    p.pubkey = std::string{remote};
+    p.conn_index = connections.size();
+    p.idle_expiry = keep_alive;
+    p.activity();
+    peers.emplace(std::move(remote_cid), std::move(p));
+    connections.push_back(std::move(socket));
 
-    add_pollitem(socket);
-    peer.outgoing = remotes.size();
-    remotes.emplace_back(remote, std::move(socket));
-    peer.service_node = true;
-    peer.activity();
-
-    result.first = &remotes.back().second;
-    return result;
+    return {&connections.back(), ""s};
 }
 
-std::pair<zmq::socket_t *, std::string> LokiMQ::proxy_connect_sn(bt_dict &&data) {
-    auto remote_pubkey = data.at("pubkey").get<std::string>();
-    std::chrono::milliseconds keep_alive{get_int<int>(data.at("keep-alive"))};
-    std::string hint;
-    auto hint_it = data.find("hint");
-    if (hint_it != data.end())
-        hint = data.at("hint").get<std::string>();
+std::pair<zmq::socket_t *, std::string> LokiMQ::proxy_connect_sn(bt_dict_consumer data) {
+    string_view hint, remote_pk;
+    std::chrono::milliseconds keep_alive;
+    bool optional = false, incoming_only = false;
 
-    bool optional = data.count("optional"), incoming = data.count("incoming");
+    // Alphabetical order
+    if (data.skip_until("hint"))
+        hint = data.consume_string();
+    if (data.skip_until("incoming"))
+        incoming_only = data.consume_integer<bool>();
+    if (data.skip_until("keep-alive"))
+        keep_alive = std::chrono::milliseconds{data.consume_integer<uint64_t>()};
+    if (data.skip_until("optional"))
+        optional = data.consume_integer<bool>();
+    if (!data.skip_until("pubkey"))
+        throw std::runtime_error("Internal error: Invalid proxy_connect_sn command; pubkey missing");
+    remote_pk = data.consume_string();
 
-    return proxy_connect_sn(remote_pubkey, hint, optional, incoming, keep_alive);
+    return proxy_connect_sn(remote_pk, hint, optional, incoming_only, keep_alive);
 }
 
 void LokiMQ::proxy_send(bt_dict_consumer data) {
@@ -667,8 +655,20 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
     bool optional = false;
     bool incoming = false;
     bool request = false;
+    bool have_conn_id = false;
+    ConnectionID conn_id;
+    string_view conn_route;
+
     std::string request_tag;
     std::unique_ptr<ReplyCallback> request_cbptr;
+    if (data.skip_until("conn_id")) {
+        conn_id.id = data.consume_integer<long long>();
+        if (conn_id.id == -1)
+            throw std::runtime_error("Invalid error: invalid conn_id value (-1)");
+        have_conn_id = true;
+    }
+    if (data.skip_until("conn_route"))
+        conn_route = data.consume_string_view();
     if (data.skip_until("hint"))
         hint = data.consume_string_view();
     if (data.skip_until("incoming"))
@@ -677,9 +677,14 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
         keep_alive = std::chrono::milliseconds{data.consume_integer<uint64_t>()};
     if (data.skip_until("optional"))
         optional = data.consume_integer<bool>();
-    if (!data.skip_until("pubkey"))
-        throw std::runtime_error("Internal error: Invalid proxy send command; pubkey missing");
-    string_view remote_pubkey = data.consume_string_view();
+    if (data.skip_until("pubkey")) {
+        if (have_conn_id)
+            throw std::runtime_error("Internal error: Invalid proxy send command; conn_id and pubkey are exclusive");
+        conn_id.pk = data.consume_string();
+        conn_id.id = ConnectionID::SN_ID;
+    } else if (!have_conn_id)
+        throw std::runtime_error("Internal error: Invalid proxy send command; pubkey or conn_id missing");
+
     if (data.skip_until("request"))
         request = data.consume_integer<bool>();
     if (request) {
@@ -694,13 +699,36 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
         throw std::runtime_error("Internal error: Invalid proxy send command; send parts missing");
     bt_list_consumer send = data.consume_list_consumer();
 
-    auto sock_route = proxy_connect_sn(remote_pubkey, hint, optional, incoming, keep_alive);
-    if (!sock_route.first) {
-        if (optional)
-            LMQ_LOG(debug, "Not sending: send is optional and no connection to ", to_hex(remote_pubkey), " is currently established");
-        else
-            LMQ_LOG(error, "Unable to send to ", to_hex(remote_pubkey), ": no connection could be established");
-        return;
+    zmq::socket_t *send_to;
+    std::string routing_prefix;
+    if (conn_id.sn()) {
+        auto sock_route = proxy_connect_sn(conn_id.pk, hint, optional, incoming, keep_alive);
+        if (!sock_route.first) {
+            if (optional)
+                LMQ_LOG(debug, "Not sending: send is optional and no connection to ",
+                        to_hex(conn_id.pk), " is currently established");
+            else
+                LMQ_LOG(error, "Unable to send to ", to_hex(conn_id.pk), ": no connection address found");
+            return;
+        }
+        send_to = sock_route.first;
+        routing_prefix = std::move(sock_route.second);
+    } else if (!conn_route.empty()) { // incoming non-SN connection
+        auto it = incoming_conn_index.find(conn_id);
+        if (it == incoming_conn_index.end()) {
+            LMQ_LOG(warn, "Unable to send to ", conn_id, ": incoming listening socket not found");
+            return;
+        }
+        send_to = &connections[it->second];
+        routing_prefix = std::string{conn_route};
+    } else {
+        auto pr = peers.equal_range(conn_id);
+        if (pr.first == peers.end()) {
+            LMQ_LOG(warn, "Unable to send: connection id ", conn_id, " is not (or is no longer) a valid connection");
+            return;
+        }
+        auto& peer = pr.first->second;
+        send_to = &connections[peer.conn_index];
     }
 
     if (request) {
@@ -710,44 +738,80 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
     }
 
     try {
-        send_message_parts(*sock_route.first, build_send_parts(send, sock_route.second));
+        send_message_parts(*send_to, build_send_parts(send, routing_prefix));
     } catch (const zmq::error_t &e) {
-        if (e.num() == EHOSTUNREACH && sock_route.first == &listener && !sock_route.second.empty()) {
-            // We *tried* to route via the incoming connection but it is no longer valid.  Drop it,
-            // establish a new connection, and try again.
-            auto &peer = peers[std::string{remote_pubkey}];
-            peer.incoming.clear(); // Don't worry about cleaning the map entry if outgoing is also < 0: that will happen at the next idle cleanup
-            LMQ_LOG(debug, "Could not route back to SN ", to_hex(remote_pubkey), " via listening socket; trying via new outgoing connection");
-            return proxy_send(std::move(data));
+        if (e.num() == EHOSTUNREACH && !routing_prefix.empty() /*= incoming conn*/) {
+            LMQ_LOG(debug, "Incoming connection is no longer valid; removing peer details");
+            // Our incoming connection no longer exists; remove it from `peers`.
+            auto pr = peers.equal_range(conn_id);
+            if (pr.first != peers.end()) {
+                if (!conn_id.sn()) {
+                    peers.erase(pr.first);
+                } else {
+                    bool removed;
+                    for (auto it = pr.first; it != pr.second; ) {
+                        auto& peer = it->second;
+                        if (peer.route == routing_prefix) {
+                            peers.erase(it);
+                            removed = true;
+                            break;
+                        }
+                    }
+                    // The incoming connection to the SN is no longer good, but we can retry because
+                    // we may have another active connection with the SN (or may want to open one).
+                    if (removed) {
+                        LMQ_LOG(debug, "Retrying sending to SN ", to_hex(conn_id.pk), " using other sockets");
+                        return proxy_send(std::move(data));
+                    }
+                }
+            }
         }
-        LMQ_LOG(warn, "Unable to send message to remote SN ", to_hex(remote_pubkey), ": ", e.what());
+        LMQ_LOG(warn, "Unable to send message to ", conn_id, ": ", e.what());
     }
 }
 
 void LokiMQ::proxy_reply(bt_dict_consumer data) {
-    // NB: bt_dict_consumer goes in alphabetical order
-    data.skip_until("route");
-    string_view route = data.consume_string();
-    assert(!route.empty());
+    bool have_conn_id = false;
+    ConnectionID conn_id{0};
+    if (data.skip_until("conn_id")) {
+        conn_id.id = data.consume_integer<long long>();
+        if (conn_id.id == -1)
+            throw std::runtime_error("Invalid error: invalid conn_id value (-1)");
+        have_conn_id = true;
+    }
+    if (data.skip_until("pubkey")) {
+        if (have_conn_id)
+            throw std::runtime_error("Internal error: Invalid proxy send command; conn_id and pubkey are exclusive");
+        conn_id.pk = data.consume_string();
+        conn_id.id = ConnectionID::SN_ID;
+    } else if (!have_conn_id)
+        throw std::runtime_error("Internal error: Invalid proxy send command; pubkey or conn_id missing");
+    if (!data.skip_until("send"))
+        throw std::runtime_error("Internal error: Invalid proxy reply command; send parts missing");
 
-    if (!listener.connected()) {
-        // FIXME: this is wrong; we can reply to something even with no listener (e.g. if client
-        // says A, server replies B, client replies to that with C).
-        LMQ_LOG(error, "Internal error: proxy_reply called but that shouldn't be possible as we have no listener!");
+    bt_list_consumer send = data.consume_list_consumer();
+
+    auto pr = peers.equal_range(conn_id);
+    if (pr.first == pr.second) {
+        LMQ_LOG(warn, "Unable to send tagged reply: the connection is no longer valid");
         return;
     }
 
-    if (!data.skip_until("send"))
-        throw std::runtime_error("Internal error: Invalid proxy reply command; send parts missing");
-    bt_list_consumer send = data.consume_list_consumer();
-
-    try {
-        send_message_parts(listener, build_send_parts(send, route));
-    } catch (const zmq::error_t &err) {
-        if (err.num() == EHOSTUNREACH) {
-            LMQ_LOG(info, "Unable to send reply to incoming non-SN request: remote is no longer connected");
-        } else {
-            LMQ_LOG(warn, "Unable to send reply to incoming non-SN request: ", err.what());
+    // We try any connections until one works (for ordinary remotes there will be just one, but for
+    // SNs there might be one incoming and one outgoing).
+    for (auto it = pr.first; it != pr.second; ) {
+        try {
+            send_message_parts(connections[it->second.conn_index], build_send_parts(send, it->second.route));
+            break;
+        } catch (const zmq::error_t &err) {
+            if (err.num() == EHOSTUNREACH) {
+                LMQ_LOG(info, "Unable to send reply to incoming non-SN request: remote is no longer connected");
+                LMQ_LOG(debug, "Incoming connection is no longer valid; removing peer details");
+                it = peers.erase(it);
+            } else {
+                LMQ_LOG(warn, "Unable to send reply to incoming non-SN request: ", err.what());
+                ++it;
+            }
         }
     }
 }
@@ -810,11 +874,12 @@ void LokiMQ::proxy_control_message(std::vector<zmq::message_t>& parts) {
             auto ptrval = bt_deserialize<uintptr_t>(view(parts[2]));
             return proxy_batch(reinterpret_cast<detail::Batch*>(ptrval));
         } else if (cmd == "CONNECT_SN") {
-            proxy_connect_sn(bt_deserialize<bt_dict>(view(parts[2])));
+            proxy_connect_sn(view(parts[2]));
             return;
         } else if (cmd == "CONNECT_REMOTE") {
-            proxy_connect_remote(view(parts[2]));
-            return;
+            return proxy_connect_remote(view(parts[2]));
+        } else if (cmd == "DISCONNECT") {
+            return proxy_disconnect(view(parts[2]));
         } else if (cmd == "TIMER") {
             return proxy_timer(view(parts[2]));
         }
@@ -829,7 +894,7 @@ void LokiMQ::proxy_control_message(std::vector<zmq::message_t>& parts) {
             // connections once all workers are done.
             max_workers = 0;
             for (const auto &route : idle_workers)
-                route_control(workers_socket, workers[route].routing_id, "QUIT");
+                route_control(workers_socket, workers[route].worker_routing_id, "QUIT");
             idle_workers.clear();
             return;
         }
@@ -838,64 +903,50 @@ void LokiMQ::proxy_control_message(std::vector<zmq::message_t>& parts) {
             " (" + std::to_string(parts.size()) + ")");
 }
 
-
-void LokiMQ::proxy_close_remote(int index, bool linger) {
-    remotes[index].second.setsockopt<int>(ZMQ_LINGER, linger ? std::chrono::milliseconds{CLOSE_LINGER}.count() : 0);
-    pollitems.erase(pollitems.begin() + poll_remote_offset + index);
-    remotes.erase(remotes.begin() + index);
-    assert(remotes.size() == pollitems.size() + poll_remote_offset);
-
-    for (auto& p : peers)
-        if (p.second.outgoing > index)
-            --p.second.outgoing;
-
-    for (auto& pc : pending_connects) {
-        auto& i = std::get<int>(pc);
-        if (i > index)
+template <typename Container, typename AccessIndex>
+void update_connection_indices(Container& c, size_t index, AccessIndex get_index) {
+    for (auto it = c.begin(); it != c.end(); ) {
+        size_t& i = get_index(*it);
+        if (index == i) {
+            it = c.erase(it);
+            continue;
+        }
+        if (index > i)
             --i;
+        ++it;
     }
 }
 
-auto LokiMQ::proxy_close_outgoing(decltype(peers)::iterator it) -> decltype(it) {
-    auto &peer = *it;
-    auto &info = peer.second;
+void LokiMQ::proxy_close_connection(size_t index, std::chrono::milliseconds linger) {
+    connections[index].setsockopt<int>(ZMQ_LINGER, linger > 0ms ? linger.count() : 0);
+    pollitems_stale = true;
+    connections.erase(connections.begin() + index);
 
-    if (info.outgoing >= 0) {
-        proxy_close_remote(info.outgoing);
-        info.outgoing = -1;
-    }
-
-    if (info.incoming.empty())
-        // Neither incoming nor outgoing connections left, so erase the peer info
-        return peers.erase(it);
-
-    return std::next(it);
-}
-
-void LokiMQ::proxy_disconnect(const std::string &remote) {
-    auto it = peers.find(remote);
-    if (it == peers.end())
-        return;
-    if (it->second.outgoing >= 0)
-        LMQ_LOG(debug, "Closing outgoing connection to ", to_hex(it->first));
-    proxy_close_outgoing(it);
+    update_connection_indices(peers, index,
+            [](auto& p) -> size_t& { return p.second.conn_index; });
+    update_connection_indices(pending_connects, index,
+            [](auto& pc) -> size_t& { return std::get<size_t>(pc); });
+    update_connection_indices(bind, index,
+            [](auto& b) -> size_t& { return b.second.index; });
+    update_connection_indices(incoming_conn_index, index,
+            [](auto& oci) -> size_t& { return oci.second; });
+    assert(index < conn_index_to_id.size());
+    conn_index_to_id.erase(conn_index_to_id.begin() + index);
 }
 
 void LokiMQ::proxy_expire_idle_peers() {
     for (auto it = peers.begin(); it != peers.end(); ) {
         auto &info = it->second;
-        if (info.outgoing >= 0) {
+        if (info.outgoing()) {
             auto idle = info.last_activity - std::chrono::steady_clock::now();
             if (idle <= info.idle_expiry) {
                 ++it;
                 continue;
             }
-            LMQ_LOG(info, "Closing outgoing connection to ", to_hex(it->first), ": idle timeout reached");
+            LMQ_LOG(info, "Closing outgoing connection to ", it->first, ": idle timeout reached");
+            proxy_close_connection(info.conn_index, CLOSE_LINGER);
+            it = peers.erase(it);
         }
-
-        // Deliberately outside the above if: this *also* removes the peer from the map if if has
-        // neither an incoming or outgoing connection
-        it = proxy_close_outgoing(it);
     }
 }
 
@@ -910,14 +961,15 @@ void LokiMQ::proxy_conn_cleanup() {
 
     auto now = std::chrono::steady_clock::now();
 
+    // FIXME - check other outgoing connections to see if they died and if so purge them
+
     // Check any pending outgoing connections for timeout
     for (auto it = pending_connects.begin(); it != pending_connects.end(); ) {
         auto& pc = *it;
-        if (std::get<1>(pc) < now) {
-            job([callback = std::move(std::get<3>(pc))] { callback("connection attempt timed out"); });
-            int index = std::get<0>(pc);
-            it = pending_connects.erase(it);
-            proxy_close_remote(index, false /*linger*/);
+        if (std::get<std::chrono::steady_clock::time_point>(pc) < now) {
+            job([cid = ConnectionID{std::get<long long>(pc)}, callback = std::move(std::get<ConnectFailure>(pc))] { callback(cid, "connection attempt timed out"); });
+            it = pending_connects.erase(it); // Don't let the below erase it (because it invalidates iterators)
+            proxy_close_connection(std::get<size_t>(pc), CLOSE_LINGER);
         } else {
             ++it;
         }
@@ -936,8 +988,24 @@ void LokiMQ::proxy_conn_cleanup() {
     }
 };
 
+void LokiMQ::listen_curve(std::string bind_addr, AllowFunc allow_connection) {
+    // TODO: there's no particular reason we can't start listening after starting up; just needs to
+    // be implemented.  (But if we can start we'll probably also want to be able to stop, so it's
+    // more than just binding that needs implementing).
+    check_not_started(proxy_thread, "start listening");
+
+    bind.emplace_back(std::move(bind_addr), bind_data{true, std::move(allow_connection)});
+}
+
+void LokiMQ::listen_plain(std::string bind_addr, AllowFunc allow_connection) {
+    // TODO: As above.
+    check_not_started(proxy_thread, "start listening");
+
+    bind.emplace_back(std::move(bind_addr), bind_data{false, std::move(allow_connection)});
+}
+
 void LokiMQ::proxy_loop() {
-    zmq::socket_t zap_auth{context, zmq::socket_type::rep};
+
     zap_auth.setsockopt<int>(ZMQ_LINGER, 0);
     zap_auth.bind(ZMQ_ADDR_ZAP);
 
@@ -965,38 +1033,38 @@ void LokiMQ::proxy_loop() {
     if (!workers.empty())
         throw std::logic_error("Internal error: proxy thread started with active worker threads");
 
-    add_pollitem(command);
-    add_pollitem(workers_socket);
-    add_pollitem(zap_auth);
-    assert(pollitems.size() == poll_internal_size);
+    for (size_t i = 0; i < bind.size(); i++) {
+        auto& b = bind[i].second;
+        zmq::socket_t listener{context, zmq::socket_type::router};
 
-    if (!bind.empty()) {
-        // Set up the public tcp listener(s):
-        listener = {context, zmq::socket_type::router};
-        listener.setsockopt(ZMQ_ZAP_DOMAIN, AUTH_DOMAIN_SN, sizeof(AUTH_DOMAIN_SN)-1);
-        listener.setsockopt<int>(ZMQ_CURVE_SERVER, 1);
-        listener.setsockopt(ZMQ_CURVE_PUBLICKEY, pubkey.data(), pubkey.size());
-        listener.setsockopt(ZMQ_CURVE_SECRETKEY, privkey.data(), privkey.size());
+        std::string auth_domain = bt_serialize(i);
+        listener.setsockopt(ZMQ_ZAP_DOMAIN, auth_domain.c_str(), auth_domain.size());
+        if (b.curve) {
+            listener.setsockopt<int>(ZMQ_CURVE_SERVER, 1);
+            listener.setsockopt(ZMQ_CURVE_PUBLICKEY, pubkey.data(), pubkey.size());
+            listener.setsockopt(ZMQ_CURVE_SECRETKEY, privkey.data(), privkey.size());
+        }
         listener.setsockopt(ZMQ_HANDSHAKE_IVL, (int) HANDSHAKE_TIME.count());
         listener.setsockopt<int64_t>(ZMQ_MAXMSGSIZE, MAX_MSG_SIZE);
         listener.setsockopt<int>(ZMQ_ROUTER_HANDOVER, 1);
         listener.setsockopt<int>(ZMQ_ROUTER_MANDATORY, 1);
 
-        for (const auto &b : bind) {
-            LMQ_LOG(info, "LokiMQ listening on ", b);
-            listener.bind(b);
-        }
+        listener.bind(bind[i].first);
+        LMQ_LOG(info, "LokiMQ listening on ", bind[i].first);
 
-        // Also add an internal connection to self so that calling code can avoid needing to
-        // special-case rare situations where we are supposed to talk to a quorum member that happens to
-        // be ourselves (which can happen, for example, with cross-quoum Blink communication)
-        // FIXME: not working
-        //listener.bind(SN_ADDR_SELF);
-
-        add_pollitem(listener);
+        connections.push_back(std::move(listener));
+        auto conn_id = next_conn_id++;
+        conn_index_to_id.push_back(conn_id);
+        incoming_conn_index[conn_id] = connections.size() - 1;
+        b.index = connections.size() - 1;
     }
+    pollitems_stale = true;
 
-    assert(pollitems.size() == poll_remote_offset);
+    // Also add an internal connection to self so that calling code can avoid needing to
+    // special-case rare situations where we are supposed to talk to a quorum member that happens to
+    // be ourselves (which can happen, for example, with cross-quoum Blink communication)
+    // FIXME: not working
+    //listener.bind(SN_ADDR_SELF);
 
     if (!timers)
         timers.reset(zmq_timers_new());
@@ -1016,7 +1084,7 @@ void LokiMQ::proxy_loop() {
     while (true) {
         std::chrono::milliseconds poll_timeout;
         if (max_workers == 0) { // Will be 0 only if we are quitting
-            if (std::none_of(workers.begin(), workers.end(), [](auto &w) { return w.thread.joinable(); })) {
+            if (std::none_of(workers.begin(), workers.end(), [](auto &w) { return w.worker_thread.joinable(); })) {
                 // All the workers have finished, so we can finish shutting down
                 return proxy_quit();
             }
@@ -1029,6 +1097,10 @@ void LokiMQ::proxy_loop() {
             proxy_skip_poll = false;
         else {
             LMQ_TRACE("polling for new messages");
+
+            if (pollitems_stale)
+                rebuild_pollitems();
+
             // We poll the control socket and worker socket for any incoming messages.  If we have
             // available worker room then also poll incoming connections and outgoing connections
             // for messages to forward to a worker.  Otherwise, we just look for a control message
@@ -1052,7 +1124,7 @@ void LokiMQ::proxy_loop() {
 
         // Handle any zap authentication
         LMQ_TRACE("processing zap requests");
-        process_zap_requests(zap_auth);
+        process_zap_requests();
 
         // See if we can drain anything from the current queue before we potentially add to it
         // below.
@@ -1064,7 +1136,7 @@ void LokiMQ::proxy_loop() {
         // We round-robin connections when pulling off pending messages one-by-one rather than
         // pulling off all messages from one connection before moving to the next; thus in cases of
         // contention we end up fairly distributing.
-        const int num_sockets = remotes.size() + listener.connected();
+        const int num_sockets = connections.size();
         std::queue<int> queue_index;
         for (int i = 0; i < num_sockets; i++)
             queue_index.push(i);
@@ -1072,7 +1144,7 @@ void LokiMQ::proxy_loop() {
         for (parts.clear(); !queue_index.empty() && workers.size() < max_workers; parts.clear()) {
             size_t i = queue_index.front();
             queue_index.pop();
-            auto &sock = listener.connected() ? (i == 0 ? listener : remotes[i - 1].second) : remotes[i].second;
+            auto& sock = connections[i];
 
             if (!recv_message_parts(sock, parts, zmq::recv_flags::dontwait))
                 continue;
@@ -1195,46 +1267,24 @@ void LokiMQ::proxy_worker_message(std::vector<zmq::message_t>& parts) {
             idle_workers.push_back(worker_id);
         }
     } else if (cmd == "QUITTING") {
-        workers[worker_id].thread.join();
+        workers[worker_id].worker_thread.join();
         LMQ_LOG(debug, "Worker ", route, " exited normally");
     } else {
         LMQ_LOG(error, "Worker ", route, " sent unknown control message: `", cmd, "'");
     }
 }
 
-decltype(LokiMQ::peers)::iterator LokiMQ::proxy_lookup_peer(int conn_index, zmq::message_t& msg) {
-    bool is_outgoing_conn = !listener.connected() || conn_index > 0;
-
-    std::string pubkey;
-    bool service_node = false;
-    if (!is_outgoing_conn) {
-        try {
-            extract_pubkey(msg, pubkey, service_node);
-        } catch (...) {
-            LMQ_LOG(error, "Internal error: message metadata not set or invalid; dropping message");
-            throw std::out_of_range("message pubkey metadata invalid");
-        }
-    } else {
-        pubkey = remotes[conn_index - listener.connected()].first;
-    }
-
-    auto it = peers.find(pubkey);
-    if (it == peers.end())
-        it = peers.emplace(std::move(pubkey), peer_info{}).first;
-    it->second.service_node |= service_node;
-    return it;
-}
-
 // Return true if we recognized/handled the builtin command (even if we reject it for whatever
 // reason)
-bool LokiMQ::proxy_handle_builtin(int conn_index, std::vector<zmq::message_t>& parts) {
+bool LokiMQ::proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>& parts) {
+    bool outgoing = connections[conn_index].getsockopt<int>(ZMQ_TYPE) == ZMQ_DEALER;
+
     string_view route, cmd;
-    bool is_outgoing_conn = !listener.connected() || conn_index > 0;
-    if (parts.size() < (is_outgoing_conn ? 1 : 2)) {
+    if (parts.size() < (outgoing ? 1 : 2)) {
         LMQ_LOG(warn, "Received empty message; ignoring");
         return true;
     }
-    if (is_outgoing_conn) {
+    if (outgoing) {
         cmd = view(parts[0]);
     } else {
         route = view(parts[0]);
@@ -1243,7 +1293,7 @@ bool LokiMQ::proxy_handle_builtin(int conn_index, std::vector<zmq::message_t>& p
     LMQ_TRACE("Checking for builtins: ", cmd, " from ", peer_address(parts.back()));
 
     if (cmd == "REPLY") {
-        size_t tag_pos = (is_outgoing_conn ? 1 : 2);
+        size_t tag_pos = (outgoing ? 1 : 2);
         if (parts.size() <= tag_pos) {
             LMQ_LOG(warn, "Received REPLY without a reply tag; ignoring");
             return true;
@@ -1265,41 +1315,51 @@ bool LokiMQ::proxy_handle_builtin(int conn_index, std::vector<zmq::message_t>& p
         }
         return true;
     } else if (cmd == "HI") {
-        if (is_outgoing_conn) {
+        if (outgoing) {
             LMQ_LOG(warn, "Got invalid 'HI' message on an outgoing connection; ignoring");
             return true;
         }
         LMQ_LOG(info, "Incoming client from ", peer_address(parts.back()), " sent HI, replying with HELLO");
-        send_routed_message(listener, std::string{route}, "HELLO");
+        send_routed_message(connections[conn_index], std::string{route}, "HELLO");
         return true;
     } else if (cmd == "HELLO") {
-        if (!is_outgoing_conn) {
+        if (!outgoing) {
             LMQ_LOG(warn, "Got invalid 'HELLO' message on an incoming connection; ignoring");
             return true;
         }
         auto it = std::find_if(pending_connects.begin(), pending_connects.end(),
-                [&](auto& pc) { return std::get<0>(pc) == conn_index; });
+                [&](auto& pc) { return std::get<size_t>(pc) == conn_index; });
         if (it == pending_connects.end()) {
             LMQ_LOG(warn, "Got invalid 'HELLO' message on an already handshaked incoming connection; ignoring");
             return true;
         }
+        auto& pc = *it;
+        auto pit = peers.find(std::get<long long>(pc));
+        if (pit == peers.end()) {
+            LMQ_LOG(warn, "Got invalid 'HELLO' message with invalid conn_id; ignoring");
+            return true;
+        }
+
         LMQ_LOG(info, "Got initial HELLO server response from ", peer_address(parts.back()));
-        size_t pksize = 32;
-        if (listener.connected())
-            conn_index--; // convert to `remotes` index.
-        remotes[conn_index].first.resize(pksize);
-        remotes[conn_index].second.getsockopt(ZMQ_CURVE_SERVERKEY, &remotes[conn_index].first[0], &pksize);
-        auto &peer = peers[remotes[conn_index].first];
-        peer.idle_expiry = 365 * 24h;
-        peer.outgoing = conn_index;
-        peer.service_node = false;
-        peer.activity();
-        proxy_schedule_job([on_success=std::move(std::get<2>(*it)), pk=remotes[conn_index].first] { on_success(std::move(pk)); });
+        proxy_schedule_job([on_success=std::move(std::get<ConnectSuccess>(pc)),
+                conn=conn_index_to_id[conn_index]] {
+            on_success(conn);
+        });
         pending_connects.erase(it);
         return true;
     } else if (cmd == "BYE") {
-        auto pit = proxy_lookup_peer(conn_index, parts.front());
-        proxy_close_outgoing(pit);
+        if (outgoing) {
+            std::string pk;
+            bool sn;
+            AuthLevel a;
+            std::tie(pk, sn, a) = extract_metadata(parts.back());
+            ConnectionID conn = sn ? ConnectionID{std::move(pk)} : conn_index_to_id[conn_index];
+            LMQ_LOG(info, "BYE command received; disconnecting from ", conn);
+            proxy_disconnect(conn, 1s);
+        } else {
+            LMQ_LOG(warn, "Got invalid 'BYE' command on an incoming socket; ignoring");
+        }
+
         return true;
     }
     else if (cmd == "FORBIDDEN" || cmd == "NOT_A_SERVICE_NODE") {
@@ -1315,7 +1375,7 @@ LokiMQ::run_info& LokiMQ::get_idle_worker() {
         workers.emplace_back();
         auto& r = workers.back();
         r.worker_id = id;
-        r.routing_id = "w" + std::to_string(id);
+        r.worker_routing_id = "w" + std::to_string(id);
         return r;
     }
     size_t id = idle_workers.back();
@@ -1339,8 +1399,8 @@ LokiMQ::run_info& LokiMQ::run_info::operator=(pending_command&& pending) {
     is_batch_job = false;
     cat = &pending.cat;
     command = std::move(pending.command);
-    pubkey = std::move(pending.pubkey);
-    service_node = pending.service_node;
+    conn = std::move(pending.conn);
+    conn_route = std::move(pending.conn_route);
     data_parts = std::move(pending.data_parts);
     callback = pending.callback;
     return *this;
@@ -1354,10 +1414,10 @@ LokiMQ::run_info& LokiMQ::run_info::operator=(batch_job&& bj) {
 
 
 void LokiMQ::proxy_run_worker(run_info& run) {
-    if (!run.thread.joinable())
-        run.thread = std::thread{&LokiMQ::worker_thread, this, run.worker_id};
+    if (!run.worker_thread.joinable())
+        run.worker_thread = std::thread{&LokiMQ::worker_thread, this, run.worker_id};
     else
-        send_routed_message(workers_socket, run.routing_id, "RUN");
+        send_routed_message(workers_socket, run.worker_routing_id, "RUN");
 }
 
 
@@ -1386,26 +1446,60 @@ void LokiMQ::proxy_process_queue() {
 }
 
 void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& parts) {
-    auto pit = proxy_lookup_peer(conn_index, parts.back());
-    string_view pubkey = pit->first;
-    auto& peer_info = pit->second;
+    bool outgoing = connections[conn_index].getsockopt<int>(ZMQ_TYPE) == ZMQ_DEALER;
 
-    bool is_outgoing_conn = !listener.connected() || conn_index > 0;
-    size_t command_part_index = is_outgoing_conn ? 0 : 1;
+    peer_info tmp_peer;
+    tmp_peer.conn_index = conn_index;
+    if (!outgoing) tmp_peer.route = parts[0].to_string();
+    peer_info* peer = nullptr;
+    if (outgoing) {
+        auto it = peers.find(conn_index_to_id[conn_index]);
+        if (it == peers.end()) {
+            LMQ_LOG(warn, "Internal error: connection index not found");
+            return;
+        }
+        peer = &it->second;
+    } else {
+        std::tie(tmp_peer.pubkey, tmp_peer.service_node, tmp_peer.auth_level) = extract_metadata(parts.back());
+        if (tmp_peer.service_node) {
+            // It's a service node so we should have a peer_info entry; see if we can find one with
+            // the same route, and if not, add one.
+            auto pr = peers.equal_range(tmp_peer.pubkey);
+            for (auto it = pr.first; it != pr.second; ++it) {
+                if (it->second.route == tmp_peer.route) {
+                    peer = &it->second;
+                    // Upgrade permissions in case we have something higher on the socket
+                    peer->service_node |= tmp_peer.service_node;
+                    if (tmp_peer.auth_level > peer->auth_level)
+                        peer->auth_level = tmp_peer.auth_level;
+                    break;
+                }
+            }
+            if (!peer) {
+                peer = &peers.emplace(ConnectionID{tmp_peer.pubkey}, std::move(tmp_peer))->second;
+            }
+        } else {
+            // Incoming, non-SN connection: we don't store a peer_info for this, so just use the
+            // temporary one
+            peer = &tmp_peer;
+        }
+    }
+
+    size_t command_part_index = outgoing ? 0 : 1;
     std::string command = parts[command_part_index].to_string();
     auto cat_call = get_command(command);
 
     if (!cat_call.first) {
-        if (is_outgoing_conn)
-            send_direct_message(remotes[conn_index - listener.connected()].second, "UNKNOWNCOMMAND", command);
+        if (outgoing)
+            send_direct_message(connections[conn_index], "UNKNOWNCOMMAND", command);
         else
-            send_routed_message(listener, std::string{pubkey}, "UNKNOWNCOMMAND", command);
+            send_routed_message(connections[conn_index], peer->route, "UNKNOWNCOMMAND", command);
         return;
     }
 
     auto& category = *cat_call.first;
 
-    if (!proxy_check_auth(pubkey, conn_index, peer_info, command, category, parts.back()))
+    if (!proxy_check_auth(conn_index, outgoing, *peer, command, category, parts.back()))
         return;
 
     // Steal any data message parts
@@ -1424,7 +1518,8 @@ void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
         }
 
         LMQ_LOG(debug, "No available free workers, queuing ", command, " for later");
-        pending_commands.emplace_back(category, std::move(command), std::move(data_parts), cat_call.second, std::string{pubkey}, peer_info.service_node);
+        ConnectionID conn{peer->service_node ? ConnectionID::SN_ID : conn_index_to_id[conn_index].id, peer->pubkey};
+        pending_commands.emplace_back(category, std::move(command), std::move(data_parts), cat_call.second, std::move(conn), tmp_peer.route);
         category.queued++;
         return;
     }
@@ -1438,65 +1533,68 @@ void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
     run.is_batch_job = false;
     run.cat = &category;
     run.command = std::move(command);
-    run.pubkey = std::string{pubkey};
-    run.service_node = peer_info.service_node;
+    run.conn.pk = peer->pubkey;
+    if (peer->service_node) {
+        run.conn.id = ConnectionID::SN_ID;
+        run.conn_route.clear();
+    } else {
+        run.conn.id = conn_index_to_id[conn_index].id;
+        if (outgoing)
+            run.conn_route.clear();
+        else
+            run.conn_route = tmp_peer.route;
+    }
+
     run.data_parts = std::move(data_parts);
     run.callback = cat_call.second;
 
-    if (is_outgoing_conn) {
-        peer_info.activity(); // outgoing connection activity, pump the activity timer
-    } else {
-        // incoming connection; the route is the first argument.  Update the peer route info in case
-        // it has changed (e.g. new connection).
-        auto route = view(parts[0]);
-        if (string_view(peer_info.incoming) != route)
-            peer_info.incoming = std::string{route};
-    }
+    if (outgoing)
+        peer->activity(); // outgoing connection activity, pump the activity timer
 
-    LMQ_TRACE("Forwarding incoming ", run.command, " from ", run.service_node ? "SN " : "non-SN ",
-            to_hex(run.pubkey), " @ ", peer_address(parts.back()), " to worker ", run.routing_id);
+    LMQ_TRACE("Forwarding incoming ", run.command, " from ", run.conn, " @ ", peer_address(parts.back()),
+            " to worker ", run.worker_routing_id);
 
     proxy_run_worker(run);
     category.active_threads++;
 }
 
-bool LokiMQ::proxy_check_auth(string_view pubkey, size_t conn_index, const peer_info& peer, const std::string& command, const category& cat, zmq::message_t& msg) {
-    bool is_outgoing_conn = !listener.connected() || conn_index > 0;
+bool LokiMQ::proxy_check_auth(size_t conn_index, bool outgoing, const peer_info& peer,
+        const std::string& command, const category& cat, zmq::message_t& msg) {
     std::string reply;
     if (peer.auth_level < cat.access.auth) {
-        LMQ_LOG(warn, "Access denied to ", command, " for peer ", to_hex(pubkey), " @ ", peer_address(msg),
+        LMQ_LOG(warn, "Access denied to ", command, " for peer [", to_hex(peer.pubkey), "]/", peer_address(msg),
                 ": peer auth level ", to_string(peer.auth_level), " < ", to_string(cat.access.auth));
         reply = "FORBIDDEN";
     }
     else if (cat.access.local_sn && !local_service_node) {
-        LMQ_LOG(warn, "Access denied to ", command, " for peer ", to_hex(pubkey), " @ ", peer_address(msg),
+        LMQ_LOG(warn, "Access denied to ", command, " for peer [", to_hex(peer.pubkey), "]/", peer_address(msg),
                 ": that command is only available when this LokiMQ is running in service node mode");
         reply = "NOT_A_SERVICE_NODE";
     }
     else if (cat.access.remote_sn && !peer.service_node) {
-        LMQ_LOG(warn, "Access denied to ", command, " for peer ", to_hex(pubkey), " @ ", peer_address(msg),
+        LMQ_LOG(warn, "Access denied to ", command, " for peer [", to_hex(peer.pubkey), "]/", peer_address(msg),
                 ": remote is not recognized as a service node");
         // Disconnect: we don't think the remote is a SN, but it issued a command only SNs should be
         // issuing.  Drop the connection; if the remote has something important to relay it will
         // reconnect, at which point we will reassess the SN status on the new incoming connection.
-        if (!is_outgoing_conn)
-            send_routed_message(listener, std::string{pubkey}, "BYE");
+        if (outgoing)
+            proxy_disconnect(peer.service_node ? ConnectionID{peer.pubkey} : conn_index_to_id[conn_index], 1s);
         else
-            proxy_disconnect(std::string{pubkey});
+            send_routed_message(connections[conn_index], peer.route, "BYE");
         return false;
     }
 
     if (reply.empty())
         return true;
 
-    if (is_outgoing_conn)
-        send_direct_message(remotes[conn_index - listener.connected()].second, std::move(reply), command);
+    if (outgoing)
+        send_direct_message(connections[conn_index], std::move(reply), command);
     else
-        send_routed_message(listener, std::string{pubkey}, std::move(reply), command);
-    return true;
+        send_routed_message(connections[conn_index], peer.route, std::move(reply), command);
+    return false;
 }
 
-void LokiMQ::process_zap_requests(zmq::socket_t &zap_auth) {
+void LokiMQ::process_zap_requests() {
     for (std::vector<zmq::message_t> frames; recv_message_parts(zap_auth, frames, zmq::recv_flags::dontwait); frames.clear()) {
 #ifndef NDEBUG
         if (log_level() >= LogLevel::trace) {
@@ -1549,50 +1647,60 @@ void LokiMQ::process_zap_requests(zmq::socket_t &zap_auth) {
             LMQ_LOG(error, "Bad ZAP authentication request: version != 1.0 or invalid ZAP message parts");
             status_code = "500";
             status_text = "Internal error: invalid auth request";
-        }
-        else if (frames.size() != 7 || view(frames[5]) != "CURVE") {
-            LMQ_LOG(error, "Bad ZAP authentication request: invalid CURVE authentication request");
-            status_code = "500";
-            status_text = "Invalid CURVE authentication request\n";
-        }
-        else if (frames[6].size() != 32) {
-            LMQ_LOG(error, "Bad ZAP authentication request: invalid request pubkey");
-            status_code = "500";
-            status_text = "Invalid public key size for CURVE authentication";
-        }
-        else {
-            auto domain = view(frames[2]);
-            if (domain != AUTH_DOMAIN_SN) {
-                LMQ_LOG(error, "Bad ZAP authentication request: invalid auth domain '", domain, "'");
+        } else {
+            auto auth_domain = view(frames[2]);
+            size_t bind_id = (size_t) -1;
+            try {
+                bind_id = bt_deserialize<size_t>(view(frames[2]));
+            } catch (...) {}
+
+            if (bind_id >= bind.size()) {
+                LMQ_LOG(error, "Bad ZAP authentication request: invalid auth domain '", auth_domain, "'");
                 status_code = "400";
-                status_text = "Unknown authentication domain: " + std::string{domain};
+                status_text = "Unknown authentication domain: " + std::string{auth_domain};
+            } else if (bind[bind_id].second.curve
+                    ? !(frames.size() == 7 && view(frames[5]) == "CURVE")
+                    : !(frames.size() == 6 && view(frames[5]) == "NULL")) {
+                LMQ_LOG(error, "Bad ZAP authentication request: invalid ",
+                        bind[bind_id].second.curve ? "CURVE" : "NULL", " authentication request");
+                status_code = "500";
+                status_text = "Invalid authentication request mechanism";
+            } else if (bind[bind_id].second.curve && frames[6].size() != 32) {
+                LMQ_LOG(error, "Bad ZAP authentication request: invalid request pubkey");
+                status_code = "500";
+                status_text = "Invalid public key size for CURVE authentication";
             } else {
-                auto ip = string(frames[3]), pubkey = string(frames[6]);
-                auto result = allow_connection(ip, pubkey);
+                auto ip = view(frames[3]);
+                string_view pubkey;
+                if (bind[bind_id].second.curve)
+                    pubkey = view(frames[6]);
+                auto result = bind[bind_id].second.allow(ip, pubkey);
                 bool sn = result.remote_sn;
                 auto& user_id = response_vals[4];
-                user_id.reserve(64);
-                to_hex(pubkey.begin(), pubkey.end(), std::back_inserter(user_id));
+                if (bind[bind_id].second.curve) {
+                    user_id.reserve(64);
+                    to_hex(pubkey.begin(), pubkey.end(), std::back_inserter(user_id));
+                }
 
                 if (result.auth <= AuthLevel::denied || result.auth > AuthLevel::admin) {
-                    LMQ_LOG(info, "Access denied for incoming ", (sn ? "service node" : "non-SN client"),
-                            " connection from ", user_id, " at ", ip, " with initial auth level ", to_string(result.auth));
+                    LMQ_LOG(info, "Access denied for incoming ", view(frames[5]), (sn ? " service node" : " client"),
+                            " connection from ", !user_id.empty() ? user_id + " at " : ""s, ip,
+                            " with initial auth level ", to_string(result.auth));
                     status_code = "400";
                     status_text = "Access denied";
                     user_id.clear();
-                }
-                LMQ_LOG(info, "Accepted incoming ", (sn ? "service node" : "non-SN client"),
-                        " connection with authentication level ", to_string(result.auth),
-                        " from ", user_id, " at ", ip);
+                } else {
+                    LMQ_LOG(info, "Accepted incoming ", view(frames[5]), (sn ? " service node" : " client"),
+                            " connection with authentication level ", to_string(result.auth),
+                            " from ", !user_id.empty() ? user_id + " at " : ""s, ip);
 
-                auto& metadata = response_vals[5];
-                if (result.remote_sn)
-                    metadata += zmtp_metadata("X-SN", "1");
-                if (result.auth != AuthLevel::none)
+                    auto& metadata = response_vals[5];
+                    metadata += zmtp_metadata("X-SN", result.remote_sn ? "1" : "0");
                     metadata += zmtp_metadata("X-AuthLevel", to_string(result.auth));
 
-                status_code = "200";
-                status_text = "";
+                    status_code = "200";
+                    status_text = "";
+                }
             }
         }
 
@@ -1612,34 +1720,51 @@ LokiMQ::~LokiMQ() {
     LMQ_LOG(info, "LokiMQ proxy thread has stopped");
 }
 
-void LokiMQ::connect_sn(string_view pubkey, std::chrono::milliseconds keep_alive, string_view hint) {
+ConnectionID LokiMQ::connect_sn(string_view pubkey, std::chrono::milliseconds keep_alive, string_view hint) {
     check_started(proxy_thread, "connect");
 
     detail::send_control(get_control_socket(), "CONNECT_SN", bt_serialize<bt_dict>({{"pubkey",pubkey}, {"keep-alive",keep_alive.count()}, {"hint",hint}}));
+
+    return pubkey;
 }
 
-void LokiMQ::connect_remote(string_view remote, ConnectSuccess on_connect, ConnectFailure on_failure,
-        string_view pubkey, std::chrono::milliseconds timeout) {
+ConnectionID LokiMQ::connect_remote(string_view remote, ConnectSuccess on_connect, ConnectFailure on_failure,
+        string_view pubkey, AuthLevel auth_level, std::chrono::milliseconds timeout) {
     if (!proxy_thread.joinable())
         LMQ_LOG(warn, "connect_remote() called before start(); this won't take effect until start() is called");
 
-    LMQ_TRACE("telling proxy to connect to ", remote, ", expecting pubkey [", to_hex(pubkey), "]");
+    if (remote.size() < 7 || !(remote.substr(0, 6) == "tcp://" || remote.substr(0, 6) == "ipc://" /* unix domain sockets */))
+        throw std::runtime_error("Invalid connect_remote: remote address '" + std::string{remote} + "' is not a valid or supported zmq connect string");
+
+    auto id = next_conn_id++;
+    LMQ_TRACE("telling proxy to connect to ", remote, ", id ", id,
+            pubkey.empty() ? "using NULL auth" : ", using CURVE with remote pubkey [" + to_hex(pubkey) + "]");
     detail::send_control(get_control_socket(), "CONNECT_REMOTE", bt_serialize<bt_dict>({
-        {"remote", remote},
-        {"pubkey", pubkey},
-        {"timeout", timeout.count()},
+        {"auth", static_cast<std::underlying_type_t<AuthLevel>>(auth_level)},
+        {"conn_id", id},
         {"connect", reinterpret_cast<uintptr_t>(new ConnectSuccess{std::move(on_connect)})},
         {"failure", reinterpret_cast<uintptr_t>(new ConnectFailure{std::move(on_failure)})},
+        {"pubkey", pubkey},
+        {"remote", remote},
+        {"timeout", timeout.count()},
     }));
+
+    return id;
 }
 
 void LokiMQ::proxy_connect_remote(bt_dict_consumer data) {
+    AuthLevel auth_level = AuthLevel::none;
+    long long conn_id = -1;
     ConnectSuccess on_connect;
     ConnectFailure on_failure;
     std::string remote;
     std::string remote_pubkey;
     std::chrono::milliseconds timeout = REMOTE_CONNECT_TIMEOUT;
 
+    if (data.skip_until("auth_level"))
+        auth_level = static_cast<AuthLevel>(data.consume_integer<std::underlying_type_t<AuthLevel>>());
+    if (data.skip_until("conn_id"))
+        conn_id = data.consume_integer<long long>();
     if (data.skip_until("connect")) {
         auto* ptr = reinterpret_cast<ConnectSuccess*>(data.consume_integer<uintptr_t>());
         on_connect = std::move(*ptr);
@@ -1654,38 +1779,85 @@ void LokiMQ::proxy_connect_remote(bt_dict_consumer data) {
         remote_pubkey = data.consume_string();
         assert(remote_pubkey.size() == 32 || remote_pubkey.empty());
     }
-    if (data.skip_until("remote")) {
+    if (data.skip_until("remote"))
         remote = data.consume_string();
-    }
     if (data.skip_until("timeout"))
         timeout = std::chrono::milliseconds{data.consume_integer<uint64_t>()};
 
-    if (remote.empty())
-        throw std::runtime_error("Internal error: CONNECT_REMOTE proxy command missing required 'remote' value");
+    if (conn_id == -1 || remote.empty())
+        throw std::runtime_error("Internal error: CONNECT_REMOTE proxy command missing required 'conn_id' and/or 'remote' value");
 
-    LMQ_LOG(info, "Establishing remote connection to ", remote, remote_pubkey.empty() ? " (any pubkey)" : " expecting pubkey " + to_hex(remote_pubkey));
+    LMQ_LOG(info, "Establishing remote connection to ", remote, remote_pubkey.empty() ? " (NULL auth)" : " via CURVE expecting pubkey " + to_hex(remote_pubkey));
+
+    assert(conn_index_to_id.size() == connections.size());
 
     zmq::socket_t sock{context, zmq::socket_type::dealer};
     try {
         setup_outgoing_socket(sock, remote_pubkey);
         sock.connect(remote);
     } catch (const zmq::error_t &e) {
-        proxy_schedule_job([on_failure=std::move(on_failure), what="connect() failed: "s+e.what()] { on_failure(std::move(what)); });
+        proxy_schedule_job([conn_id, on_failure=std::move(on_failure), what="connect() failed: "s+e.what()] {
+                on_failure(conn_id, std::move(what));
+        });
         return;
     }
 
-    LMQ_LOG(debug, "Opened new zmq socket to ", remote, ", sending HI");
-    send_direct_message(sock, "HI");
-    add_pollitem(sock);
-    remotes.emplace_back("", std::move(sock));
-    pending_connects.emplace_back(remotes.size()-1, std::chrono::steady_clock::now() + timeout,
+    connections.push_back(std::move(sock));
+    LMQ_LOG(debug, "Opened new zmq socket to ", remote, ", conn_id ", conn_id, "; sending HI");
+    send_direct_message(connections.back(), "HI");
+    pending_connects.emplace_back(connections.size()-1, conn_id, std::chrono::steady_clock::now() + timeout,
             std::move(on_connect), std::move(on_failure));
+    peer_info peer;
+    peer.pubkey = std::move(remote_pubkey);
+    peer.service_node = false;
+    peer.auth_level = auth_level;
+    peer.conn_index = connections.size() - 1;
+    ConnectionID conn{conn_id, peer.pubkey};
+    conn_index_to_id.push_back(conn);
+    assert(connections.size() == conn_index_to_id.size());
+    peer.idle_expiry = 24h * 10 * 365; // "forever"
+    peer.activity();
+    peers.emplace(std::move(conn), std::move(peer));
 }
 
-void LokiMQ::disconnect_remote(string_view id, std::chrono::milliseconds linger) {
-    (void)id, (void)linger;
+void LokiMQ::disconnect(ConnectionID id, std::chrono::milliseconds linger) {
+    detail::send_control(get_control_socket(), "DISCONNECT", bt_serialize<bt_dict>({
+            {"conn_id", id.id},
+            {"linger_ms", linger.count()},
+            {"pubkey", id.pk},
+    }));
 }
 
+void LokiMQ::proxy_disconnect(bt_dict_consumer data) {
+    ConnectionID connid{-1};
+    std::chrono::milliseconds linger = 1s;
+
+    if (data.skip_until("conn_id"))
+        connid.id = data.consume_integer<long long>();
+    if (data.skip_until("linger_ms"))
+        linger = std::chrono::milliseconds(data.consume_integer<long long>());
+    if (data.skip_until("pubkey"))
+        connid.pk = data.consume_string();
+
+    if (connid.sn() && connid.pk.size() != 32)
+        throw std::runtime_error("Error: invalid disconnect of SN without a valid pubkey");
+
+    proxy_disconnect(std::move(connid), linger);
+}
+void LokiMQ::proxy_disconnect(ConnectionID conn, std::chrono::milliseconds linger) {
+    LMQ_TRACE("Disconnecting outgoing connection to ", conn);
+    auto pr = peers.equal_range(conn);
+    for (auto it = pr.first; it != pr.second; ++it) {
+        auto& peer = it->second;
+        if (peer.outgoing()) {
+            LMQ_LOG(info, "Closing outgoing connection to ", conn);
+            proxy_close_connection(peer.conn_index, linger);
+            peers.erase(it);
+            return;
+        }
+    }
+    LMQ_LOG(warn, "Failed to disconnect ", conn, ": no such outgoing connection");
+}
 
 void LokiMQ::job(std::function<void()> f) {
     auto* b = new Batch<void>;

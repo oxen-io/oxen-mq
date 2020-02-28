@@ -44,9 +44,7 @@ TEST_CASE("batching many small jobs", "[batch-many]") {
     lokimq::LokiMQ lmq{
         "", "", // generate ephemeral keys
         false, // not a service node
-        {}, // don't listen
         [](auto) { return ""; },
-        [](auto ip, auto pk) { return lokimq::Allow{lokimq::AuthLevel::none, false}; },
     };
     lmq.set_general_threads(4);
     lmq.set_batch_threads(4);
@@ -62,9 +60,7 @@ TEST_CASE("batch exception propagation", "[batch-exceptions]") {
     lokimq::LokiMQ lmq{
         "", "", // generate ephemeral keys
         false, // not a service node
-        {}, // don't listen
         [](auto) { return ""; },
-        [](auto ip, auto pk) { return lokimq::Allow{lokimq::AuthLevel::none, false}; },
     };
     lmq.set_general_threads(4);
     lmq.set_batch_threads(4);

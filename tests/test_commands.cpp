@@ -1,5 +1,6 @@
 #include "common.h"
 #include <future>
+#include <lokimq/hex.h>
 
 using namespace lokimq;
 
@@ -8,12 +9,11 @@ TEST_CASE("basic commands", "[commands]") {
     LokiMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
-        {listen},
-        [](auto &) { return ""; },
-        [](auto /*ip*/, auto /*pk*/) { return Allow{AuthLevel::none, false}; },
+        [](auto) { return ""; },
         get_logger("S» ")
     };
     server.log_level(LogLevel::trace);
+    server.listen_curve(listen, [](auto /*ip*/, auto /*pk*/) { return Allow{AuthLevel::none, false}; });
 
     std::atomic<int> hellos{0}, his{0};
 
@@ -25,7 +25,7 @@ TEST_CASE("basic commands", "[commands]") {
     });
     std::string client_pubkey;
     server.add_command("public", "client.pubkey", [&](Message& m) {
-            client_pubkey = std::string{m.pubkey};
+            client_pubkey = std::string{m.conn.pubkey()};
     });
 
     server.start();
@@ -42,9 +42,9 @@ TEST_CASE("basic commands", "[commands]") {
     std::atomic<bool> connected{false}, failed{false};
     std::string pubkey;
 
-    client.connect_remote(listen,
-            [&](std::string pk) { pubkey = std::move(pk); connected = true; },
-            [&](string_view) { failed = true; },
+    auto c = client.connect_remote(listen,
+            [&](auto conn) { pubkey = conn.pubkey(); connected = true; },
+            [&](auto conn, string_view) { failed = true; },
             server.get_pubkey());
 
     int i;
@@ -56,18 +56,18 @@ TEST_CASE("basic commands", "[commands]") {
     REQUIRE( connected.load() );
     REQUIRE( i <= 1 ); // should be fast
     REQUIRE( !failed.load() );
-    REQUIRE( pubkey == server.get_pubkey() );
+    REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
 
-    client.send(pubkey, "public.hello");
-    client.send(pubkey, "public.client.pubkey");
+    client.send(c, "public.hello");
+    client.send(c, "public.client.pubkey");
 
     std::this_thread::sleep_for(50ms);
     REQUIRE( hellos == 1 );
     REQUIRE( his == 1 );
-    REQUIRE( client_pubkey == client.get_pubkey() );
+    REQUIRE( to_hex(client_pubkey) == to_hex(client.get_pubkey()) );
 
     for (int i = 0; i < 50; i++)
-        client.send(pubkey, "public.hello");
+        client.send(c, "public.hello");
 
     std::this_thread::sleep_for(100ms);
     REQUIRE( hellos == 51 );
