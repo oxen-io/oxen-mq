@@ -459,23 +459,23 @@ private:
     std::vector<unsigned int> idle_workers;
 
     /// Maximum number of general task workers, specified by g`/during construction
-    unsigned int general_workers = std::thread::hardware_concurrency();
+    int general_workers = std::max<int>(1, std::thread::hardware_concurrency());
 
     /// Maximum number of possible worker threads we can have.  This is calculated when starting,
     /// and equals general_workers plus the sum of all categories' reserved threads counts plus the
     /// reserved batch workers count.  This is also used to signal a shutdown; we set it to 0 when
     /// quitting.
-    unsigned int max_workers;
+    int max_workers;
 
     /// Number of active workers
-    unsigned int active_workers() const { return workers.size() - idle_workers.size(); }
+    int active_workers() const { return workers.size() - idle_workers.size(); }
 
     /// Worker thread loop
     void worker_thread(unsigned int index);
 
     /// If set, skip polling for one proxy loop iteration (set when we know we have something
     /// processible without having to shove it onto a socket, such as scheduling an internal job).
-    bool proxy_skip_poll = false;
+    bool proxy_skip_one_poll = false;
 
     /// Does the proxying work
     void proxy_loop();
@@ -486,7 +486,7 @@ private:
 
     void proxy_process_queue();
 
-    Batch<void>* proxy_schedule_job(std::function<void()> f);
+    void proxy_schedule_reply_job(std::function<void()> f);
 
     /// Looks up a peers element given a connect index (for outgoing connections where we already
     /// knew the pubkey and SN status) or an incoming zmq message (which has the pubkey and sn
@@ -567,13 +567,17 @@ private:
     /// weaker (i.e. it cannot reconnect to the SN if the connection is no longer open).
     void proxy_reply(bt_dict_consumer data);
 
-    /// Currently active batches.
+    /// Currently active batch/reply jobs; this is the container that owns the Batch instances
     std::unordered_set<detail::Batch*> batches;
     /// Individual batch jobs waiting to run
     using batch_job = std::pair<detail::Batch*, int>;
-    std::queue<batch_job> batch_jobs;
-    unsigned int batch_jobs_active = 0;
-    unsigned int batch_jobs_reserved = std::max((std::thread::hardware_concurrency() + 1) / 2, 1u);
+    std::queue<batch_job> batch_jobs, reply_jobs;
+    int batch_jobs_active = 0;
+    int reply_jobs_active = 0;
+    int batch_jobs_reserved = -1;
+    int reply_jobs_reserved = -1;
+    /// Runs any queued batch jobs
+    void proxy_run_batch_jobs(std::queue<batch_job>& jobs, int reserved, int& active, bool reply);
 
     /// BATCH command.  Called with a Batch<R> (see lokimq/batch.h) object pointer for the proxy to
     /// take over and queue batch jobs.
@@ -662,6 +666,7 @@ private:
     /// transient data we are passing into the thread.
     struct run_info {
         bool is_batch_job = false;
+        bool is_reply_job = false;
 
         // If is_batch_job is false then these will be set appropriate (if is_batch_job is true then
         // these shouldn't be accessed and likely contain stale data).
@@ -684,10 +689,14 @@ private:
         size_t worker_id; // The index in `workers`
         std::string worker_routing_id; // "w123" where 123 == worker_id
 
-        /// Loads the run info with a pending command
-        run_info& operator=(pending_command&& pending);
+        /// Loads the run info with an incoming command
+        run_info& load(category* cat, std::string command, ConnectionID conn, std::string route,
+                std::vector<zmq::message_t> data_parts, const std::pair<CommandCallback, bool>* callback);
+
+        /// Loads the run info with a stored pending command
+        run_info& load(pending_command&& pending);
         /// Loads the run info with a batch job
-        run_info& operator=(batch_job&& bj);
+        run_info& load(batch_job&& bj, bool reply_job = false);
     };
     /// Data passed to workers for the RUN command.  The proxy thread sets elements in this before
     /// sending RUN to a worker then the worker uses it to get call info, and only allocates it
@@ -825,17 +834,28 @@ public:
     void add_command_alias(std::string from, std::string to);
 
     /**
-     * Sets the number of worker threads reserved for batch jobs.  If not called this defaults to
-     * half the number of hardware threads available (rounded up).  This works exactly like
-     * reserved_threads for a category, but allows to batch jobs.  See category for details.
+     * Sets the number of worker threads reserved for batch jobs.  If not explicitly called then
+     * this defaults to half the general worker threads configured (rounded up).  This works exactly
+     * like reserved_threads for a category, but allows to batch jobs.  See category for details.
      *
      * Note that some internal jobs are counted as batch jobs: in particular timers added via
-     * add_timer() and replies received in response to request commands currently each take a batch
-     * job slot when invoked.
+     * add_timer() are scheduled as batch jobs.
      *
      * Cannot be called after start()ing the LokiMQ instance.
      */
-    void set_batch_threads(unsigned int threads);
+    void set_batch_threads(int threads);
+
+    /**
+     * Sets the number of worker threads reserved for handling replies from servers; this is
+     * mostly for responses to `request()` calls, but also gets used for other network-related
+     * events such as the ConnectSuccess/ConnectFailure callbacks for establishing remote non-SN
+     * connections.
+     *
+     * Defaults to one-eighth of the number of configured general threads, rounded up.
+     *
+     * Cannot be changed after start()ing the LokiMQ instance.
+     */
+    void set_reply_threads(int threads);
 
     /**
      * Sets the number of general worker threads.  This is the target number of threads to run that
@@ -844,9 +864,13 @@ public:
      * reserved threads can create threads in addition to the amount specified here if necessary to
      * fulfill the reserved threads count for the category.
      *
+     * Adjusting this also adjusts the default values of batch and reply threads, above.
+     *
+     * Defaults to `std::thread::hardware_concurrency()`.
+     *
      * Cannot be called after start()ing the LokiMQ instance.
      */
-    void set_general_threads(unsigned int threads);
+    void set_general_threads(int threads);
 
     /**
      * Finish starting up: binds to the bind locations given in the constructor and launches the
