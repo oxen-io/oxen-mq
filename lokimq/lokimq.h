@@ -102,8 +102,14 @@ struct ConnectionID {
     ConnectionID& operator=(const ConnectionID&) = default;
     ConnectionID& operator=(ConnectionID&&) = default;
 
+    // Returns true if this is a ConnectionID (false for a default-constructed, invalid id)
+    explicit operator bool() const {
+        return id != 0;
+    }
+
     // Two ConnectionIDs are equal if they are both SNs and have matching pubkeys, or they are both
-    // not SNs and have matching internal IDs.  (Pubkeys do not have to match for non-SNs).
+    // not SNs and have matching internal IDs.  (Pubkeys do not have to match for non-SNs, and
+    // routes are not considered for equality at all).
     bool operator==(const ConnectionID &o) const {
         if (id == SN_ID && o.id == SN_ID)
             return pk == o.pk;
@@ -127,14 +133,17 @@ struct ConnectionID {
     ConnectionID() : ConnectionID(0) {}
 private:
     ConnectionID(long long id) : id{id} {}
-    ConnectionID(long long id, std::string pubkey) : id{id}, pk{std::move(pubkey)} {}
+    ConnectionID(long long id, std::string pubkey, std::string route = "")
+        : id{id}, pk{std::move(pubkey)}, route{std::move(route)} {}
 
     constexpr static long long SN_ID = -1;
     long long id = 0;
     std::string pk;
+    std::string route;
     friend class LokiMQ;
     friend class std::hash<ConnectionID>;
-
+    template <typename... T>
+    friend bt_dict build_send(ConnectionID to, string_view cmd, const T&... opts);
     friend std::ostream& operator<<(std::ostream& o, const ConnectionID& conn);
 };
 
@@ -158,7 +167,6 @@ public:
     LokiMQ& lokimq; ///< The owning LokiMQ object
     std::vector<string_view> data; ///< The provided command data parts, if any.
     ConnectionID conn; ///< The connection info for routing a reply; also contains the pubkey/sn status.
-    std::string route; ///< The return route for a reply (if the message was on an incoming conn)
     std::string reply_tag; ///< If the invoked command is a request command this is the required reply tag that will be prepended by `send_reply()`.
 
     /// Constructor
@@ -650,12 +658,11 @@ private:
         std::vector<zmq::message_t> data_parts;
         const std::pair<CommandCallback, bool>* callback;
         ConnectionID conn;
-        std::string conn_route;
 
         pending_command(category& cat, std::string command, std::vector<zmq::message_t> data_parts,
-                const std::pair<CommandCallback, bool>* callback, ConnectionID conn, std::string conn_route)
+                const std::pair<CommandCallback, bool>* callback, ConnectionID conn)
             : cat{cat}, command{std::move(command)}, data_parts{std::move(data_parts)},
-            callback{callback}, conn{std::move(conn)}, conn_route{std::move(conn_route)} {}
+            callback{callback}, conn{std::move(conn)} {}
     };
     std::list<pending_command> pending_commands;
 
@@ -692,7 +699,7 @@ private:
         std::string worker_routing_id; // "w123" where 123 == worker_id
 
         /// Loads the run info with an incoming command
-        run_info& load(category* cat, std::string command, ConnectionID conn, std::string route,
+        run_info& load(category* cat, std::string command, ConnectionID conn,
                 std::vector<zmq::message_t> data_parts, const std::pair<CommandCallback, bool>* callback);
 
         /// Loads the run info with a stored pending command
@@ -1115,14 +1122,6 @@ struct keep_alive {
     explicit keep_alive(std::chrono::milliseconds time) : time{std::move(time)} {}
 };
 
-/// Specifies a routing prefix to be used.  This option is required (and added automatically by
-/// Message::send and ::reply) when a message is being sent to a non-SN connection on a listening
-/// socket, and has no effect otherwise.
-struct route {
-    std::string routing_prefix;
-    explicit route(std::string r) : routing_prefix{std::move(r)} {}
-};
-
 }
 
 namespace detail {
@@ -1163,18 +1162,12 @@ inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option
     control_data["keep-alive"] = timeout.time.count();
 }
 
-/// `route` specialization: adds a routing prefix to be used when sending a non-SN message on an
-/// incoming socket.
-inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::route& route) {
-    control_data["conn_route"] = route.routing_prefix;
-}
-
 } // namespace detail
 
 template <typename... T>
-void LokiMQ::send(ConnectionID to, string_view cmd, const T &...opts) {
+bt_dict build_send(ConnectionID to, string_view cmd, const T&... opts) {
     bt_dict control_data;
-    bt_list parts{{std::move(cmd)}};
+    bt_list parts{{cmd}};
 #ifdef __cpp_fold_expressions
     (detail::apply_send_option(parts, control_data, opts),...);
 #else
@@ -1182,56 +1175,52 @@ void LokiMQ::send(ConnectionID to, string_view cmd, const T &...opts) {
 #endif
 
     if (to.sn())
-        control_data["pubkey"] = std::move(to.pk);
-    else
+        control_data["conn_pubkey"] = std::move(to.pk);
+    else {
         control_data["conn_id"] = to.id;
+        control_data["conn_route"] = std::move(to.route);
+    }
     control_data["send"] = std::move(parts);
-    detail::send_control(get_control_socket(), "SEND", bt_serialize(control_data));
+    return control_data;
+
+}
+
+template <typename... T>
+void LokiMQ::send(ConnectionID to, string_view cmd, const T&... opts) {
+    detail::send_control(get_control_socket(), "SEND",
+            bt_serialize(build_send(std::move(to), cmd, opts...)));
 }
 
 std::string make_random_string(size_t size);
 
 template <typename... T>
 void LokiMQ::request(ConnectionID to, string_view cmd, ReplyCallback callback, const T &...opts) {
-    auto reply_tag = make_random_string(15); // 15 random bytes is lots and should keep us in most stl implementations' small string optimization
-    bt_dict control_data;
-    bt_list parts{{std::move(cmd), reply_tag}};
-#ifdef __cpp_fold_expressions
-    (detail::apply_send_option(parts, control_data, opts),...);
-#else
-    (void) std::initializer_list<int>{(detail::apply_send_option(parts, control_data, opts), 0)...};
-#endif
-
-    if (to.sn())
-        control_data["pubkey"] = std::move(to.pk);
-    else
-        control_data["conn_id"] = to.id;
-
-    control_data["send"] = std::move(parts);
+    const auto reply_tag = make_random_string(15); // 15 random bytes is lots and should keep us in most stl implementations' small string optimization
+    bt_dict control_data = build_send(std::move(to), cmd, reply_tag, opts...);
     control_data["request"] = true;
     control_data["request_callback"] = reinterpret_cast<uintptr_t>(new ReplyCallback{std::move(callback)});
-    control_data["request_tag"] = std::move(reply_tag);
-    detail::send_control(get_control_socket(), "SEND", bt_serialize(control_data));
+    control_data["request_tag"] = string_view{reply_tag};
+    detail::send_control(get_control_socket(), "SEND", bt_serialize(std::move(control_data)));
 }
 
 template <typename... Args>
 void Message::send_back(string_view command, Args&&... args) {
     if (conn.sn()) lokimq.send(conn, command, std::forward<Args>(args)...);
-    else lokimq.send(conn, command, send_option::route{route}, send_option::optional{}, std::forward<Args>(args)...);
+    else lokimq.send(conn, command, send_option::optional{}, std::forward<Args>(args)...);
 }
 
 template <typename... Args>
 void Message::send_reply(Args&&... args) {
     assert(!reply_tag.empty());
     if (conn.sn()) lokimq.send(conn, "REPLY", reply_tag, std::forward<Args>(args)...);
-    else lokimq.send(conn, "REPLY", reply_tag, send_option::route{route}, send_option::optional{}, std::forward<Args>(args)...);
+    else lokimq.send(conn, "REPLY", reply_tag, send_option::optional{}, std::forward<Args>(args)...);
 }
 
 template <typename ReplyCallback, typename... Args>
 void Message::send_request(string_view cmd, ReplyCallback&& callback, Args&&... args) {
     if (conn.sn()) lokimq.request(conn, cmd, std::forward<ReplyCallback>(callback), std::forward<Args>(args)...);
     else lokimq.request(conn, cmd, std::forward<ReplyCallback>(callback),
-            send_option::route{route}, send_option::optional{}, std::forward<Args>(args)...);
+            send_option::optional{}, std::forward<Args>(args)...);
 }
 
 template <typename... T>

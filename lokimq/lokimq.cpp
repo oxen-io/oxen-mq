@@ -468,10 +468,9 @@ void LokiMQ::worker_thread(unsigned int index) {
                 }
             } else {
                 message.conn = run.conn;
-                message.route = run.conn_route;
                 message.data.clear();
 
-                LMQ_TRACE("Got incoming command from ", message.conn, message.route.empty() ? "(outgoing)" : "(incoming)");
+                LMQ_TRACE("Got incoming command from ", message.conn, message.conn.route.empty() ? "(outgoing)" : "(incoming)");
 
                 if (run.callback->second /*is_request*/) {
                     message.reply_tag = {run.data_parts[0].data<char>(), run.data_parts[0].size()};
@@ -660,7 +659,6 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
     bool request = false;
     bool have_conn_id = false;
     ConnectionID conn_id;
-    string_view conn_route;
 
     std::string request_tag;
     std::unique_ptr<ReplyCallback> request_cbptr;
@@ -670,8 +668,15 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
             throw std::runtime_error("Invalid error: invalid conn_id value (-1)");
         have_conn_id = true;
     }
+    if (data.skip_until("conn_pubkey")) {
+        if (have_conn_id)
+            throw std::runtime_error("Internal error: Invalid proxy send command; conn_id and conn_pubkey are exclusive");
+        conn_id.pk = data.consume_string();
+        conn_id.id = ConnectionID::SN_ID;
+    } else if (!have_conn_id)
+        throw std::runtime_error("Internal error: Invalid proxy send command; conn_pubkey or conn_id missing");
     if (data.skip_until("conn_route"))
-        conn_route = data.consume_string_view();
+        conn_id.route = data.consume_string();
     if (data.skip_until("hint"))
         hint = data.consume_string_view();
     if (data.skip_until("incoming"))
@@ -680,13 +685,6 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
         keep_alive = std::chrono::milliseconds{data.consume_integer<uint64_t>()};
     if (data.skip_until("optional"))
         optional = data.consume_integer<bool>();
-    if (data.skip_until("pubkey")) {
-        if (have_conn_id)
-            throw std::runtime_error("Internal error: Invalid proxy send command; conn_id and pubkey are exclusive");
-        conn_id.pk = data.consume_string();
-        conn_id.id = ConnectionID::SN_ID;
-    } else if (!have_conn_id)
-        throw std::runtime_error("Internal error: Invalid proxy send command; pubkey or conn_id missing");
 
     if (data.skip_until("request"))
         request = data.consume_integer<bool>();
@@ -703,7 +701,6 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
     bt_list_consumer send = data.consume_list_consumer();
 
     zmq::socket_t *send_to;
-    std::string routing_prefix;
     if (conn_id.sn()) {
         auto sock_route = proxy_connect_sn(conn_id.pk, hint, optional, incoming, keep_alive);
         if (!sock_route.first) {
@@ -715,19 +712,18 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
             return;
         }
         send_to = sock_route.first;
-        routing_prefix = std::move(sock_route.second);
-    } else if (!conn_route.empty()) { // incoming non-SN connection
+        conn_id.route = std::move(sock_route.second);
+    } else if (!conn_id.route.empty()) { // incoming non-SN connection
         auto it = incoming_conn_index.find(conn_id);
         if (it == incoming_conn_index.end()) {
             LMQ_LOG(warn, "Unable to send to ", conn_id, ": incoming listening socket not found");
             return;
         }
         send_to = &connections[it->second];
-        routing_prefix = std::string{conn_route};
     } else {
         auto pr = peers.equal_range(conn_id);
         if (pr.first == peers.end()) {
-            LMQ_LOG(warn, "Unable to send: connection id ", conn_id, " is not (or is no longer) a valid connection");
+            LMQ_LOG(warn, "Unable to send: connection id ", conn_id, " is not (or is no longer) a valid outgoing connection");
             return;
         }
         auto& peer = pr.first->second;
@@ -741,9 +737,9 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
     }
 
     try {
-        send_message_parts(*send_to, build_send_parts(send, routing_prefix));
+        send_message_parts(*send_to, build_send_parts(send, conn_id.route));
     } catch (const zmq::error_t &e) {
-        if (e.num() == EHOSTUNREACH && !routing_prefix.empty() /*= incoming conn*/) {
+        if (e.num() == EHOSTUNREACH && !conn_id.route.empty() /*= incoming conn*/) {
             LMQ_LOG(debug, "Incoming connection is no longer valid; removing peer details");
             // Our incoming connection no longer exists; remove it from `peers`.
             auto pr = peers.equal_range(conn_id);
@@ -754,7 +750,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
                     bool removed;
                     for (auto it = pr.first; it != pr.second; ) {
                         auto& peer = it->second;
-                        if (peer.route == routing_prefix) {
+                        if (peer.route == conn_id.route) {
                             peers.erase(it);
                             removed = true;
                             break;
@@ -782,13 +778,13 @@ void LokiMQ::proxy_reply(bt_dict_consumer data) {
             throw std::runtime_error("Invalid error: invalid conn_id value (-1)");
         have_conn_id = true;
     }
-    if (data.skip_until("pubkey")) {
+    if (data.skip_until("conn_pubkey")) {
         if (have_conn_id)
-            throw std::runtime_error("Internal error: Invalid proxy send command; conn_id and pubkey are exclusive");
+            throw std::runtime_error("Internal error: Invalid proxy reply command; conn_id and conn_pubkey are exclusive");
         conn_id.pk = data.consume_string();
         conn_id.id = ConnectionID::SN_ID;
     } else if (!have_conn_id)
-        throw std::runtime_error("Internal error: Invalid proxy send command; pubkey or conn_id missing");
+        throw std::runtime_error("Internal error: Invalid proxy reply command; conn_pubkey or conn_id missing");
     if (!data.skip_until("send"))
         throw std::runtime_error("Internal error: Invalid proxy reply command; send parts missing");
 
@@ -1416,14 +1412,13 @@ void LokiMQ::set_general_threads(int threads) {
     general_workers = threads;
 }
 
-LokiMQ::run_info& LokiMQ::run_info::load(category* cat_, std::string command_, ConnectionID conn_, std::string route_,
+LokiMQ::run_info& LokiMQ::run_info::load(category* cat_, std::string command_, ConnectionID conn_,
                 std::vector<zmq::message_t> data_parts_, const std::pair<CommandCallback, bool>* callback_) {
     is_batch_job = false;
     is_reply_job = false;
     cat = cat_;
     command = std::move(command_);
     conn = std::move(conn_);
-    conn_route = std::move(route_);
     data_parts = std::move(data_parts_);
     callback = callback_;
     return *this;
@@ -1431,7 +1426,7 @@ LokiMQ::run_info& LokiMQ::run_info::load(category* cat_, std::string command_, C
 
 LokiMQ::run_info& LokiMQ::run_info::load(pending_command&& pending) {
     return load(&pending.cat, std::move(pending.command), std::move(pending.conn),
-            std::move(pending.conn_route), std::move(pending.data_parts), pending.callback);
+            std::move(pending.data_parts), pending.callback);
 }
 
 LokiMQ::run_info& LokiMQ::run_info::load(batch_job&& bj, bool reply_job) {
@@ -1555,8 +1550,8 @@ void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
         }
 
         LMQ_LOG(debug, "No available free workers, queuing ", command, " for later");
-        ConnectionID conn{peer->service_node ? ConnectionID::SN_ID : conn_index_to_id[conn_index].id, peer->pubkey};
-        pending_commands.emplace_back(category, std::move(command), std::move(data_parts), cat_call.second, std::move(conn), tmp_peer.route);
+        ConnectionID conn{peer->service_node ? ConnectionID::SN_ID : conn_index_to_id[conn_index].id, peer->pubkey, std::move(tmp_peer.route)};
+        pending_commands.emplace_back(category, std::move(command), std::move(data_parts), cat_call.second, std::move(conn));
         category.queued++;
         return;
     }
@@ -1569,10 +1564,10 @@ void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
     auto& run = get_idle_worker();
     {
         ConnectionID c{peer->service_node ? ConnectionID::SN_ID : conn_index_to_id[conn_index].id, peer->pubkey};
+        c.route = std::move(tmp_peer.route);
         if (outgoing || peer->service_node)
             tmp_peer.route.clear();
-        run.load(&category, std::move(command), std::move(c), std::move(tmp_peer.route),
-                std::move(data_parts), cat_call.second);
+        run.load(&category, std::move(command), std::move(c), std::move(data_parts), cat_call.second);
     }
 
     if (outgoing)
