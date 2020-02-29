@@ -1332,7 +1332,9 @@ bool LokiMQ::proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>
             return true;
         }
         LMQ_LOG(info, "Incoming client from ", peer_address(parts.back()), " sent HI, replying with HELLO");
-        send_routed_message(connections[conn_index], std::string{route}, "HELLO");
+        try {
+            send_routed_message(connections[conn_index], std::string{route}, "HELLO");
+        } catch (const std::exception &e) { LMQ_LOG(warn, "Couldn't reply with HELLO: ", e.what()); }
         return true;
     } else if (cmd == "HELLO") {
         if (!outgoing) {
