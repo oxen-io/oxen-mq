@@ -236,6 +236,9 @@ void send_control(zmq::socket_t& sock, string_view cmd, std::string data) {
 
 } // namespace detail
 
+std::ostream& operator<<(std::ostream& o, AuthLevel a) {
+    return o << to_string(a);
+}
 
 std::ostream& operator<<(std::ostream& o, const ConnectionID& conn) {
     if (!conn.pk.empty())
@@ -1587,7 +1590,7 @@ bool LokiMQ::proxy_check_auth(size_t conn_index, bool outgoing, const peer_info&
     std::string reply;
     if (peer.auth_level < cat.access.auth) {
         LMQ_LOG(warn, "Access denied to ", command, " for peer [", to_hex(peer.pubkey), "]/", peer_address(msg),
-                ": peer auth level ", to_string(peer.auth_level), " < ", to_string(cat.access.auth));
+                ": peer auth level ", peer.auth_level, " < ", cat.access.auth);
         reply = "FORBIDDEN";
     }
     else if (cat.access.local_sn && !local_service_node) {
@@ -1709,13 +1712,13 @@ void LokiMQ::process_zap_requests() {
                 if (result.auth <= AuthLevel::denied || result.auth > AuthLevel::admin) {
                     LMQ_LOG(info, "Access denied for incoming ", view(frames[5]), (sn ? " service node" : " client"),
                             " connection from ", !user_id.empty() ? user_id + " at " : ""s, ip,
-                            " with initial auth level ", to_string(result.auth));
+                            " with initial auth level ", result.auth);
                     status_code = "400";
                     status_text = "Access denied";
                     user_id.clear();
                 } else {
                     LMQ_LOG(info, "Accepted incoming ", view(frames[5]), (sn ? " service node" : " client"),
-                            " connection with authentication level ", to_string(result.auth),
+                            " connection with authentication level ", result.auth,
                             " from ", !user_id.empty() ? user_id + " at " : ""s, ip);
 
                     auto& metadata = response_vals[5];

@@ -66,6 +66,8 @@ enum class AuthLevel {
     admin, ///< Advanced authentication commands require an admin user, either via explicit login or by implicit login from localhost.  This typically protects administrative commands like shutting down, starting mining, or access sensitive data.
 };
 
+std::ostream& operator<<(std::ostream& os, AuthLevel a);
+
 /// The access level for a command category
 struct Access {
     /// Minimum access level required
