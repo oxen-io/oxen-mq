@@ -1769,7 +1769,7 @@ ConnectionID LokiMQ::connect_remote(string_view remote, ConnectSuccess on_connec
     LMQ_TRACE("telling proxy to connect to ", remote, ", id ", id,
             pubkey.empty() ? "using NULL auth" : ", using CURVE with remote pubkey [" + to_hex(pubkey) + "]");
     detail::send_control(get_control_socket(), "CONNECT_REMOTE", bt_serialize<bt_dict>({
-        {"auth", static_cast<std::underlying_type_t<AuthLevel>>(auth_level)},
+        {"auth_level", static_cast<std::underlying_type_t<AuthLevel>>(auth_level)},
         {"conn_id", id},
         {"connect", reinterpret_cast<uintptr_t>(new ConnectSuccess{std::move(on_connect)})},
         {"failure", reinterpret_cast<uintptr_t>(new ConnectFailure{std::move(on_failure)})},
