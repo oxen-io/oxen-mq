@@ -1582,7 +1582,7 @@ void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
     if (outgoing)
         peer->activity(); // outgoing connection activity, pump the activity timer
 
-    LMQ_TRACE("Forwarding incoming ", run.command, " from ", run.conn, " @ ", peer_address(parts.back()),
+    LMQ_TRACE("Forwarding incoming ", run.command, " from ", run.conn, " @ ", peer_address(run.data_parts.back()),
             " to worker ", run.worker_routing_id);
 
     proxy_run_worker(run);
