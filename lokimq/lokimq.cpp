@@ -561,7 +561,14 @@ void LokiMQ::setup_outgoing_socket(zmq::socket_t& socket, string_view remote_pub
     }
     socket.setsockopt(ZMQ_HANDSHAKE_IVL, (int) HANDSHAKE_TIME.count());
     socket.setsockopt<int64_t>(ZMQ_MAXMSGSIZE, MAX_MSG_SIZE);
-    socket.setsockopt(ZMQ_ROUTING_ID, pubkey.data(), pubkey.size());
+    if (PUBKEY_BASED_ROUTING_ID) {
+        std::string routing_id;
+        routing_id.reserve(33);
+        routing_id += 'L'; // Prefix because routing id's starting with \0 are reserved by zmq (and our pubkey might start with \0)
+        routing_id.append(pubkey.begin(), pubkey.end());
+        socket.setsockopt(ZMQ_ROUTING_ID, routing_id.data(), routing_id.size());
+    }
+    // else let ZMQ pick a random one
 }
 
 std::pair<zmq::socket_t *, std::string>

@@ -320,6 +320,16 @@ public:
      * closing the connection.  Setting this only affects new outgoing connections. */
     std::chrono::milliseconds HANDSHAKE_TIME = 10s;
 
+    /** Whether to use a zmq routing ID based on the pubkey for new outgoing connections.  This is
+     * normally desirable as it allows the listener to recognize that the incoming connection is a
+     * reconnection from the same remote and handover routing to the new socket while closing off
+     * the (likely dead) old socket.  This, however, prevents a single LokiMQ instance from
+     * establishing multiple connections to the same listening LokiMQ, which is sometimes useful
+     * (for example when testing), and so this option can be overridden to `false` to use completely
+     * random zmq routing ids on outgoing connections (which will thus allow multiple connections).
+     */
+    bool PUBKEY_BASED_ROUTING_ID = true;
+
     /** Maximum incoming message size; if a remote tries sending a message larger than this they get
      * disconnected. -1 means no limit. */
     int64_t MAX_MSG_SIZE = 1 * 1024 * 1024;
