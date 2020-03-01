@@ -260,7 +260,7 @@ second A arrives there are 4 threads running, but only 1 of them is an A thus th
 slot for A jobs so we start the second A on a fifth thread.  The third A, however, has no A jobs
 available so gets queued.
 
-Exmaple 4: BBBBBBAAA.  At most 6 jobs.  The 5th and 6th B's get queued (all general workers are
+Example 4: BBBBBBAAA.  At most 6 jobs.  The 5th and 6th B's get queued (all general workers are
 busy).  The first and second get started (there are two unused reserved A slots), the third one gets
 queued.  The 5th and 6th B's are already interesting on their own: they won't be started until there
 are only three active jobs; the third A won't be started until *either* there are only three active
@@ -273,8 +273,7 @@ when a command with reserve threads arrived.
 ## Internal batch jobs
 
 A common pattern is one where a single thread suddenly has some work that can be be parallelized.
-You could (but shouldn't) employ some blocking, locking, mutex + condition variable monstrosity, but
-you shouldn't.
+You could employ some blocking, locking, mutex + condition variable monstrosity, but you shouldn't.
 
 Instead LokiMQ provides a mechanism for this by allowing you to submit a batch of jobs with a
 completion callback.  All jobs will be queued and, when the last one finishes, the finalization
@@ -349,6 +348,11 @@ As a shortcut there is a `lmq.job(...)` method that schedules a single task (wit
 in the batch job queue.  This is useful when some event requires triggering some other event, but
 you don't need to wait for or collect its result.  (Internally this is just a convenience method
 around creating a single-job, no-completion Batch job).
+
+You generally do *not* want to use single (or batched) jobs for operations that can block
+indefinitely (such as network operations) because each such job waiting on some external condition
+ties up a thread.  You are better off in such a case using your own asynchronous operations and
+either using your own thread or a periodic timer (see below) to shepherd those operations.
 
 ## Timers
 
