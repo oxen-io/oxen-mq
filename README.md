@@ -1,15 +1,14 @@
 # LokiMQ - zeromq-based message passing for Loki projects
 
 This C++14 library contains an abstraction layer around ZeroMQ to support integration with Loki
-authentication and message passing.  It is designed to be usable as the underlying communication
-mechanism of SN-to-SN communication ("quorumnet"), the RPC interface used by wallets and local
-daemon commands, communication channels between lokid and auxiliary services (storage server,
-lokinet), and also provides a local multithreaded job scheduling within a process.
+authentication, RPC, and message passing.  It is designed to be usable as the underlying
+communication mechanism of SN-to-SN communication ("quorumnet"), the RPC interface used by wallets
+and local daemon commands, communication channels between lokid and auxiliary services (storage
+server, lokinet), and also provides a local multithreaded job scheduling within a process.
 
-It is not required to use this library to interact with loki components as a client: this is mainly
-intended to abstract away much of the server-side handling.
-
-All messages are encrypted (using x25519).
+Messages channels can be encrypted (using x25519) or not -- however opening an encrypted channel
+requires knowing the server pubkey.  All SN-to-SN traffic is encrypted, and other traffic can be
+encrypted as needed.
 
 This library makes minimal use of mutexes, and none in the hot paths of the code, instead mostly
 relying on ZMQ sockets for synchronization; for more information on this (and why this is generally
@@ -21,10 +20,11 @@ LokiMQ messages come in two fundamental forms: "commands", consisting of a comma
 optional arguments, and "requests", consisting of a request name, a request tag, and optional
 arguments.
 
-The command/request string is one of two types:
+All channels are capable of bidirectional communication, and multiple messages can be in transit in
+either direction at any time.  LokiMQ sets up a "listener" and "client" connections, but these only
+determine how connections are established: once established, commands can be issued by either party.
 
-`BASIC` - for basic requests such as authentication (`LOGIN`) handled by LokiMQ itself.  These
-commands may not contain a `.`, and are handled by LokiMQ itself.
+The command/request string is one of two types:
 
 `category.command` - for commands/requests registered by the LokiMQ caller (e.g. lokid).  Here
 `category` must be at least one character not containing a `.` and `command` may be anything.  These
@@ -62,7 +62,7 @@ and output would look like this:
     there
 
 You could also create a `ping` command that instructs someone to pong you with a random word -- i.e.
-give him a ping and she sends you a pong:
+give him a ping and she sends you a pong command:
 
     <<< [general.ping]
     >>> [general.pong] [omg]
@@ -104,6 +104,40 @@ the calling code to handle all encoding/decoding duties.
 Internal commands passed between LokiMQ-managed threads use either plain strings or bt-encoded
 dictionaries.  See `lokimq/bt_serialize.h` if you want a bt serializer/deserializer.
 
+## Sending commands
+
+Sending a command to a peer is done by using a connection ID, and generally falls into either a
+`send()` method or a `request()` method.
+
+    lmq.send(conn, "category.command", "some data");
+    lmq.request(conn, "category.command", [](bool success, std::vector<std::string> data) {
+        if (success) { std::cout << "Remote replied: " << data.at(0) << "\n"; } });
+
+The connection ID generally has two possible values:
+
+- a string containing a service node pubkey.  In this mode LokiMQ will look for the given SN in
+  already-established connections, reusing a connection if one exists.  If no connection already
+  exists, a new connection to the given SN is attempted (this requires constructing the LokiMQ
+  object with a callback to determine SN remote addresses).
+- a ConnectionID object, typically returned by the `connect_remote` method (although there are other
+  places to get one, such as from the `Message` object passed to a command: see the following
+  section).
+
+    // Send to a service node, establishing a connection if necessary:
+    std::string my_sn = ...; // 32-byte pubkey of a known SN
+    lmq.send(my_sn, "sn.explode", "{ \"seconds\": 30 }");
+
+    // Connect to a remote by address then send it something
+    auto conn = lmq.connect_remote("tcp://127.0.0.1:4567",
+        [](ConnectionID c) { std::cout << "Connected!\n"; },
+        [](ConnectionID c, string_view f) { std::cout << "Connect failed: " << f << "\n" });
+    lmq.request(conn, "rpc.get_height", [](bool s, std::vector<std::string> d) {
+        if (s && d.size() == 1)
+            std::cout << "Current height: " << d[0] << "\n";
+        else
+            std::cout << "Timeout fetching height!";
+    });
+
 ## Command invocation
 
 The application registers categories and registers commands within these categories with callbacks.
@@ -121,9 +155,13 @@ lookup function to retrieve the remote address given a SN x25519 pubkey.
 ### Callbacks
 
 Invoked command functions are always invoked with exactly one arguments: a non-const LokiMQ::Message
-reference from which the connection info, LokiMQ object, and message data can be obtained.  If you
-need some extra state data (for example, a reference to some high level object) the LokiMQ object
-has an opaque public `void* data` member intended for exactly this purpose.
+reference from which the connection info, LokiMQ object, and message data can be obtained.
+
+The Message object also contains a `ConnectionID` object as the public `conn` member; it is safe to
+take a copy of this and then use it later to send commands to this peer.  (For example, a wallet
+might issue a command to a node requesting that it be sent any new transactions that arrive; the
+node could store a copy of the ConnectionID, then use these copies when any such transaction
+arrives).
 
 ## Authentication
 
@@ -232,60 +270,20 @@ Thus the general thread count should be regarded as the "normal" thread limit an
 allow an extra burst of thread activity *only if* all general threads are busy with other categories
 when a command with reserve threads arrived.
 
-## Internal job queuing
-
-This library supports queuing internal jobs (internally these are in the "" (empty string) category,
-which is not externally accessible).  These jobs are quite different from ordinary jobs: they have
-no authentication and can only be submitted by the program itself to its own worker threads.  They
-have either no second message part, or else one single message part consists of an opaque void
-pointer value.  This pointer is passed by value to the registered function, which must take exactly
-one `void *` argument.
-
-It is entirely the responsibility of the caller and callee to deal with the `void *` argument,
-including construction/destruction/etc.  This is very low level but allow the most flexibility.  For
-example, a caller might do something like:
-
-```C++
-// Set up a function that takes ownership:
-void hello1(void *data) {
-    auto* str = static_cast<std::string*>(data);
-    std::cout << "Hello1 " << *str << "\n";
-    delete str;
-}
-LokiMQ::register_task("hello1", &hello1);
-
-// Another function that doesn't take ownership (and handles nullptr):
-void hello2(void *data) { // 
-    std::cout << "Hello2 " <<
-        (data ? *static_cast<std::string*>(data) : "anonymous") <<
-        "\n";
-}
-LokiMQ::register_task("hello2", &hello2);
-
-
-// Later, in the calling code:
-const static std::string there{"there"};
-void myfunc() {
-    // ...
-    lmq.job(&hello1, new std::string{"world"}); // Give up ownership of the pointer
-    lmq.job(&hello2, &there); // Passing an externally valid pointer
-    // But don't do this:
-    //std::string world{"world"};
-    //lmq.job(&hello2, &world); // Bad: `world` will probably be destroyed
-                                // before the callback gets invoked
-}
-```
-
-### Dealing with synchronization of jobs
+## Internal batch jobs
 
 A common pattern is one where a single thread suddenly has some work that can be be parallelized.
-We can easily queue all the jobs into the worker thread pool (see above), but the issue then is how
-to continue when the work is done.  You could (but shouldn't) employ some blocking, locking, mutex +
-condition variable monstrosity, but you shouldn't.
+You could (but shouldn't) employ some blocking, locking, mutex + condition variable monstrosity, but
+you shouldn't.
 
 Instead LokiMQ provides a mechanism for this by allowing you to submit a batch of jobs with a
 completion callback.  All jobs will be queued and, when the last one finishes, the finalization
 callback will be queued to continue with the task.
+
+These batch jobs are quite different from ordinary network commands, as described above: they have
+no authentication and can only be submitted by the program itself to its own worker threads.  They
+share worker threads with all other commands, as described above, but have their own separate
+reserved thread value (for all intents and purposes this works just like a category reserved count).
 
 From the caller point of view this requires splitting the logic into two parts, a "Before" that sets
 up the batch, a "Job" that does the work (multiple times), and an "After" that continues once all
@@ -341,5 +339,20 @@ void start_big_task() {
 ```
 
 This code deliberately does not support blocking to wait for the tasks to finish: if you want such a
-poor design (which is a recipe for deadlocks, imagine jobs queuing other jobs and then waiting) you
-can implement it yourself; LokiMQ isn't going to help you hurt yourself like that.
+poor design (which is a recipe for deadlocks: imagine jobs that queuing other jobs that can end up
+exhausting the worker threads with waiting jobs) then you can implement it yourself; LokiMQ isn't
+going to help you hurt yourself like that.
+
+### Single-job queuing
+
+As a shortcut there is a `lmq.job(...)` method that schedules a single task (with no return value)
+in the batch job queue.  This is useful when some event requires triggering some other event, but
+you don't need to wait for or collect its result.  (Internally this is just a convenience method
+around creating a single-job, no-completion Batch job).
+
+## Timers
+
+LokiMQ supports scheduling periodic tasks via the `add_timer()` function.  These timers have an
+interval and are scheduled as (single-job) batches when the timer fires.  They also support
+"squelching" (enabled by default) that supresses the job being scheduled if a previously scheduled
+job is already scheduled or running.
