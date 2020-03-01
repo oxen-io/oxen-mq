@@ -15,6 +15,7 @@ set_target_properties(lokimq-static PROPERTIES OUTPUT_NAME lokimq)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(ZMQ REQUIRED libzmq>=4.1)
 
+set(CPPZMQ_BUILD_TESTS OFF)
 add_subdirectory(cppzmq EXCLUDE_FROM_ALL)
 
 foreach(target lokimq lokimq-static)
@@ -34,7 +35,17 @@ endforeach()
 target_link_libraries(lokimq PUBLIC cppzmq)
 target_link_libraries(lokimq-static PUBLIC cppzmq-static)
 
-if(BUILD_TESTING)
+add_library(lokimq::lokimq ALIAS lokimq)
+add_library(lokimq::static ALIAS lokimq-static)
+
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+  set(lokimq_IS_TOPLEVEL_PROJECT TRUE)
+else()
+  set(lokimq_IS_TOPLEVEL_PROJECT FALSE)
+endif()
+
+option(LOKIMQ_BUILD_TESTS "Building and perform lokimq tests" ${lokimq_IS_TOPLEVEL_PROJECT})
+if(LOKIMQ_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
