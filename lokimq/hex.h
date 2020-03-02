@@ -27,7 +27,7 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
-#include <string>
+#include "string_view.h"
 #include <array>
 #include <iterator>
 #include <cassert>
@@ -68,8 +68,7 @@ void to_hex(InputIt begin, InputIt end, OutputIt out) {
 }
 
 /// Creates a hex string from an iterable, std::string-like object
-template <typename String>
-std::string to_hex(const String& s) {
+std::string to_hex(string_view s) {
     std::string hex;
     hex.reserve(s.size() * 2);
     to_hex(s.begin(), s.end(), std::back_inserter(hex));
@@ -87,8 +86,7 @@ constexpr bool is_hex(It begin, It end) {
 }
 
 /// Returns true if all elements in the string-like value are hex characters
-template <typename String>
-constexpr bool is_hex(const String& s) { return is_hex(s.begin(), s.end()); }
+constexpr bool is_hex(string_view s) { return is_hex(s.begin(), s.end()); }
 
 /// Convert a hex digit into its numeric (0-15) value
 constexpr char from_hex_digit(unsigned char x) noexcept {
@@ -114,8 +112,7 @@ void from_hex(InputIt begin, InputIt end, OutputIt out) {
 
 /// Converts hex digits from a std::string-like object into a std::string of bytes.  Undefined
 /// behaviour if any characters are not in [0-9a-fA-F] or if the input sequence length is not even.
-template <typename String>
-std::string from_hex(const String& s) {
+std::string from_hex(string_view s) {
     std::string bytes;
     bytes.reserve(s.size() / 2);
     from_hex(s.begin(), s.end(), std::back_inserter(bytes));
