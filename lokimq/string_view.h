@@ -242,6 +242,6 @@ using string_view = simple_string_view;
 // implementation in pre-C++17.
 namespace lokimq {
 inline namespace literals {
-    string_view operator""_sv(const char* str, size_t len) { return {str, len}; }
+    inline string_view operator""_sv(const char* str, size_t len) { return {str, len}; }
 }
 }
