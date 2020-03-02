@@ -1115,16 +1115,27 @@ data_parts_impl<InputIt> data_parts(InputIt begin, InputIt end) { return {std::m
 /// will not also be done.)
 struct hint {
     std::string connect_hint;
+    // Constructor taking a hint.  If the hint is an empty string then no hint will be used.
     explicit hint(std::string connect_hint) : connect_hint{std::move(connect_hint)} {}
 };
 
 /// Does a send() if we already have a connection (incoming or outgoing) with the given peer,
 /// otherwise drops the message.
-struct optional {};
+struct optional {
+    bool is_optional = true;
+    // Constructor; default construction gives you an optional, but the bool parameter can be
+    // specified as false to explicitly make a connection non-optional instead.
+    explicit optional(bool opt = true) : is_optional{opt} {}
+};
 
 /// Specifies that the message should be sent only if it can be sent on an existing incoming socket,
 /// and dropped otherwise.
-struct incoming {};
+struct incoming {
+    bool is_incoming = true;
+    // Constructor; default construction gives you an incoming-only, but the bool parameter can be
+    // specified as false to explicitly disable incoming-only behaviour.
+    explicit incoming(bool inc = true) : is_incoming{inc} {}
+};
 
 /// Specifies the idle timeout for the connection - if a new or existing outgoing connection is used
 /// for the send and its current idle timeout setting is less than this value then it is updated.
@@ -1159,13 +1170,13 @@ inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option
 }
 
 /// `optional` specialization: sets the optional flag in the control data
-inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::optional &) {
-    control_data["optional"] = 1;
+inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::optional& o) {
+    control_data["optional"] = o.is_optional;
 }
 
 /// `incoming` specialization: sets the incoming-only flag in the control data
-inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::incoming &) {
-    control_data["incoming"] = 1;
+inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::incoming& i) {
+    control_data["incoming"] = i.is_incoming;
 }
 
 /// `keep_alive` specialization: increases the outgoing socket idle timeout (if shorter)
@@ -1216,22 +1227,19 @@ void LokiMQ::request(ConnectionID to, string_view cmd, ReplyCallback callback, c
 
 template <typename... Args>
 void Message::send_back(string_view command, Args&&... args) {
-    if (conn.sn()) lokimq.send(conn, command, std::forward<Args>(args)...);
-    else lokimq.send(conn, command, send_option::optional{}, std::forward<Args>(args)...);
+    lokimq.send(conn, command, send_option::optional{!conn.sn()}, std::forward<Args>(args)...);
 }
 
 template <typename... Args>
 void Message::send_reply(Args&&... args) {
     assert(!reply_tag.empty());
-    if (conn.sn()) lokimq.send(conn, "REPLY", reply_tag, std::forward<Args>(args)...);
-    else lokimq.send(conn, "REPLY", reply_tag, send_option::optional{}, std::forward<Args>(args)...);
+    lokimq.send(conn, "REPLY", reply_tag, send_option::optional{!conn.sn()}, std::forward<Args>(args)...);
 }
 
 template <typename ReplyCallback, typename... Args>
 void Message::send_request(string_view cmd, ReplyCallback&& callback, Args&&... args) {
-    if (conn.sn()) lokimq.request(conn, cmd, std::forward<ReplyCallback>(callback), std::forward<Args>(args)...);
-    else lokimq.request(conn, cmd, std::forward<ReplyCallback>(callback),
-            send_option::optional{}, std::forward<Args>(args)...);
+    lokimq.request(conn, cmd, std::forward<ReplyCallback>(callback),
+            send_option::optional{!conn.sn()}, std::forward<Args>(args)...);
 }
 
 template <typename... T>
