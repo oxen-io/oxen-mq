@@ -230,6 +230,7 @@ static constexpr size_t MAX_CATEGORY_LENGTH = 50;
 /// Maximum length of a command
 static constexpr size_t MAX_COMMAND_LENGTH = 200;
 
+class CatHelper;
 
 /**
  * Class that handles LokiMQ listeners, connections, proxying, and workers.  An application
@@ -812,8 +813,11 @@ public:
      * messages are processed off the queue.  -1 means unlimited, 0 means we will never queue (which
      * means just dropping messages for this category if no workers are available to instantly
      * handle the request).
+     *
+     * @returns a CatHelper object that makes adding commands slightly less verbose (see the
+     * CatHelper describe, above).
      */
-    void add_category(std::string name, Access access_level, unsigned int reserved_threads = 0, int max_queue = 200);
+    CatHelper add_category(std::string name, Access access_level, unsigned int reserved_threads = 0, int max_queue = 200);
 
     /**
      * Adds a new command to an existing category.  This method may not be invoked after `start()`
@@ -1094,6 +1098,41 @@ public:
      */
     void add_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch = true);
 };
+
+/// Helper class that slightly simplifies adding commands to a category.
+///
+/// This allows simplifying:
+///
+/// lmq.add_category("foo", ...);
+/// lmq.add_command("foo", "a", ...);
+/// lmq.add_command("foo", "b", ...);
+/// lmq.add_request_command("foo", "c", ...);
+///
+/// to:
+///
+/// lmq.add_category("foo", ...)
+///     .add_command("a", ...)
+///     .add_command("b", ...)
+///     .add_request_command("b", ...)
+///     ;
+class CatHelper {
+    LokiMQ& lmq;
+    std::string cat;
+
+public:
+    CatHelper(LokiMQ& lmq, std::string cat) : lmq{lmq}, cat{std::move(cat)} {}
+
+    CatHelper& add_command(std::string name, LokiMQ::CommandCallback callback) {
+        lmq.add_command(cat, std::move(name), std::move(callback));
+        return *this;
+    }
+
+    CatHelper& add_request_command(std::string name, LokiMQ::CommandCallback callback) {
+        lmq.add_request_command(cat, std::move(name), std::move(callback));
+        return *this;
+    }
+};
+
 
 /// Namespace for options to the send() method
 namespace send_option {

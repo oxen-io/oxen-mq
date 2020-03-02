@@ -267,7 +267,7 @@ LogLevel LokiMQ::log_level() const {
 }
 
 
-void LokiMQ::add_category(std::string name, Access access_level, unsigned int reserved_threads, int max_queue) {
+CatHelper LokiMQ::add_category(std::string name, Access access_level, unsigned int reserved_threads, int max_queue) {
     check_not_started(proxy_thread, "add a category");
 
     if (name.size() > MAX_CATEGORY_LENGTH)
@@ -280,7 +280,9 @@ void LokiMQ::add_category(std::string name, Access access_level, unsigned int re
     if (it != categories.end())
         throw std::runtime_error("Unable to add category `" + name + "': that category already exists");
 
+    CatHelper ret{*this, name};
     categories.emplace(std::move(name), category{access_level, reserved_threads, max_queue});
+    return ret;
 }
 
 void LokiMQ::add_command(const std::string& category, std::string name, CommandCallback callback) {
