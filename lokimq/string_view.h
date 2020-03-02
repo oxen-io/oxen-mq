@@ -238,3 +238,10 @@ using string_view = simple_string_view;
 
 #endif
 
+// Add a "foo"_sv literal that works exactly like the C++17 "foo"sv literal, but works with out
+// implementation in pre-C++17.
+namespace lokimq {
+inline namespace literals {
+    string_view operator""_sv(const char* str, size_t len) { return {str, len}; }
+}
+}
