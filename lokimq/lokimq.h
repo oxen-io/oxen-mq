@@ -923,9 +923,10 @@ public:
      * such as: "tcp://\*:4567" or "tcp://1.2.3.4:5678".
      *
      * @param allow_connection function to call to determine whether to allow the connection and, if
-     * so, the authentication level it receives.
+     * so, the authentication level it receives.  If omitted the default returns non-service node,
+     * AuthLevel::none access.
      */
-    void listen_plain(std::string bind, AllowFunc allow_connection);
+    void listen_plain(std::string bind, AllowFunc allow_connection = [](auto, auto) { return Allow{AuthLevel::none, false}; });
 
     /**
      * Try to initiate a connection to the given SN in anticipation of needing a connection in the
