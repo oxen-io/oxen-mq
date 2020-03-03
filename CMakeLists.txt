@@ -43,6 +43,7 @@ export(
 install(
     TARGETS lokimq
     EXPORT lokimqConfig
+    DESTINATION lib
 )
 
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
