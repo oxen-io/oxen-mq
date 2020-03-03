@@ -954,11 +954,15 @@ void LokiMQ::proxy_expire_idle_peers() {
             LMQ_LOG(info, "Closing outgoing connection to ", it->first, ": idle timeout reached");
             proxy_close_connection(info.conn_index, CLOSE_LINGER);
             it = peers.erase(it);
+        } else {
+            ++it;
         }
     }
 }
 
 void LokiMQ::proxy_conn_cleanup() {
+    LMQ_TRACE("starting proxy connections cleanup");
+
     // Drop idle connections (if we haven't done it in a while) but *only* if we have some idle
     // general workers: if we don't have any idle workers then we may still have incoming messages which
     // we haven't processed yet and those messages might end up resetting the last activity time.
@@ -971,6 +975,7 @@ void LokiMQ::proxy_conn_cleanup() {
 
     // FIXME - check other outgoing connections to see if they died and if so purge them
 
+    LMQ_TRACE("Timing out pending outgoing connections");
     // Check any pending outgoing connections for timeout
     for (auto it = pending_connects.begin(); it != pending_connects.end(); ) {
         auto& pc = *it;
@@ -983,6 +988,7 @@ void LokiMQ::proxy_conn_cleanup() {
         }
     }
 
+    LMQ_TRACE("Timing out pending requests");
     // Remove any expired pending requests and schedule their callback with a failure
     for (auto it = pending_requests.begin(); it != pending_requests.end(); ) {
         auto& callback = it->second;
@@ -994,6 +1000,8 @@ void LokiMQ::proxy_conn_cleanup() {
             ++it;
         }
     }
+
+    LMQ_TRACE("done proxy connections cleanup");
 };
 
 void LokiMQ::listen_curve(std::string bind_addr, AllowFunc allow_connection) {
