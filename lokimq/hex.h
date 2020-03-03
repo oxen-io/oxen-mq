@@ -68,7 +68,7 @@ void to_hex(InputIt begin, InputIt end, OutputIt out) {
 }
 
 /// Creates a hex string from an iterable, std::string-like object
-std::string to_hex(string_view s) {
+inline std::string to_hex(string_view s) {
     std::string hex;
     hex.reserve(s.size() * 2);
     to_hex(s.begin(), s.end(), std::back_inserter(hex));
@@ -112,7 +112,7 @@ void from_hex(InputIt begin, InputIt end, OutputIt out) {
 
 /// Converts hex digits from a std::string-like object into a std::string of bytes.  Undefined
 /// behaviour if any characters are not in [0-9a-fA-F] or if the input sequence length is not even.
-std::string from_hex(string_view s) {
+inline std::string from_hex(string_view s) {
     std::string bytes;
     bytes.reserve(s.size() / 2);
     from_hex(s.begin(), s.end(), std::back_inserter(bytes));
