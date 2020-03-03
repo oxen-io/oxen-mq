@@ -1747,6 +1747,9 @@ void LokiMQ::process_zap_requests() {
 }
 
 LokiMQ::~LokiMQ() {
+    if (!proxy_thread.joinable())
+        return;
+
     LMQ_LOG(info, "LokiMQ shutting down proxy thread");
     detail::send_control(get_control_socket(), "QUIT");
     proxy_thread.join();
