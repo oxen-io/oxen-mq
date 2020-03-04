@@ -661,6 +661,8 @@ std::pair<zmq::socket_t *, std::string> LokiMQ::proxy_connect_sn(bt_dict_consume
 }
 
 void LokiMQ::proxy_send(bt_dict_consumer data) {
+    bt_dict_consumer orig_data = data;
+
     // NB: bt_dict_consumer goes in alphabetical order
     string_view hint;
     std::chrono::milliseconds keep_alive{DEFAULT_SEND_KEEP_ALIVE};
@@ -770,7 +772,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
                     // we may have another active connection with the SN (or may want to open one).
                     if (removed) {
                         LMQ_LOG(debug, "Retrying sending to SN ", to_hex(conn_id.pk), " using other sockets");
-                        return proxy_send(std::move(data));
+                        return proxy_send(orig_data);
                     }
                 }
             }
