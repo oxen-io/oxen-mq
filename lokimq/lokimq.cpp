@@ -632,6 +632,7 @@ LokiMQ::proxy_connect_sn(string_view remote, string_view connect_hint, bool opti
     p.conn_index = connections.size();
     p.idle_expiry = keep_alive;
     p.activity();
+    conn_index_to_id.push_back(remote_cid);
     peers.emplace(std::move(remote_cid), std::move(p));
     connections.push_back(std::move(socket));
 
@@ -930,6 +931,7 @@ void LokiMQ::proxy_close_connection(size_t index, std::chrono::milliseconds ling
     pollitems_stale = true;
     connections.erase(connections.begin() + index);
 
+    LMQ_LOG(debug, "Closing conn index ", index);
     update_connection_indices(peers, index,
             [](auto& p) -> size_t& { return p.second.conn_index; });
     update_connection_indices(pending_connects, index,
@@ -1506,7 +1508,7 @@ void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
     if (outgoing) {
         auto it = peers.find(conn_index_to_id[conn_index]);
         if (it == peers.end()) {
-            LMQ_LOG(warn, "Internal error: connection index not found");
+            LMQ_LOG(warn, "Internal error: connection index ", conn_index, " not found");
             return;
         }
         peer = &it->second;
