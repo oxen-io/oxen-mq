@@ -50,6 +50,16 @@ set_target_properties(lokimq PROPERTIES
 
 target_link_libraries(lokimq PUBLIC cppzmq)
 
+if(NOT SODIUM_LIBRARIES)
+    pkg_search_module(SODIUM REQUIRED libsodium)
+endif()
+
+# Really want to just use SODIUM_LINK_LIBRARIES here, but that isn't in older cmake:
+find_library(libsodium_link_libs NAMES ${SODIUM_LIBRARIES} PATHS ${SODIUM_LIBRARY_DIRS})
+target_link_libraries(lokimq PRIVATE ${libsodium_link_libs})
+
+target_include_directories(lokimq PRIVATE ${SODIUM_INCLUDE_DIRS})
+
 add_library(lokimq::lokimq ALIAS lokimq)
 
 export(
