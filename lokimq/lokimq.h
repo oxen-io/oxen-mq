@@ -141,7 +141,7 @@ private:
     std::string pk;
     std::string route;
     friend class LokiMQ;
-    friend class std::hash<ConnectionID>;
+    friend struct std::hash<ConnectionID>;
     template <typename... T>
     friend bt_dict build_send(ConnectionID to, string_view cmd, const T&... opts);
     friend std::ostream& operator<<(std::ostream& o, const ConnectionID& conn);
