@@ -232,7 +232,7 @@ struct is_bt_insertable<T,
 template <typename T, typename = void> struct is_bt_output_dict_container : std::false_type {};
 template <typename T>
 struct is_bt_output_dict_container<T, std::enable_if_t<
-    std::is_same<std::string, std::remove_cv_t<typename T::value_type::first_type>>::value &&
+    std::is_same<std::string, std::remove_cv_t<typename T::key_type>>::value &&
     is_bt_insertable<T>::value,
     void_t<typename T::value_type::second_type /* has a second type */>>>
 : std::true_type {};

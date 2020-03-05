@@ -17,11 +17,13 @@ constexpr char ZMQ_ADDR_ZAP[] = "inproc://zeromq.zap.01";
 
 // Inside some method:
 //     LMQ_LOG(warn, "bad ", 42, " stuff");
-#define LMQ_LOG(level, ...) log_(LogLevel::level, __FILE__, __LINE__, __VA_ARGS__)
+//
+// (The "this->" is here to work around gcc 5 bugginess when called in a `this`-capturing lambda.)
+#define LMQ_LOG(level, ...) this->log_(LogLevel::level, __FILE__, __LINE__, __VA_ARGS__)
 
 #ifndef NDEBUG
 // Same as LMQ_LOG(trace, ...) when not doing a release build; nothing under a release build.
-#  define LMQ_TRACE(...) log_(LogLevel::trace, __FILE__, __LINE__, __VA_ARGS__)
+#  define LMQ_TRACE(...) this->log_(LogLevel::trace, __FILE__, __LINE__, __VA_ARGS__)
 #else
 #  define LMQ_TRACE(...)
 #endif
@@ -855,7 +857,7 @@ void LokiMQ::proxy_timer(std::function<void()> job, std::chrono::milliseconds in
             this);
     if (timer_id == -1)
         throw zmq::error_t{};
-    timer_jobs[timer_id] = {std::move(job), squelch, false};
+    timer_jobs[timer_id] = std::make_tuple(std::move(job), squelch, false);
 }
 
 void LokiMQ::proxy_timer(bt_list_consumer timer_data) {
