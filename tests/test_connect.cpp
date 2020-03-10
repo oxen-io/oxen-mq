@@ -1,5 +1,6 @@
 #include "common.h"
 #include <future>
+#include <lokimq/hex.h>
 extern "C" {
 #include <sodium.h>
 }
@@ -120,4 +121,46 @@ TEST_CASE("plain-text connections", "[plaintext][connect]") {
     REQUIRE( success );
 
 
+}
+
+TEST_CASE("SN disconnections", "[connect][disconnect]") {
+    std::vector<std::unique_ptr<LokiMQ>> lmq;
+    std::vector<std::string> pubkey, privkey;
+    std::unordered_map<std::string, std::string> conn;
+    for (int i = 0; i < 3; i++) {
+        pubkey.emplace_back();
+        privkey.emplace_back();
+        pubkey[i].resize(crypto_box_PUBLICKEYBYTES);
+        privkey[i].resize(crypto_box_SECRETKEYBYTES);
+        crypto_box_keypair(reinterpret_cast<unsigned char*>(&pubkey[i][0]), reinterpret_cast<unsigned char*>(&privkey[i][0]));
+        conn.emplace(pubkey[i], "tcp://127.0.0.1:" + std::to_string(4450 + i));
+    }
+    std::atomic<int> his{0};
+    for (int i = 0; i < pubkey.size(); i++) {
+        lmq.push_back(std::make_unique<LokiMQ>(
+            pubkey[i], privkey[i], true,
+            [conn](auto pk) { auto it = conn.find((std::string) pk); if (it != conn.end()) return it->second; return ""s; },
+            get_logger("S" + std::to_string(i) + "» ")
+        ));
+        auto& server = *lmq.back();
+        server.log_level(LogLevel::debug);
+
+        server.listen_curve(conn[pubkey[i]], [](auto /*ip*/, auto /*pk*/) { return Allow{AuthLevel::none, true}; });
+        server.add_category("sn", Access{AuthLevel::none, true})
+            .add_command("hi", [&](Message& m) { his++; });
+        server.start();
+    }
+    std::this_thread::sleep_for(50ms);
+
+    lmq[0]->send(pubkey[1], "sn.hi");
+    lmq[0]->send(pubkey[2], "sn.hi");
+    std::this_thread::sleep_for(50ms);
+    lmq[2]->send(pubkey[0], "sn.hi");
+    lmq[2]->send(pubkey[1], "sn.hi");
+    lmq[1]->send(pubkey[0], "BYE");
+    std::this_thread::sleep_for(50ms);
+    lmq[0]->send(pubkey[2], "sn.hi");
+    std::this_thread::sleep_for(50ms);
+
+    REQUIRE(his == 5);
 }

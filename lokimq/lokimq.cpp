@@ -924,12 +924,15 @@ void update_connection_indices(Container& c, size_t index, AccessIndex get_index
             it = c.erase(it);
             continue;
         }
-        if (index > i)
+        if (i > index)
             --i;
         ++it;
     }
 }
 
+/// Closes outgoing connections and removes all references.  Note that this will invalidate
+/// iterators on the various connection containers - if you don't want that, delete it first so that
+/// the container won't contain the element being deleted.
 void LokiMQ::proxy_close_connection(size_t index, std::chrono::milliseconds linger) {
     connections[index].setsockopt<int>(ZMQ_LINGER, linger > 0ms ? linger.count() : 0);
     pollitems_stale = true;
@@ -959,7 +962,6 @@ void LokiMQ::proxy_expire_idle_peers() {
             }
             LMQ_LOG(info, "Closing outgoing connection to ", it->first, ": idle timeout reached");
             proxy_close_connection(info.conn_index, CLOSE_LINGER);
-            it = peers.erase(it);
         } else {
             ++it;
         }
@@ -1186,6 +1188,14 @@ void LokiMQ::proxy_loop() {
 
             if (!proxy_handle_builtin(i, parts))
                 proxy_to_worker(i, parts);
+
+            if (pollitems_stale) {
+                // If our items became stale then we may have just closed a connection and so our
+                // queue index maybe also be stale, so restart the proxy loop (so that we rebuild
+                // pollitems).
+                LMQ_TRACE("pollitems became stale; short-circuiting incoming message loop");
+                break;
+            }
         }
 
         LMQ_TRACE("done proxy loop");
@@ -1902,7 +1912,6 @@ void LokiMQ::proxy_disconnect(ConnectionID conn, std::chrono::milliseconds linge
         if (peer.outgoing()) {
             LMQ_LOG(info, "Closing outgoing connection to ", conn);
             proxy_close_connection(peer.conn_index, linger);
-            peers.erase(it);
             return;
         }
     }
