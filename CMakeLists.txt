@@ -48,7 +48,11 @@ set_target_properties(lokimq PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
-target_link_libraries(lokimq PUBLIC cppzmq)
+if(BUILD_SHARED_LIBS)
+  target_link_libraries(lokimq PUBLIC cppzmq)
+else()
+  target_link_libraries(lokimq PUBLIC cppzmq-static)
+endif()
 
 if(NOT SODIUM_LIBRARIES)
     pkg_search_module(SODIUM REQUIRED libsodium)
@@ -57,6 +61,10 @@ endif()
 # Really want to just use SODIUM_LINK_LIBRARIES here, but that isn't in older cmake:
 find_library(libsodium_link_libs NAMES ${SODIUM_LIBRARIES} PATHS ${SODIUM_LIBRARY_DIRS})
 target_link_libraries(lokimq PRIVATE ${libsodium_link_libs})
+
+if(STATIC)
+    target_link_libraries(cppzmq-static INTERFACE ${libsodium_link_libs})
+endif()
 
 target_include_directories(lokimq PRIVATE ${SODIUM_INCLUDE_DIRS})
 
