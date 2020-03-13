@@ -45,6 +45,10 @@ install(
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq
 )
 
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+target_link_libraries(lokimq PRIVATE Threads::Threads)
+
 # We require cppzmq >= 4.3, and versions before 4.3.2 have some security issues, so try to find
 # >=4.3.2 on the system and, if we don't (or found an old one) build a bundled one.
 include(FindPkgConfig)
