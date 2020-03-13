@@ -1,4 +1,4 @@
-lokimq (1.0.0-1) unstable; urgency=medium
+lokimq (1.0.0-1~ubuntu1804) bionic; urgency=medium
 
   * Initial LokiMQ release
 
