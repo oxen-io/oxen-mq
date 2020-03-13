@@ -18,7 +18,10 @@ pkg_check_modules(SODIUM REQUIRED libsodium)
 
 target_link_libraries(tests Catch2::Catch2 lokimq ${SODIUM_LIBRARIES} Threads::Threads)
 
-set_property(TARGET tests PROPERTY CXX_STANDARD 14)
-set_property(TARGET tests PROPERTY CXX_STANDARD_REQUIRED ON)
+set_target_properties(tests PROPERTIES
+    CXX_STANDARD 14
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
 
 add_custom_target(check COMMAND tests)

@@ -74,6 +74,7 @@ target_compile_options(lokimq PRIVATE -Wall -Wextra -Werror)
 set_target_properties(lokimq PROPERTIES
     CXX_STANDARD 14
     CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
     POSITION_INDEPENDENT_CODE ON
 )
 
