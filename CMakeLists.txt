@@ -53,7 +53,6 @@ add_subdirectory(cppzmq EXCLUDE_FROM_ALL)
 target_include_directories(lokimq
     PUBLIC
         $<INSTALL_INTERFACE:>
-        $<INSTALL_INTERFACE:mapbox-variant/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/mapbox-variant/include>
 )
@@ -111,6 +110,26 @@ install(
           ${CMAKE_CURRENT_BINARY_DIR}/lokimq/version.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq
 )
+option(LOKIMQ_INSTALL_MAPBOX_VARIANT "Install mapbox-variant headers with lokimq/ headers" ON)
+if(LOKIMQ_INSTALL_MAPBOX_VARIANT)
+  install(
+    FILES mapbox-variant/include/mapbox/variant.hpp
+          mapbox-variant/include/mapbox/variant_cast.hpp
+          mapbox-variant/include/mapbox/variant_io.hpp
+          mapbox-variant/include/mapbox/variant_visitor.hpp
+          mapbox-variant/include/mapbox/recursive_wrapper.hpp
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq/mapbox
+  )
+endif()
+
+option(LOKIMQ_INSTALL_CPPZMQ "Install cppzmq header with lokimq/ headers" ON)
+if(LOKIMQ_INSTALL_CPPZMQ)
+  install(
+    FILES cppzmq/zmq.hpp
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq
+  )
+endif()
+
 
 install(
     FILES ${CMAKE_CURRENT_BINARY_DIR}/liblokimq.pc
