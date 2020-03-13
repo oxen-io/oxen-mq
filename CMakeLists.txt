@@ -4,12 +4,23 @@ project(liblokimq CXX)
 
 include(GNUInstallDirs)
 
+set(LOKIMQ_VERSION_MAJOR 1)
+set(LOKIMQ_VERSION_MINOR 0)
+set(LOKIMQ_VERSION_PATCH 0)
+set(LOKIMQ_VERSION "${LOKIMQ_VERSION_MAJOR}.${LOKIMQ_VERSION_MINOR}.${LOKIMQ_VERSION_PATCH}")
+message(STATUS "lokimq v${LOKIMQ_VERSION}")
+
+set(LOKIMQ_LIBVERSION 0)
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 add_library(lokimq
     lokimq/lokimq.cpp
     lokimq/bt_serialize.cpp
 )
+set_target_properties(lokimq PROPERTIES SOVERSION ${LOKIMQ_LIBVERSION})
+
+configure_file(lokimq/version.h.in lokimq/version.h @ONLY)
 
 install(
     FILES lokimq/batch.h
@@ -17,6 +28,7 @@ install(
           lokimq/hex.h
           lokimq/lokimq.h
           lokimq/string_view.h
+          ${CMAKE_CURRENT_BINARY_DIR}/lokimq/version.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq
 )
 
