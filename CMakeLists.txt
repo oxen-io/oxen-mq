@@ -37,12 +37,10 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 target_link_libraries(lokimq PRIVATE Threads::Threads)
 
-# We require cppzmq >= 4.3, and versions before 4.3.2 have some security issues, so try to find
-# >=4.3.2 on the system and, if we don't (or found an old one) build a bundled one.
 include(FindPkgConfig)
-pkg_search_module(libzmq QUIET libzmq>=4.3.2)
+pkg_search_module(libzmq QUIET libzmq>=4.3)
 if(NOT libzmq_FOUND)
-    message(STATUS "libzmq >= 4.3.2 not found, building bundled 4.3.2")
+    message(STATUS "libzmq >= 4.3 not found, building bundled 4.3.2")
     list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/local-libzmq")
     include(LocalLibzmq)
 endif()
