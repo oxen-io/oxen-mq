@@ -12,6 +12,10 @@ message(STATUS "lokimq v${LOKIMQ_VERSION}")
 
 set(LOKIMQ_LIBVERSION 0)
 
+
+option(BUILD_SHARED_LIBS "Build shared libraries instead of static ones" ON)
+
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 add_library(lokimq
