@@ -19,6 +19,7 @@ option(BUILD_SHARED_LIBS "Build shared libraries instead of static ones" ON)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 configure_file(lokimq/version.h.in lokimq/version.h @ONLY)
+configure_file(liblokimq.pc.in liblokimq.pc @ONLY)
 
 add_library(lokimq
     lokimq/auth.cpp
@@ -109,6 +110,11 @@ install(
           lokimq/string_view.h
           ${CMAKE_CURRENT_BINARY_DIR}/lokimq/version.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq
+)
+
+install(
+    FILES ${CMAKE_CURRENT_BINARY_DIR}/liblokimq.pc
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
 )
 
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
