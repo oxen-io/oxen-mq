@@ -52,7 +52,7 @@ void bt_deserialize<string_view>::operator()(string_view& s, string_view& val) {
     if (s.size() < 2) throw bt_deserialize_invalid{"Deserialize failed: given data is not an bt-encoded string"};
     if (s[0] < '0' || s[0] > '9')
         throw bt_deserialize_invalid_type{"Expected 0-9 but found '"s + s[0] + "'"};
-    uint64_t len = extract_unsigned(s);
+    auto len = static_cast<size_t>(extract_unsigned(s));
     if (s.empty() || s[0] != ':')
         throw bt_deserialize_invalid{"Did not find expected ':' during string deserialization"};
     s.remove_prefix(1);
