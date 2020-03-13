@@ -18,6 +18,8 @@ option(BUILD_SHARED_LIBS "Build shared libraries instead of static ones" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+configure_file(lokimq/version.h.in lokimq/version.h @ONLY)
+
 add_library(lokimq
     lokimq/auth.cpp
     lokimq/batch.cpp
@@ -29,21 +31,6 @@ add_library(lokimq
     lokimq/worker.cpp
 )
 set_target_properties(lokimq PROPERTIES SOVERSION ${LOKIMQ_LIBVERSION})
-
-configure_file(lokimq/version.h.in lokimq/version.h @ONLY)
-
-install(
-    FILES lokimq/auth.h
-          lokimq/batch.h
-          lokimq/bt_serialize.h
-          lokimq/connections.h
-          lokimq/hex.h
-          lokimq/lokimq.h
-          lokimq/message.h
-          lokimq/string_view.h
-          ${CMAKE_CURRENT_BINARY_DIR}/lokimq/version.h
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq
-)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
@@ -109,6 +96,19 @@ install(
     TARGETS lokimq
     EXPORT lokimqConfig
     DESTINATION lib
+)
+
+install(
+    FILES lokimq/auth.h
+          lokimq/batch.h
+          lokimq/bt_serialize.h
+          lokimq/connections.h
+          lokimq/hex.h
+          lokimq/lokimq.h
+          lokimq/message.h
+          lokimq/string_view.h
+          ${CMAKE_CURRENT_BINARY_DIR}/lokimq/version.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq
 )
 
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
