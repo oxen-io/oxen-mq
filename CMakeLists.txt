@@ -95,7 +95,7 @@ export(
 install(
     TARGETS lokimq
     EXPORT lokimqConfig
-    DESTINATION lib
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
 install(
