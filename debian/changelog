@@ -1,0 +1,5 @@
+lokimq (1.0.0-1) unstable; urgency=medium
+
+  * Initial LokiMQ release
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Fri, 13 Mar 2020 17:51:00 -0300
