@@ -44,6 +44,9 @@
 #include <zmq.hpp>
 #include "bt_serialize.h"
 #include "string_view.h"
+#include "connections.h"
+#include "message.h"
+#include "auth.h"
 
 #if ZMQ_VERSION < ZMQ_MAKE_VERSION (4, 3, 0)
 // Timers were not added until 4.3.0
@@ -57,152 +60,6 @@ using namespace std::literals;
 /// Logging levels passed into LogFunc.  (Note that trace does nothing more than debug in a release
 /// build).
 enum class LogLevel { fatal, error, warn, info, debug, trace };
-
-/// Authentication levels for command categories and connections
-enum class AuthLevel {
-    denied, ///< Not actually an auth level, but can be returned by the AllowFunc to deny an incoming connection.
-    none, ///< No authentication at all; any random incoming ZMQ connection can invoke this command.
-    basic, ///< Basic authentication commands require a login, or a node that is specifically configured to be a public node (e.g. for public RPC).
-    admin, ///< Advanced authentication commands require an admin user, either via explicit login or by implicit login from localhost.  This typically protects administrative commands like shutting down, starting mining, or access sensitive data.
-};
-
-std::ostream& operator<<(std::ostream& os, AuthLevel a);
-
-/// The access level for a command category
-struct Access {
-    /// Minimum access level required
-    AuthLevel auth = AuthLevel::none;
-    /// If true only remote SNs may call the category commands
-    bool remote_sn = false;
-    /// If true the category requires that the local node is a SN
-    bool local_sn = false;
-};
-
-/// Return type of the AllowFunc: this determines whether we allow the connection at all, and if so,
-/// sets the initial authentication level and tells LokiMQ whether the other end is an active SN.
-struct Allow {
-    AuthLevel auth = AuthLevel::none;
-    bool remote_sn = false;
-};
-
-class LokiMQ;
-
-/// Opaque data structure representing a connection which supports ==, !=, < and std::hash.  For
-/// connections to service node this is the service node pubkey (and you can pass a 32-byte string
-/// anywhere a ConnectionID is called for).  For non-SN remote connections you need to keep a copy
-/// of the ConnectionID returned by connect_remote().
-struct ConnectionID {
-    ConnectionID(std::string pubkey_) : id{SN_ID}, pk{std::move(pubkey_)} {
-        if (pk.size() != 32)
-            throw std::runtime_error{"Invalid pubkey: expected 32 bytes"};
-    }
-    ConnectionID(string_view pubkey_) : ConnectionID(std::string{pubkey_}) {}
-    ConnectionID(const ConnectionID&) = default;
-    ConnectionID(ConnectionID&&) = default;
-    ConnectionID& operator=(const ConnectionID&) = default;
-    ConnectionID& operator=(ConnectionID&&) = default;
-
-    // Returns true if this is a ConnectionID (false for a default-constructed, invalid id)
-    explicit operator bool() const {
-        return id != 0;
-    }
-
-    // Two ConnectionIDs are equal if they are both SNs and have matching pubkeys, or they are both
-    // not SNs and have matching internal IDs.  (Pubkeys do not have to match for non-SNs, and
-    // routes are not considered for equality at all).
-    bool operator==(const ConnectionID &o) const {
-        if (id == SN_ID && o.id == SN_ID)
-            return pk == o.pk;
-        return id == o.id;
-    }
-    bool operator!=(const ConnectionID &o) const { return !(*this == o); }
-    bool operator<(const ConnectionID &o) const {
-        if (id == SN_ID && o.id == SN_ID)
-            return pk < o.pk;
-        return id < o.id;
-    }
-    // Returns true if this ConnectionID represents a SN connection
-    bool sn() const { return id == SN_ID; }
-
-    // Returns this connection's pubkey, if any.  (Note that it is possible to have a pubkey and not
-    // be a SN when connecting to secure remotes: having a non-empty pubkey does not imply that
-    // `sn()` is true).
-    const std::string& pubkey() const { return pk; }
-    // Default construction; creates a ConnectionID with an invalid internal ID that will not match
-    // an actual connection.
-    ConnectionID() : ConnectionID(0) {}
-private:
-    ConnectionID(long long id) : id{id} {}
-    ConnectionID(long long id, std::string pubkey, std::string route = "")
-        : id{id}, pk{std::move(pubkey)}, route{std::move(route)} {}
-
-    constexpr static long long SN_ID = -1;
-    long long id = 0;
-    std::string pk;
-    std::string route;
-    friend class LokiMQ;
-    friend struct std::hash<ConnectionID>;
-    template <typename... T>
-    friend bt_dict build_send(ConnectionID to, string_view cmd, const T&... opts);
-    friend std::ostream& operator<<(std::ostream& o, const ConnectionID& conn);
-};
-
-} // namespace lokimq
-namespace std {
-    // Need this here because we stick it in an unordered_map below.
-    template <> struct hash<lokimq::ConnectionID> {
-        size_t operator()(const lokimq::ConnectionID &c) const {
-            return c.sn() ? std::hash<std::string>{}(c.pk) :
-                std::hash<long long>{}(c.id);
-        }
-    };
-} // namespace std
-namespace lokimq {
-
-/// Encapsulates an incoming message from a remote connection with message details plus extra
-/// info need to send a reply back through the proxy thread via the `reply()` method.  Note that
-/// this object gets reused: callbacks should use but not store any reference beyond the callback.
-class Message {
-public:
-    LokiMQ& lokimq; ///< The owning LokiMQ object
-    std::vector<string_view> data; ///< The provided command data parts, if any.
-    ConnectionID conn; ///< The connection info for routing a reply; also contains the pubkey/sn status.
-    std::string reply_tag; ///< If the invoked command is a request command this is the required reply tag that will be prepended by `send_reply()`.
-
-    /// Constructor
-    Message(LokiMQ& lmq, ConnectionID cid) : lokimq{lmq}, conn{std::move(cid)} {}
-
-    // Non-copyable
-    Message(const Message&) = delete;
-    Message& operator=(const Message&) = delete;
-
-    /// Sends a command back to whomever sent this message.  Arguments are forwarded to send() but
-    /// with send_option::optional{} added if the originator is not a SN.  For SN messages (i.e.
-    /// where `sn` is true) this is a "strong" reply by default in that the proxy will attempt to
-    /// establish a new connection to the SN if no longer connected.  For non-SN messages the reply
-    /// will be attempted using the available routing information, but if the connection has already
-    /// been closed the reply will be dropped.
-    ///
-    /// If you want to send a non-strong reply even when the remote is a service node then add
-    /// an explicit `send_option::optional()` argument.
-    template <typename... Args>
-    void send_back(string_view, Args&&... args);
-
-    /// Sends a reply to a request.  This takes no command: the command is always the built-in
-    /// "REPLY" command, followed by the unique reply tag, then any reply data parts.  All other
-    /// arguments are as in `send_back()`.  You should only send one reply for a command expecting
-    /// replies, though this is not enforced: attempting to send multiple replies will simply be
-    /// dropped when received by the remote.  (Note, however, that it is possible to send multiple
-    /// messages -- e.g. you could send a reply and then also call send_back() and/or send_request()
-    /// to send more requests back to the sender).
-    template <typename... Args>
-    void send_reply(Args&&... args);
-
-    /// Sends a request back to whomever sent this message.  This is effectively a wrapper around
-    /// lmq.request() that takes care of setting up the recipient arguments.
-    template <typename ReplyCallback, typename... Args>
-    void send_request(string_view cmd, ReplyCallback&& callback, Args&&... args);
-};
 
 // Forward declarations; see batch.h
 namespace detail { class Batch; }
@@ -261,6 +118,11 @@ private:
     /// Will be true (and is guarded by a mutex) if the proxy thread is quitting; guards against new
     /// control sockets from threads trying to talk to the proxy thread.
     bool proxy_shutting_down = false;
+
+    /// We have one seldom-used mutex here: it is generally locked just once per thread (the first
+    /// time the thread calls get_control_socket()) and once more by the proxy thread when it shuts
+    /// down, and so will not be a contention point.
+    std::mutex control_sockets_mutex;
 
     /// Called to obtain a "command" socket that attaches to `control` to send commands to the
     /// proxy thread from other threads.  This socket is unique per thread and LokiMQ instance.
@@ -1223,7 +1085,11 @@ inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option
     control_data["keep-alive"] = timeout.time.count();
 }
 
-} // namespace detail
+
+
+/// Extracts a pubkey, SN status, and auth level from a zmq message received on a *listening*
+/// socket.
+std::tuple<std::string, bool, AuthLevel> extract_metadata(zmq::message_t& msg);
 
 template <typename... T>
 bt_dict build_send(ConnectionID to, string_view cmd, const T&... opts) {
@@ -1246,10 +1112,13 @@ bt_dict build_send(ConnectionID to, string_view cmd, const T&... opts) {
 
 }
 
+} // namespace detail
+
+
 template <typename... T>
 void LokiMQ::send(ConnectionID to, string_view cmd, const T&... opts) {
     detail::send_control(get_control_socket(), "SEND",
-            bt_serialize(build_send(std::move(to), cmd, opts...)));
+            bt_serialize(detail::build_send(std::move(to), cmd, opts...)));
 }
 
 std::string make_random_string(size_t size);
@@ -1257,7 +1126,7 @@ std::string make_random_string(size_t size);
 template <typename... T>
 void LokiMQ::request(ConnectionID to, string_view cmd, ReplyCallback callback, const T &...opts) {
     const auto reply_tag = make_random_string(15); // 15 random bytes is lots and should keep us in most stl implementations' small string optimization
-    bt_dict control_data = build_send(std::move(to), cmd, reply_tag, opts...);
+    bt_dict control_data = detail::build_send(std::move(to), cmd, reply_tag, opts...);
     control_data["request"] = true;
     control_data["request_callback"] = reinterpret_cast<uintptr_t>(new ReplyCallback{std::move(callback)});
     control_data["request_tag"] = string_view{reply_tag};

@@ -15,18 +15,27 @@ set(LOKIMQ_LIBVERSION 0)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 add_library(lokimq
-    lokimq/lokimq.cpp
+    lokimq/auth.cpp
+    lokimq/batch.cpp
     lokimq/bt_serialize.cpp
+    lokimq/connections.cpp
+    lokimq/jobs.cpp
+    lokimq/lokimq.cpp
+    lokimq/proxy.cpp
+    lokimq/worker.cpp
 )
 set_target_properties(lokimq PROPERTIES SOVERSION ${LOKIMQ_LIBVERSION})
 
 configure_file(lokimq/version.h.in lokimq/version.h @ONLY)
 
 install(
-    FILES lokimq/batch.h
+    FILES lokimq/auth.h
+          lokimq/batch.h
           lokimq/bt_serialize.h
+          lokimq/connections.h
           lokimq/hex.h
           lokimq/lokimq.h
+          lokimq/message.h
           lokimq/string_view.h
           ${CMAKE_CURRENT_BINARY_DIR}/lokimq/version.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq
