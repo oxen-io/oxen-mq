@@ -93,6 +93,10 @@ if(BUILD_SHARED_LIBS)
   link_dep_libs(lokimq PRIVATE ${SODIUM_LIBRARY_DIRS} ${SODIUM_LIBRARIES})
   target_include_directories(lokimq PRIVATE ${SODIUM_INCLUDE_DIRS})
 
+  if(TARGET libzmq_vendor)
+    link_dep_libs(libzmq_vendor INTERFACE "${SODIUM_LIBRARY_DIRS}" ${SODIUM_LIBRARIES})
+  endif()
+
   target_link_libraries(lokimq PUBLIC cppzmq)
 else()
   link_dep_libs(lokimq PRIVATE "${SODIUM_STATIC_LIBRARY_DIRS}" ${SODIUM_STATIC_LIBRARIES})
