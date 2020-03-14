@@ -77,7 +77,7 @@ endif()
 find_library(libsodium_link_libs NAMES ${SODIUM_LIBRARIES} PATHS ${SODIUM_LIBRARY_DIRS})
 target_link_libraries(lokimq PRIVATE ${libsodium_link_libs})
 
-if(STATIC)
+if(NOT BUILD_SHARED_LIBS)
     target_link_libraries(cppzmq-static INTERFACE ${libsodium_link_libs})
 endif()
 
