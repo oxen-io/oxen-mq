@@ -73,9 +73,11 @@ if(NOT SODIUM_LIBRARIES)
     pkg_search_module(SODIUM REQUIRED libsodium)
 endif()
 
-# allow adding links to non-local targets (which is allowed even under old policy as long as the
-# target is an interface, but under new cmake it spews out warnings).
-cmake_policy(SET CMP0079 NEW)
+if(NOT ${CMAKE_VERSION} VERSION_LESS 3.13)
+    # allow adding links to non-local targets (which is allowed even under old policy as long as the
+    # target is an interface, but under new cmake it spews out warnings).
+    cmake_policy(SET CMP0079 NEW)
+endif()
 
 function(link_dep_libs target linktype libdirs)
   foreach(lib ${ARGN})
