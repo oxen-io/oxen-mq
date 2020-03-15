@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.7)
 
 project(liblokimq CXX)
 
@@ -38,26 +38,36 @@ find_package(Threads REQUIRED)
 target_link_libraries(lokimq PRIVATE Threads::Threads)
 
 # libzmq is nearly impossible to link statically from a system-installed static library: it depends
-# on a ton of other libraries which typically are not all statically available.  So if the caller
-# asked us to do things statically, don't even try to find a system lib and just build it.  If they
-# really want it, they can set up the libzmq_FOUND etc. variables themselves.
-if(BUILD_SHARED_LIBS)
-  include(FindPkgConfig)
-  pkg_search_module(libzmq QUIET libzmq>=4.3)
-endif()
-if(NOT libzmq_FOUND)
-    message(STATUS "libzmq >= 4.3 not found, building bundled 4.3.2")
-    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/local-libzmq")
-    include(LocalLibzmq)
+# on a ton of other libraries, some of which are not all statically available.  If the caller wants
+# to mess with this, so be it: they can set up a libzmq target and we'll use it.  Otherwise if they
+# asked us to do things statically, don't even try to find a system lib and just build it.
+set(lokimq_build_static_libzmq OFF)
+if(TARGET libzmq)
+    target_link_libraries(lokimq PUBLIC libzmq)
+elseif(BUILD_SHARED_LIBS)
+    include(FindPkgConfig)
+    pkg_check_modules(libzmq libzmq>=4.3 IMPORTED_TARGET)
+    if(libzmq_FOUND)
+        target_link_libraries(lokimq PUBLIC PkgConfig::libzmq)
+    else()
+        set(lokimq_build_static_libzmq ON)
+    endif()
+else()
+    set(lokimq_build_static_libzmq ON)
 endif()
 
-set(CPPZMQ_BUILD_TESTS OFF CACHE BOOL "Disable cppzmq tests")
-add_subdirectory(cppzmq EXCLUDE_FROM_ALL)
+if(lokimq_build_static_libzmq)
+    message(STATUS "libzmq >= 4.3 not found or static build requested, building bundled 4.3.2")
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/local-libzmq")
+    include(LocalLibzmq)
+    target_link_libraries(lokimq PUBLIC libzmq_vendor)
+endif()
 
 target_include_directories(lokimq
     PUBLIC
         $<INSTALL_INTERFACE:>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cppzmq>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/mapbox-variant/include>
 )
 
@@ -69,49 +79,39 @@ set_target_properties(lokimq PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
-if(NOT SODIUM_LIBRARIES)
-    pkg_search_module(SODIUM REQUIRED libsodium)
-endif()
-
-if(NOT ${CMAKE_VERSION} VERSION_LESS 3.13)
-    # allow adding links to non-local targets (which is allowed even under old policy as long as the
-    # target is an interface, but under new cmake it spews out warnings).
-    cmake_policy(SET CMP0079 NEW)
-endif()
-
 function(link_dep_libs target linktype libdirs)
-  foreach(lib ${ARGN})
-    find_library(link_lib-${lib} NAMES ${lib} PATHS ${libdirs})
-    if(link_lib-${lib})
-      target_link_libraries(${target} ${linktype} ${link_lib-${lib}})
-    endif()
-  endforeach()
+    foreach(lib ${ARGN})
+        find_library(link_lib-${lib} NAMES ${lib} PATHS ${libdirs})
+        message(STATUS "FIND ${lib} FOUND ${link_lib-${lib}}")
+        if(link_lib-${lib})
+            target_link_libraries(${target} ${linktype} ${link_lib-${lib}})
+        endif()
+    endforeach()
 endfunction()
 
-# Really want to just use SODIUM_LINK_LIBRARIES here, but that isn't in older cmake:
-if(BUILD_SHARED_LIBS)
-  link_dep_libs(lokimq PRIVATE ${SODIUM_LIBRARY_DIRS} ${SODIUM_LIBRARIES})
-  target_include_directories(lokimq PRIVATE ${SODIUM_INCLUDE_DIRS})
-
-  if(TARGET libzmq_vendor)
-    link_dep_libs(libzmq_vendor INTERFACE "${SODIUM_LIBRARY_DIRS}" ${SODIUM_LIBRARIES})
-  endif()
-
-  target_link_libraries(lokimq PUBLIC cppzmq)
+# If the caller has already set up a sodium target then we will just link to it, otherwise we go
+# looking for it.
+if(TARGET sodium)
+    target_link_libraries(lokimq PRIVATE sodium)
+    if(lokimq_build_static_libzmq)
+        target_link_libraries(libzmq_vendor INTERFACE sodium)
+    endif()
 else()
-  link_dep_libs(lokimq PRIVATE "${SODIUM_STATIC_LIBRARY_DIRS}" ${SODIUM_STATIC_LIBRARIES})
-  target_include_directories(lokimq PRIVATE ${SODIUM_STATIC_INCLUDE_DIRS})
+    pkg_check_modules(sodium REQUIRED libsodium IMPORTED_TARGET)
 
-  if (libzmq_FOUND)
-    # cppzmq doesn't properly set up its libzmq target dependencies so do it here (this isn't the
-    # normal case: we only get here if someone pre-set libzmq_FOUND etc. *and* wants static libs)
-    link_dep_libs(cppzmq-static INTERFACE "${PC_LIBZMQ_STATIC_LIBRARY_DIRS}" ${PC_LIBZMQ_STATIC_LIBRARIES})
-  else()
-    # Otherwise we built a static vendored one, so make sure it links to the static libsodium
-    link_dep_libs(libzmq_vendor INTERFACE "${SODIUM_STATIC_LIBRARY_DIRS}" ${SODIUM_STATIC_LIBRARIES})
-  endif()
-
-  target_link_libraries(lokimq PUBLIC cppzmq-static)
+    if(BUILD_SHARED_LIBS)
+        target_link_libraries(lokimq PRIVATE PkgConfig::sodium)
+        if(lokimq_build_static_libzmq)
+            target_link_libraries(libzmq_vendor INTERFACE PkgConfig::sodium)
+        endif()
+    else()
+        link_dep_libs(lokimq PRIVATE "${sodium_STATIC_LIBRARY_DIRS}" ${sodium_STATIC_LIBRARIES})
+        target_include_directories(lokimq PRIVATE ${sodium_STATIC_INCLUDE_DIRS})
+        if(lokimq_build_static_libzmq)
+            link_dep_libs(libzmq_vendor INTERFACE "${sodium_STATIC_LIBRARY_DIRS}" ${sodium_STATIC_LIBRARIES})
+            target_link_libraries(libzmq_vendor INTERFACE ${sodium_STATIC_INCLUDE_DIRS})
+        endif()
+    endif()
 endif()
 
 add_library(lokimq::lokimq ALIAS lokimq)
