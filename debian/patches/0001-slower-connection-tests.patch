@@ -1,0 +1,70 @@
+From: Jason Rhinelander <jason@imaginary.ca>
+Date: Sat, 21 Mar 2020 13:32:41 -0300
+Subject: slower connection tests
+
+ARM systems (particularly armhf) sometimes exceed the limits here,
+particularly when the build system is low memory and just coming out of
+the build, so allow the tests to take longer to connect.
+---
+ tests/test_commands.cpp | 2 +-
+ tests/test_connect.cpp  | 4 ++--
+ tests/test_requests.cpp | 4 ++--
+ 3 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/tests/test_commands.cpp b/tests/test_commands.cpp
+index 9483a47..0ba91cf 100644
+--- a/tests/test_commands.cpp
++++ b/tests/test_commands.cpp
+@@ -58,7 +58,7 @@ TEST_CASE("basic commands", "[commands]") {
+     {
+         auto lock = catch_lock();
+         REQUIRE( connected.load() );
+-        REQUIRE( i <= 1 ); // should be fast
++        REQUIRE( i <= 3 ); // should be fast
+         REQUIRE( !failed.load() );
+         REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
+     }
+diff --git a/tests/test_connect.cpp b/tests/test_connect.cpp
+index 6c1b5c9..577b5f6 100644
+--- a/tests/test_connect.cpp
++++ b/tests/test_connect.cpp
+@@ -41,7 +41,7 @@ TEST_CASE("connections with curve authentication", "[curve][connect]") {
+     }
+     {
+         auto lock = catch_lock();
+-        REQUIRE( i <= 1 );
++        REQUIRE( i <= 3 );
+         REQUIRE( connected.load() );
+     }
+ 
+@@ -118,7 +118,7 @@ TEST_CASE("plain-text connections", "[plaintext][connect]") {
+     }
+     {
+         auto lock = catch_lock();
+-        REQUIRE( i <= 1 );
++        REQUIRE( i <= 3 );
+         REQUIRE( connected.load() );
+     }
+ 
+diff --git a/tests/test_requests.cpp b/tests/test_requests.cpp
+index 6d274fe..123adc5 100644
+--- a/tests/test_requests.cpp
++++ b/tests/test_requests.cpp
+@@ -46,7 +46,7 @@ TEST_CASE("basic requests", "[requests]") {
+         auto lock = catch_lock();
+         REQUIRE( connected.load() );
+         REQUIRE( !failed.load() );
+-        REQUIRE( i <= 1 );
++        REQUIRE( i <= 3 );
+         REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
+     }
+ 
+@@ -108,7 +108,7 @@ TEST_CASE("request from server to client", "[requests]") {
+         auto lock = catch_lock();
+         REQUIRE( connected.load() );
+         REQUIRE( !failed.load() );
+-        REQUIRE( i <= 1 );
++        REQUIRE( i <= 3 );
+         REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
+     }
+ 
