@@ -1,3 +1,18 @@
+lokimq (1.0.1-1~deb10) buster; urgency=medium
+
+  * Use the correct variable for shared libs
+  * More static build linking fixes
+  * cmake compatibility fix
+  * Add sodium dep if embedding static lib when doing a shared build, too
+  * More linking overhaul
+  * Add BUILD_BYPRODUCTS so that ninja build works
+  * Increase test timeouts for arm
+  * Add more locks around assertions
+  * Change pending_connects from vector to list
+  * 1.0.1 release
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Sat, 21 Mar 2020 13:00:16 -0300
+
 lokimq (1.0.0-1~deb10) buster; urgency=medium
 
   * Initial LokiMQ release
