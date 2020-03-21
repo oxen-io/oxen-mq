@@ -55,25 +55,34 @@ TEST_CASE("basic commands", "[commands]") {
             break;
         std::this_thread::sleep_for(50ms);
     }
-    REQUIRE( connected.load() );
-    REQUIRE( i <= 1 ); // should be fast
-    REQUIRE( !failed.load() );
-    REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
+    {
+        auto lock = catch_lock();
+        REQUIRE( connected.load() );
+        REQUIRE( i <= 1 ); // should be fast
+        REQUIRE( !failed.load() );
+        REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
+    }
 
     client.send(c, "public.hello");
     client.send(c, "public.client.pubkey");
 
     std::this_thread::sleep_for(50ms);
-    REQUIRE( hellos == 1 );
-    REQUIRE( his == 1 );
-    REQUIRE( to_hex(client_pubkey) == to_hex(client.get_pubkey()) );
+    {
+        auto lock = catch_lock();
+        REQUIRE( hellos == 1 );
+        REQUIRE( his == 1 );
+        REQUIRE( to_hex(client_pubkey) == to_hex(client.get_pubkey()) );
+    }
 
     for (int i = 0; i < 50; i++)
         client.send(c, "public.hello");
 
     std::this_thread::sleep_for(100ms);
-    REQUIRE( hellos == 51 );
-    REQUIRE( his == 26 );
+    {
+        auto lock = catch_lock();
+        REQUIRE( hellos == 51 );
+        REQUIRE( his == 26 );
+    }
 }
 
 TEST_CASE("outgoing auth level", "[commands][auth]") {
@@ -115,9 +124,12 @@ TEST_CASE("outgoing auth level", "[commands][auth]") {
     auto admin_c = client.connect_remote(listen, [](...) {}, [](...) {}, server.get_pubkey(), AuthLevel::admin);
 
     client.send(public_c, "public.reflect", "public.hi");
-    std::this_thread::sleep_for(20ms);
+    std::this_thread::sleep_for(50ms);
 
-    REQUIRE( public_hi == 1 );
+    {
+        auto lock = catch_lock();
+        REQUIRE( public_hi == 1 );
+    }
 
     client.send(basic_c, "public.reflect", "basic.hi");
     client.send(admin_c, "public.reflect", "admin.hi");
@@ -126,10 +138,13 @@ TEST_CASE("outgoing auth level", "[commands][auth]") {
     client.send(admin_c, "public.reflect", "admin.hi");
     client.send(basic_c, "public.reflect", "basic.hi");
 
-    std::this_thread::sleep_for(30ms);
-    REQUIRE( admin_hi == 3 );
-    REQUIRE( basic_hi == 2 );
-    REQUIRE( public_hi == 2 );
+    std::this_thread::sleep_for(50ms);
+    {
+        auto lock = catch_lock();
+        REQUIRE( admin_hi == 3 );
+        REQUIRE( basic_hi == 2 );
+        REQUIRE( public_hi == 2 );
+    }
 
     admin_hi = 0;
     basic_hi = 0;
@@ -145,7 +160,8 @@ TEST_CASE("outgoing auth level", "[commands][auth]") {
     client.send(admin_c, "public.reflect", "basic.hi");
     client.send(admin_c, "public.reflect", "public.hi");
 
-    std::this_thread::sleep_for(30ms);
+    std::this_thread::sleep_for(50ms);
+    auto lock = catch_lock();
     REQUIRE( admin_hi == 1 );
     REQUIRE( basic_hi == 2 );
     REQUIRE( public_hi == 3 );

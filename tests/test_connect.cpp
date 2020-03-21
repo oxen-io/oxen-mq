@@ -39,13 +39,17 @@ TEST_CASE("connections with curve authentication", "[curve][connect]") {
             break;
         std::this_thread::sleep_for(50ms);
     }
-    REQUIRE( i <= 1 );
-    REQUIRE( connected.load() );
+    {
+        auto lock = catch_lock();
+        REQUIRE( i <= 1 );
+        REQUIRE( connected.load() );
+    }
 
     bool success = false;
     std::vector<std::string> parts;
     client.request(server_conn, "public.hello", [&](auto success_, auto parts_) { success = success_; parts = parts_; });
     std::this_thread::sleep_for(50ms);
+    auto lock = catch_lock();
     REQUIRE( success );
 
 }
@@ -79,6 +83,7 @@ TEST_CASE("self-connection SN optimization", "[connect][self]") {
     std::this_thread::sleep_for(50ms);
     sn.send(pubkey, "a.b", "my data");
     std::this_thread::sleep_for(50ms);
+    auto lock = catch_lock();
     REQUIRE(invoked);
 }
 
@@ -111,16 +116,18 @@ TEST_CASE("plain-text connections", "[plaintext][connect]") {
             break;
         std::this_thread::sleep_for(50ms);
     }
-    REQUIRE( i <= 1 );
-    REQUIRE( connected.load() );
+    {
+        auto lock = catch_lock();
+        REQUIRE( i <= 1 );
+        REQUIRE( connected.load() );
+    }
 
     bool success = false;
     std::vector<std::string> parts;
     client.request(c, "public.hello", [&](auto success_, auto parts_) { success = success_; parts = parts_; });
     std::this_thread::sleep_for(50ms);
+    auto lock = catch_lock();
     REQUIRE( success );
-
-
 }
 
 TEST_CASE("SN disconnections", "[connect][disconnect]") {
@@ -162,5 +169,6 @@ TEST_CASE("SN disconnections", "[connect][disconnect]") {
     lmq[0]->send(pubkey[2], "sn.hi");
     std::this_thread::sleep_for(50ms);
 
+    auto lock = catch_lock();
     REQUIRE(his == 5);
 }
