@@ -294,7 +294,7 @@ private:
     /// we pass handshaking we move them out of here and (if set) trigger the on_connect callback.
     /// Unlike regular node-to-node peers, these have an extra "HI"/"HELLO" sequence that we used
     /// before we consider ourselves connected to the remote.
-    std::vector<std::tuple<size_t /*conn_index*/, long long /*conn_id*/, std::chrono::steady_clock::time_point, ConnectSuccess, ConnectFailure>> pending_connects;
+    std::list<std::tuple<size_t /*conn_index*/, long long /*conn_id*/, std::chrono::steady_clock::time_point, ConnectSuccess, ConnectFailure>> pending_connects;
 
     /// Pending requests that have been sent out but not yet received a matching "REPLY".  The value
     /// is the timeout timestamp.
