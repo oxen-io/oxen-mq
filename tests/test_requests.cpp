@@ -42,10 +42,13 @@ TEST_CASE("basic requests", "[requests]") {
             break;
         std::this_thread::sleep_for(50ms);
     }
-    REQUIRE( connected.load() );
-    REQUIRE( !failed.load() );
-    REQUIRE( i <= 1 );
-    REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
+    {
+        auto lock = catch_lock();
+        REQUIRE( connected.load() );
+        REQUIRE( !failed.load() );
+        REQUIRE( i <= 1 );
+        REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
+    }
 
     std::atomic<bool> got_reply{false};
     bool success;
@@ -57,6 +60,7 @@ TEST_CASE("basic requests", "[requests]") {
     });
 
     std::this_thread::sleep_for(50ms);
+    auto lock = catch_lock();
     REQUIRE( got_reply.load() );
     REQUIRE( success );
     REQUIRE( data == std::vector<std::string>{{"123"}} );
@@ -100,10 +104,13 @@ TEST_CASE("request from server to client", "[requests]") {
             break;
         std::this_thread::sleep_for(50ms);
     }
-    REQUIRE( connected.load() );
-    REQUIRE( !failed.load() );
-    REQUIRE( i <= 1 );
-    REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
+    {
+        auto lock = catch_lock();
+        REQUIRE( connected.load() );
+        REQUIRE( !failed.load() );
+        REQUIRE( i <= 1 );
+        REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
+    }
 
     std::atomic<bool> got_reply{false};
     bool success;
@@ -115,7 +122,10 @@ TEST_CASE("request from server to client", "[requests]") {
     });
 
     std::this_thread::sleep_for(50ms);
-    REQUIRE( got_reply.load() );
-    REQUIRE( success );
-    REQUIRE( data == std::vector<std::string>{{"123"}} );
+    {
+        auto lock = catch_lock();
+        REQUIRE( got_reply.load() );
+        REQUIRE( success );
+        REQUIRE( data == std::vector<std::string>{{"123"}} );
+    }
 }
