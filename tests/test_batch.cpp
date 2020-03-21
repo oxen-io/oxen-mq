@@ -52,6 +52,7 @@ TEST_CASE("batching many small jobs", "[batch-many]") {
 
     start_big_task(lmq);
     auto sum = done.get_future().get();
+    auto lock = catch_lock();
     REQUIRE( sum.first == 1337.0 );
     REQUIRE( sum.second == 3 );
 }
@@ -76,6 +77,7 @@ TEST_CASE("batch exception propagation", "[batch-exceptions]") {
         for (int i : {1, 2})
             batch.add_job([i]() { if (i == 1) return 42; throw std::domain_error("bad value " + std::to_string(i)); });
         batch.completion([&done_promise](auto results) {
+                auto lock = catch_lock();
                 REQUIRE( results.size() == 2 );
                 REQUIRE( results[0].get() == 42 );
                 REQUIRE_THROWS_MATCHES( results[1].get() == 0, std::domain_error, Message("bad value 2") );
@@ -95,6 +97,7 @@ TEST_CASE("batch exception propagation", "[batch-exceptions]") {
                     throw std::domain_error("bad value " + std::to_string(i));
             });
         batch.completion([&done_promise,&forty_two](auto results) {
+                auto lock = catch_lock();
                 REQUIRE( results.size() == 2 );
                 auto& r = results[0].get();
                 REQUIRE( &r == &forty_two );
@@ -111,6 +114,7 @@ TEST_CASE("batch exception propagation", "[batch-exceptions]") {
         for (int i : {1, 2})
             batch.add_job([i]() { if (i != 1) throw std::domain_error("bad value " + std::to_string(i)); });
         batch.completion([&done_promise](auto results) {
+                auto lock = catch_lock();
                 REQUIRE( results.size() == 2 );
                 REQUIRE_NOTHROW( results[0].get() );
                 REQUIRE_THROWS_MATCHES( results[1].get(), std::domain_error, Message("bad value 2") );
