@@ -1,3 +1,9 @@
+lokimq (1.0.1-2~deb10) buster; urgency=medium
+
+  * slower connection tests
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Mon, 23 Mar 2020 15:18:33 -0300
+
 lokimq (1.0.1-1~deb10) buster; urgency=medium
 
   * Use the correct variable for shared libs
