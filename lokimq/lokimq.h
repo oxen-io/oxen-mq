@@ -71,9 +71,6 @@ template <typename R> class Batch;
  */
 static constexpr auto DEFAULT_SEND_KEEP_ALIVE = 30s;
 
-// How frequently we cleanup connections (closing idle connections, calling connect or request failure callbacks)
-static constexpr auto CONN_CHECK_INTERVAL = 1s;
-
 // The default timeout for connect_remote()
 static constexpr auto REMOTE_CONNECT_TIMEOUT = 10s;
 
@@ -201,6 +198,14 @@ public:
      * trying to sending pending messages before dropping them and closing the underlying socket
      * after the high-level zmq socket is closed. */
     std::chrono::milliseconds CLOSE_LINGER = 5s;
+
+    /** How frequently we cleanup connections (closing idle connections, calling connect or request
+     * failure callbacks).  Making this slower results in more "overshoot" before failure callbacks
+     * are invoked; making it too fast results in more proxy thread overhead.  Any change to this
+     * variable must be set before calling start().
+     */
+    std::chrono::milliseconds CONN_CHECK_INTERVAL = 250ms;
+
 
 private:
 
