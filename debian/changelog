@@ -1,3 +1,12 @@
+lokimq (1.0.2-1~ubuntu2004) focal; urgency=medium
+
+  * Rename keep-alive -> keep_alive in internal serialization
+  * Reduce connection check interval and make configurable
+  * Make request timeout configurable
+  * 1.0.2 version bump
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Tue, 24 Mar 2020 11:37:30 -0300
+
 lokimq (1.0.1-2~ubuntu2004) focal; urgency=medium
 
   * slower connection tests
