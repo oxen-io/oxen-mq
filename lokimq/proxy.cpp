@@ -60,7 +60,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
         hint = data.consume_string_view();
     if (data.skip_until("incoming"))
         incoming = data.consume_integer<bool>();
-    if (data.skip_until("keep-alive"))
+    if (data.skip_until("keep_alive"))
         keep_alive = std::chrono::milliseconds{data.consume_integer<uint64_t>()};
     if (data.skip_until("optional"))
         optional = data.consume_integer<bool>();

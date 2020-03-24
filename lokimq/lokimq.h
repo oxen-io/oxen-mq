@@ -1082,7 +1082,7 @@ inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option
 
 /// `keep_alive` specialization: increases the outgoing socket idle timeout (if shorter)
 inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::keep_alive& timeout) {
-    control_data["keep-alive"] = timeout.time.count();
+    control_data["keep_alive"] = timeout.time.count();
 }
 
 
