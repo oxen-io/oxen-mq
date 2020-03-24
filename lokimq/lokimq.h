@@ -71,15 +71,12 @@ template <typename R> class Batch;
  */
 static constexpr auto DEFAULT_SEND_KEEP_ALIVE = 30s;
 
-// How frequently we cleanup connections (closing idle connections, calling connect or request failure callbacks)
-static constexpr auto CONN_CHECK_INTERVAL = 1s;
-
 // The default timeout for connect_remote()
 static constexpr auto REMOTE_CONNECT_TIMEOUT = 10s;
 
-// The minimum amount of time we wait for a reply to a REQUEST before calling the callback with
+// The amount of time we wait for a reply to a REQUEST before calling the callback with
 // `false` to signal a timeout.
-static constexpr auto REQUEST_TIMEOUT = 15s;
+static constexpr auto DEFAULT_REQUEST_TIMEOUT = 15s;
 
 /// Maximum length of a category
 static constexpr size_t MAX_CATEGORY_LENGTH = 50;
@@ -201,6 +198,14 @@ public:
      * trying to sending pending messages before dropping them and closing the underlying socket
      * after the high-level zmq socket is closed. */
     std::chrono::milliseconds CLOSE_LINGER = 5s;
+
+    /** How frequently we cleanup connections (closing idle connections, calling connect or request
+     * failure callbacks).  Making this slower results in more "overshoot" before failure callbacks
+     * are invoked; making it too fast results in more proxy thread overhead.  Any change to this
+     * variable must be set before calling start().
+     */
+    std::chrono::milliseconds CONN_CHECK_INTERVAL = 250ms;
+
 
 private:
 
@@ -1045,6 +1050,16 @@ struct keep_alive {
     explicit keep_alive(std::chrono::milliseconds time) : time{std::move(time)} {}
 };
 
+/// Specifies the amount of time to wait before triggering a failure callback for a request.  If a
+/// request reply arrives *after* the failure timeout has been triggered then it will be dropped.
+/// (This has no effect if specified on a non-request() call).  Note that requests failures are only
+/// processed in the CONN_CHECK_INTERVAL timer, so it can be up to that much longer than the time
+/// specified here before a failure callback is invoked.
+struct request_timeout {
+    std::chrono::milliseconds time;
+    explicit request_timeout(std::chrono::milliseconds time) : time{std::move(time)} {}
+};
+
 }
 
 namespace detail {
@@ -1082,7 +1097,12 @@ inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option
 
 /// `keep_alive` specialization: increases the outgoing socket idle timeout (if shorter)
 inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::keep_alive& timeout) {
-    control_data["keep-alive"] = timeout.time.count();
+    control_data["keep_alive"] = timeout.time.count();
+}
+
+/// `request_timeout` specialization: set the timeout time for a request
+inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::request_timeout& timeout) {
+    control_data["request_timeout"] = timeout.time.count();
 }
 
 
