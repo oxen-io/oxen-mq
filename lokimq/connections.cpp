@@ -128,7 +128,7 @@ std::pair<zmq::socket_t *, std::string> LokiMQ::proxy_connect_sn(bt_dict_consume
         hint = data.consume_string();
     if (data.skip_until("incoming"))
         incoming_only = data.consume_integer<bool>();
-    if (data.skip_until("keep-alive"))
+    if (data.skip_until("keep_alive"))
         keep_alive = std::chrono::milliseconds{data.consume_integer<uint64_t>()};
     if (data.skip_until("optional"))
         optional = data.consume_integer<bool>();
