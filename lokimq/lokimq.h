@@ -74,9 +74,9 @@ static constexpr auto DEFAULT_SEND_KEEP_ALIVE = 30s;
 // The default timeout for connect_remote()
 static constexpr auto REMOTE_CONNECT_TIMEOUT = 10s;
 
-// The minimum amount of time we wait for a reply to a REQUEST before calling the callback with
+// The amount of time we wait for a reply to a REQUEST before calling the callback with
 // `false` to signal a timeout.
-static constexpr auto REQUEST_TIMEOUT = 15s;
+static constexpr auto DEFAULT_REQUEST_TIMEOUT = 15s;
 
 /// Maximum length of a category
 static constexpr size_t MAX_CATEGORY_LENGTH = 50;
@@ -1050,6 +1050,16 @@ struct keep_alive {
     explicit keep_alive(std::chrono::milliseconds time) : time{std::move(time)} {}
 };
 
+/// Specifies the amount of time to wait before triggering a failure callback for a request.  If a
+/// request reply arrives *after* the failure timeout has been triggered then it will be dropped.
+/// (This has no effect if specified on a non-request() call).  Note that requests failures are only
+/// processed in the CONN_CHECK_INTERVAL timer, so it can be up to that much longer than the time
+/// specified here before a failure callback is invoked.
+struct request_timeout {
+    std::chrono::milliseconds time;
+    explicit request_timeout(std::chrono::milliseconds time) : time{std::move(time)} {}
+};
+
 }
 
 namespace detail {
@@ -1088,6 +1098,11 @@ inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option
 /// `keep_alive` specialization: increases the outgoing socket idle timeout (if shorter)
 inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::keep_alive& timeout) {
     control_data["keep_alive"] = timeout.time.count();
+}
+
+/// `request_timeout` specialization: set the timeout time for a request
+inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::request_timeout& timeout) {
+    control_data["request_timeout"] = timeout.time.count();
 }
 
 
