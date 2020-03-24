@@ -33,6 +33,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
     // NB: bt_dict_consumer goes in alphabetical order
     string_view hint;
     std::chrono::milliseconds keep_alive{DEFAULT_SEND_KEEP_ALIVE};
+    std::chrono::milliseconds request_timeout{DEFAULT_REQUEST_TIMEOUT};
     bool optional = false;
     bool incoming = false;
     bool request = false;
@@ -60,7 +61,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
         hint = data.consume_string_view();
     if (data.skip_until("incoming"))
         incoming = data.consume_integer<bool>();
-    if (data.skip_until("keep-alive"))
+    if (data.skip_until("keep_alive"))
         keep_alive = std::chrono::milliseconds{data.consume_integer<uint64_t>()};
     if (data.skip_until("optional"))
         optional = data.consume_integer<bool>();
@@ -74,6 +75,8 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
         if (!data.skip_until("request_tag"))
             throw std::runtime_error("Internal error: received request without request_name");
         request_tag = data.consume_string();
+        if (data.skip_until("request_timeout"))
+            request_timeout = std::chrono::milliseconds{data.consume_integer<uint64_t>()};
     }
     if (!data.skip_until("send"))
         throw std::runtime_error("Internal error: Invalid proxy send command; send parts missing");
@@ -112,7 +115,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
     if (request) {
         LMQ_LOG(debug, "Added new pending request ", to_hex(request_tag));
         pending_requests.insert({ request_tag, {
-            std::chrono::steady_clock::now() + REQUEST_TIMEOUT, std::move(*request_cbptr) }});
+            std::chrono::steady_clock::now() + request_timeout, std::move(*request_cbptr) }});
     }
 
     try {
