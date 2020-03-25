@@ -1,3 +1,9 @@
+lokimq (1.0.2-2~deb10) buster; urgency=medium
+
+  * liblokimq-dev needs to be arch: any
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Wed, 25 Mar 2020 16:21:14 -0300
+
 lokimq (1.0.2-1~deb10) buster; urgency=medium
 
   * Rename keep-alive -> keep_alive in internal serialization
