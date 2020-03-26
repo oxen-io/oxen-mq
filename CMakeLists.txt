@@ -14,6 +14,7 @@ set(LOKIMQ_LIBVERSION 0)
 
 
 option(BUILD_SHARED_LIBS "Build shared libraries instead of static ones" ON)
+option(LOKIMQ_DOCS "Generate API documentation" ON)
 
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -157,6 +158,10 @@ if(LOKIMQ_INSTALL_CPPZMQ)
     FILES cppzmq/zmq.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq
   )
+endif()
+
+if(LOKIMQ_DOCS)
+    add_subdirectory(doc)
 endif()
 
 
