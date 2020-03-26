@@ -1,5 +1,0 @@
-
-extensions = ['breathe']
-breathe_projects = { "lokimq": "@CMAKE_CURRENT_BINARY_DIR@/doxygenxml/" }
-breathe_default_project = "lokimq"
-

@@ -3,26 +3,46 @@ if (NOT DOXYGEN)
     message(STATUS "Documentation generation disabled (doxygen not found)")
     return()
 endif()
+find_program(SPHINX_BUILD sphinx-build)
+if (NOT DOXYGEN)
+    message(STATUS "Documentation generation disabled (sphinx-build not found)")
+    return()
+endif()
 
-add_custom_target(doxygenxml
+set(lokimq_doc_sources
+    ${PROJECT_SOURCE_DIR}/lokimq/auth.h
+    ${PROJECT_SOURCE_DIR}/lokimq/batch.h
+    ${PROJECT_SOURCE_DIR}/lokimq/bt_serialize.h
+    ${PROJECT_SOURCE_DIR}/lokimq/connections.h
+    ${PROJECT_SOURCE_DIR}/lokimq/hex.h
+    ${PROJECT_SOURCE_DIR}/lokimq/lokimq.h
+    ${PROJECT_SOURCE_DIR}/lokimq/message.h
+    ${PROJECT_SOURCE_DIR}/lokimq/string_view.h
+    ${PROJECT_BINARY_DIR}/lokimq/version.h
+)
+string(REPLACE ";" " " lokimq_doc_sources_spaced "${lokimq_doc_sources}")
+
+add_custom_command(
+    OUTPUT doxyxml/index.xml
     COMMAND ${DOXYGEN} Doxyfile
-    SOURCES Doxyfile
-    BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/doxyxml/index.xml
+    DEPENDS
+        ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
+        ${lokimq_doc_sources}
 )
 
-add_custom_target(doc
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build.py ${LOKIMQ_VERSION}
-    SOURCES
-        ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
-        ${PROJECT_SOURCE_DIR}/lokimq/auth.h
-        ${PROJECT_SOURCE_DIR}/lokimq/batch.h
-        ${PROJECT_SOURCE_DIR}/lokimq/bt_serialize.h
-        ${PROJECT_SOURCE_DIR}/lokimq/connections.h
-        ${PROJECT_SOURCE_DIR}/lokimq/hex.h
-        ${PROJECT_SOURCE_DIR}/lokimq/lokimq.h
-        ${PROJECT_SOURCE_DIR}/lokimq/message.h
-        ${PROJECT_SOURCE_DIR}/lokimq/string_view.h
+add_custom_command(
+    OUTPUT html/index.html
+    COMMAND ${SPHINX_BUILD}
+        -Dbreathe_projects.lokimq=${CMAKE_CURRENT_BINARY_DIR}/doxyxml
+        -Dversion=${LOKIMQ_VERSION} -Drelease=${LOKIMQ_VERSION}
+        -Aversion=${LOKIMQ_VERSION} -Aversions=${LOKIMQ_VERSION_MAJOR},${LOKIMQ_VERSION_MINOR},${LOKIMQ_VERSION_PATCH}
+        -b html
+        ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/html
+    DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/index.rst
+        ${CMAKE_CURRENT_SOURCE_DIR}/conf.py
+        ${CMAKE_CURRENT_BINARY_DIR}/doxyxml/index.xml
 )
+add_custom_target(doc DEPENDS html/index.html)
 
 configure_file(Doxyfile.in Doxyfile @ONLY)
-configure_file(conf.py.in conf.py @ONLY)
