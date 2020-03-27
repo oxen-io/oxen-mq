@@ -33,16 +33,19 @@ add_custom_command(
 add_custom_command(
     OUTPUT html/index.html
     COMMAND ${SPHINX_BUILD}
-        -Dbreathe_projects.lokimq=${CMAKE_CURRENT_BINARY_DIR}/doxyxml
-        -Dversion=${LOKIMQ_VERSION} -Drelease=${LOKIMQ_VERSION}
         -Aversion=${LOKIMQ_VERSION} -Aversions=${LOKIMQ_VERSION_MAJOR},${LOKIMQ_VERSION_MINOR},${LOKIMQ_VERSION_PATCH}
         -b html
-        ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/html
+        ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_BINARY_DIR}/html
     DEPENDS
-        ${CMAKE_CURRENT_SOURCE_DIR}/index.rst
-        ${CMAKE_CURRENT_SOURCE_DIR}/conf.py
+        ${CMAKE_CURRENT_BINARY_DIR}/index.rst
+        ${CMAKE_CURRENT_BINARY_DIR}/readme.rst
+        ${CMAKE_CURRENT_BINARY_DIR}/conf.py
         ${CMAKE_CURRENT_BINARY_DIR}/doxyxml/index.xml
+        ${PROJECT_SOURCE_DIR}/README.md
 )
 add_custom_target(doc DEPENDS html/index.html)
 
 configure_file(Doxyfile.in Doxyfile @ONLY)
+configure_file(conf.py.in conf.py @ONLY)
+configure_file(index.rst index.rst COPYONLY)
+configure_file(readme.rst.in readme.rst @ONLY)

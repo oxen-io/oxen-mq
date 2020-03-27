@@ -109,9 +109,13 @@ dictionaries.  See `lokimq/bt_serialize.h` if you want a bt serializer/deseriali
 Sending a command to a peer is done by using a connection ID, and generally falls into either a
 `send()` method or a `request()` method.
 
+```C++
     lmq.send(conn, "category.command", "some data");
     lmq.request(conn, "category.command", [](bool success, std::vector<std::string> data) {
-        if (success) { std::cout << "Remote replied: " << data.at(0) << "\n"; } });
+        if (success) std::cout << "Remote replied: " << data.at(0) << "\n";
+        else std::cout << "Request failed\n";
+    });
+```
 
 The connection ID generally has two possible values:
 
@@ -119,10 +123,11 @@ The connection ID generally has two possible values:
   already-established connections, reusing a connection if one exists.  If no connection already
   exists, a new connection to the given SN is attempted (this requires constructing the LokiMQ
   object with a callback to determine SN remote addresses).
-- a ConnectionID object, typically returned by the `connect_remote` method (although there are other
+- a `ConnectionID` object, typically returned by the `connect_remote` method (although there are other
   places to get one, such as from the `Message` object passed to a command: see the following
   section).
 
+  ```C++
     // Send to a service node, establishing a connection if necessary:
     std::string my_sn = ...; // 32-byte pubkey of a known SN
     lmq.send(my_sn, "sn.explode", "{ \"seconds\": 30 }");
@@ -131,12 +136,14 @@ The connection ID generally has two possible values:
     auto conn = lmq.connect_remote("tcp://127.0.0.1:4567",
         [](ConnectionID c) { std::cout << "Connected!\n"; },
         [](ConnectionID c, string_view f) { std::cout << "Connect failed: " << f << "\n" });
+
     lmq.request(conn, "rpc.get_height", [](bool s, std::vector<std::string> d) {
         if (s && d.size() == 1)
             std::cout << "Current height: " << d[0] << "\n";
         else
             std::cout << "Timeout fetching height!";
     });
+  ```
 
 ## Command invocation
 
@@ -145,6 +152,22 @@ The callbacks are passed a LokiMQ::Message object from which the message (plus v
 information) can be obtained.  There is no structure imposed at all on the data passed in subsequent
 message parts: it is up to the command itself to deserialize however it wishes (e.g. JSON,
 bt-encoded, or any other encoding).
+
+The following example shows how to define a category with commands:
+
+```C++
+    lmq.add_category("cat", Access{AuthLevel::basic})
+        .add_command("eat", [](Message& m) {
+            for (const auto& food : m.data)
+                std::cout << food << " is yummy\n";
+        })
+        .add_command("sleep", [](Message&) { std::cout << "yawn\n"; })
+        .add_command("pet", [](Message&) { std::cout << "purr\n"; })
+        .add_request_command("demand", [](Message& m) {
+            m.send_reply("Cats do not accept demands");
+        })
+        ;
+```
 
 The Message object also provides methods for replying to the caller.  Simple replies queue a reply
 if the client is still connected.  Replies to service nodes can also be "strong" replies: when
@@ -176,8 +199,9 @@ Each category has access control consisting of three values:
 - LocalServiceNode (bool) - if true this requires that the local node is running in service node
   mode (note that it is *not* required that the local SN be *active*).
 
-Authentication level components are cumulative: for example, a category with Basic auth +
-ServiceNode=true + LocalServiceNode=true would only be access if all three conditions are met.
+Authentication level components are cumulative: for example, a category with `Basic` auth,
+`ServiceNode=true`, and `LocalServiceNode=true` would only be access if all three conditions are
+met.
 
 The authentication mechanism works in two ways: defaults based on configuration, and explicit
 logins.
