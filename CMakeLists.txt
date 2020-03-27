@@ -14,7 +14,6 @@ set(LOKIMQ_LIBVERSION 0)
 
 
 option(BUILD_SHARED_LIBS "Build shared libraries instead of static ones" ON)
-option(LOKIMQ_DOCS "Generate API documentation" ON)
 
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -160,11 +159,6 @@ if(LOKIMQ_INSTALL_CPPZMQ)
   )
 endif()
 
-if(LOKIMQ_DOCS)
-    add_subdirectory(doc)
-endif()
-
-
 install(
     FILES ${CMAKE_CURRENT_BINARY_DIR}/liblokimq.pc
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
@@ -180,4 +174,10 @@ option(LOKIMQ_BUILD_TESTS "Building and perform lokimq tests" ${lokimq_IS_TOPLEV
 if(LOKIMQ_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
+
+option(LOKIMQ_DOCS "Generate API documentation" ${lokimq_IS_TOPLEVEL_PROJECT})
+if(LOKIMQ_DOCS)
+    add_subdirectory(doc)
+endif()
+
 
