@@ -1170,6 +1170,15 @@ void Message::send_request(string_view cmd, Callback&& callback, Args&&... args)
             send_option::optional{!conn.sn()}, std::forward<Args>(args)...);
 }
 
+// When log messages are invoked we strip out anything before this in the filename:
+constexpr string_view LOG_PREFIX{"lokimq/", 7};
+inline string_view trim_log_filename(string_view local_file) {
+    auto chop = local_file.rfind(LOG_PREFIX);
+    if (chop != local_file.npos)
+        local_file.remove_prefix(chop);
+    return local_file;
+}
+
 template <typename... T>
 void LokiMQ::log_(LogLevel lvl, const char* file, int line, const T&... stuff) {
     if (log_level() < lvl)
@@ -1181,7 +1190,7 @@ void LokiMQ::log_(LogLevel lvl, const char* file, int line, const T&... stuff) {
 #else
     (void) std::initializer_list<int>{(os << stuff, 0)...};
 #endif
-    logger(lvl, file, line, os.str());
+    logger(lvl, trim_log_filename(file).data(), line, os.str());
 }
 
 std::ostream &operator<<(std::ostream &os, LogLevel lvl);
