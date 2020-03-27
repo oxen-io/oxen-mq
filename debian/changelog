@@ -1,3 +1,12 @@
+lokimq (1.0.3-1) unstable; urgency=medium
+
+  * Avoid masking ReplyCallback type with template param
+  * Avoid segfault on retried SN connection request
+  * Trim logged filenames to lokimq/*
+  * 1.0.3 release
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Fri, 27 Mar 2020 18:56:42 -0300
+
 lokimq (1.0.2-2) unstable; urgency=medium
 
   * liblokimq-dev needs to be arch: any
