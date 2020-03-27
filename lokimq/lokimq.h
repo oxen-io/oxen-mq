@@ -1164,9 +1164,9 @@ void Message::send_reply(Args&&... args) {
     lokimq.send(conn, "REPLY", reply_tag, send_option::optional{!conn.sn()}, std::forward<Args>(args)...);
 }
 
-template <typename ReplyCallback, typename... Args>
-void Message::send_request(string_view cmd, ReplyCallback&& callback, Args&&... args) {
-    lokimq.request(conn, cmd, std::forward<ReplyCallback>(callback),
+template <typename Callback, typename... Args>
+void Message::send_request(string_view cmd, Callback&& callback, Args&&... args) {
+    lokimq.request(conn, cmd, std::forward<Callback>(callback),
             send_option::optional{!conn.sn()}, std::forward<Args>(args)...);
 }
 
