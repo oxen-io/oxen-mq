@@ -1,0 +1,21 @@
+From: Jason Rhinelander <jason@imaginary.ca>
+Date: Sat, 28 Mar 2020 12:22:07 -0300
+Subject: Fully version library
+
+---
+ CMakeLists.txt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 2622297..2b75731 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -10,7 +10,7 @@ set(LOKIMQ_VERSION_PATCH 3)
+ set(LOKIMQ_VERSION "${LOKIMQ_VERSION_MAJOR}.${LOKIMQ_VERSION_MINOR}.${LOKIMQ_VERSION_PATCH}")
+ message(STATUS "lokimq v${LOKIMQ_VERSION}")
+ 
+-set(LOKIMQ_LIBVERSION 0)
++set(LOKIMQ_LIBVERSION ${LOKIMQ_VERSION})
+ 
+ 
+ option(BUILD_SHARED_LIBS "Build shared libraries instead of static ones" ON)
