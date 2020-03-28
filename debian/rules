@@ -3,6 +3,7 @@
 # output every command that modifies files on the build system.
 #export DH_VERBOSE = 1
 
+include /usr/share/dpkg/pkg-info.mk
 
 # see FEATURE AREAS in dpkg-buildflags(1)
 #export DEB_BUILD_MAINT_OPTIONS = hardening=+all
@@ -18,6 +19,7 @@
 	dh $@ --buildsystem=cmake --parallel
 
 override_dh_auto_configure:
+	debian/gen-liblokimq-install.sh $(DEB_VERSION_UPSTREAM)
 	dh_auto_configure -- -DLOKIMQ_INSTALL_MAPBOX_VARIANT=OFF -DLOKIMQ_INSTALL_CPPZMQ=ON
 
 # dh_make generated override targets
