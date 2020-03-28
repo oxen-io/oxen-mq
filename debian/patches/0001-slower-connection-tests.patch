@@ -47,7 +47,7 @@ index 6c1b5c9..577b5f6 100644
      }
  
 diff --git a/tests/test_requests.cpp b/tests/test_requests.cpp
-index 6d274fe..123adc5 100644
+index 53a4c68..b94eeaf 100644
 --- a/tests/test_requests.cpp
 +++ b/tests/test_requests.cpp
 @@ -46,7 +46,7 @@ TEST_CASE("basic requests", "[requests]") {
