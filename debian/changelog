@@ -1,3 +1,11 @@
+lokimq (1.0.3-2) unstable; urgency=medium
+
+  * Version liblokimq
+  * Fully version library
+  * liblokimq package versioning
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Sat, 28 Mar 2020 12:30:32 -0300
+
 lokimq (1.0.3-1) unstable; urgency=medium
 
   * Avoid masking ReplyCallback type with template param
