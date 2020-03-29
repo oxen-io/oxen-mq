@@ -627,20 +627,26 @@ public:
      *
      * @param log a function or callable object that writes a log message.  If omitted then all log
      * messages are suppressed.
+     *
+     * @param level the initial log level; defaults to warn.  The log level can be changed later by
+     * calling log_level(...).
      */
     LokiMQ( std::string pubkey,
             std::string privkey,
             bool service_node,
             SNRemoteAddress sn_lookup,
-            Logger logger = [](LogLevel, const char*, int, std::string) { });
+            Logger logger = [](LogLevel, const char*, int, std::string) { },
+            LogLevel level = LogLevel::warn);
 
     /**
-     * Simplified LokiMQ constructor for a simple listener without any SN connection/authentication
-     * capabilities.  This treats all remotes as "basic", non-service node connections for command
-     * authentication purposes.
+     * Simplified LokiMQ constructor for a non-listening client or simple listener without any
+     * outgoing SN connection lookup capabilities.  The LokiMQ object will not be able to establish
+     * new connections (including reconnections) to service nodes by pubkey.
      */
-    explicit LokiMQ(Logger logger = [](LogLevel, const char*, int, std::string) { })
-        : LokiMQ("", "", false, [](auto) { return ""s; /*no peer lookups*/ }, std::move(logger)) {}
+    explicit LokiMQ(
+            Logger logger = [](LogLevel, const char*, int, std::string) { },
+            LogLevel level = LogLevel::warn)
+        : LokiMQ("", "", false, [](auto) { return ""s; /*no peer lookups*/ }, std::move(logger), level) {}
 
     /**
      * Destructor; instructs the proxy to quit.  The proxy tells all workers to quit, waits for them
