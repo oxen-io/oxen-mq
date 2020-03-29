@@ -104,7 +104,14 @@ LokiMQ::proxy_connect_sn(string_view remote, string_view connect_hint, bool opti
     LMQ_LOG(debug, to_hex(pubkey), " (me) connecting to ", addr, " to reach ", to_hex(remote));
     zmq::socket_t socket{context, zmq::socket_type::dealer};
     setup_outgoing_socket(socket, remote);
-    socket.connect(addr);
+    try {
+        socket.connect(addr);
+    } catch (const zmq::error_t& e) {
+        // Note that this failure cases indicates something serious went wrong that means zmq isn't
+        // even going to try connecting (for example an unparseable remote address).
+        LMQ_LOG(error, "Outgoing connection to ", addr, " failed: ", e.what());
+        return {nullptr, ""s};
+    }
     peer_info p{};
     p.service_node = true;
     p.pubkey = std::string{remote};
