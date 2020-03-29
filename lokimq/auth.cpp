@@ -61,9 +61,9 @@ bool LokiMQ::proxy_check_auth(size_t conn_index, bool outgoing, const peer_info&
 
     try {
         if (outgoing)
-            send_direct_message(connections[conn_index], std::move(reply), command, zmq::send_flags::dontwait);
+            send_direct_message(connections[conn_index], std::move(reply), command);
         else
-            send_routed_message(connections[conn_index], peer.route, std::move(reply), command, zmq::send_flags::dontwait);
+            send_routed_message(connections[conn_index], peer.route, std::move(reply), command);
     } catch (const zmq::error_t&) { /* can't send: possibly already disconnected.  Ignore. */ }
 
     return false;

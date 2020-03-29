@@ -234,9 +234,9 @@ void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
         LMQ_LOG(warn, "Invalid command '", command, "' sent by remote [", to_hex(peer->pubkey), "]/", peer_address(parts.back()));
         try {
             if (outgoing)
-                send_direct_message(connections[conn_index], "UNKNOWNCOMMAND", command, zmq::send_flags::dontwait);
+                send_direct_message(connections[conn_index], "UNKNOWNCOMMAND");
             else
-                send_routed_message(connections[conn_index], peer->route, "UNKNOWNCOMMAND", command, zmq::send_flags::dontwait);
+                send_routed_message(connections[conn_index], peer->route, "UNKNOWNCOMMAND");
         } catch (const zmq::error_t&) { /* can't send: possibly already disconnected. Ignore. */ }
         return;
     }

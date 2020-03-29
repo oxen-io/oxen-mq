@@ -94,9 +94,8 @@ void LokiMQ::_queue_timer_job(int timer_id) {
 
 void LokiMQ::add_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch) {
     if (proxy_thread.joinable()) {
-        auto *jobptr = new std::function<void()>{std::move(job)};
         detail::send_control(get_control_socket(), "TIMER", bt_serialize(bt_list{{
-                    reinterpret_cast<uintptr_t>(jobptr),
+                    detail::serialize_object(std::move(job)),
                     interval.count(),
                     squelch}}));
     } else {

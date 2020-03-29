@@ -279,3 +279,96 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
         REQUIRE( google_knows == personal_details );
     }
 }
+
+TEST_CASE("send failure callbacks", "[commands][queue_full]") {
+    std::string listen = "tcp://127.0.0.1:4567";
+    LokiMQ server{
+        "", "", // generate ephemeral keys
+        false, // not a service node
+        [](auto) { return ""; },
+        get_logger("S» ")
+    };
+    server.log_level(LogLevel::debug);
+    server.listen_plain(listen, [](auto /*ip*/, auto /*pk*/) { return Allow{AuthLevel::none, false}; });
+
+    std::atomic<int> send_attempts{0};
+    std::atomic<int> send_failures{0};
+    // ZMQ TCP sockets' HWM is complicated and OS dependent; sender and receiver (probably) each
+    // have 1000 message queues, but there is also the TCP queue to worry about which means we can
+    // have more queued before we fill up, so we send 4kiB of null with each message so that we
+    // don't get too much TCP queuing.
+    std::string junk(4096, '0');
+    server.add_category("x", Access{AuthLevel::none})
+        .add_command("x", [&](Message& m) {
+            for (int x = 0; x < 500; x++) {
+                ++send_attempts;
+                m.send_back("y.y", junk, send_option::queue_full{[&]() { ++send_failures; }});
+            }
+        });
+
+    server.start();
+
+    // Use a raw socket here because I want to stall it by not reading from it at all, and that is
+    // hard with LokiMQ.
+    zmq::context_t client_ctx;
+    zmq::socket_t client{client_ctx, zmq::socket_type::dealer};
+    client.connect(listen);
+    // Handshake: we send HI, they reply HELLO.
+    client.send(zmq::message_t{"HI", 2}, zmq::send_flags::none);
+    zmq::message_t hello;
+    client.recv(hello);
+    string_view hello_sv{hello.data<char>(), hello.size()};
+    {
+        auto lock = catch_lock();
+        REQUIRE( hello_sv == "HELLO" );
+        REQUIRE_FALSE( hello.more() );
+    }
+
+    // Tell the remote to queue up a batch of messages
+    client.send(zmq::message_t{"x.x", 3}, zmq::send_flags::none);
+
+    int i;
+    for (i = 0; i < 20; i++) {
+        if (send_attempts.load() >= 500)
+            break;
+        std::this_thread::sleep_for(25ms);
+    }
+    {
+        auto lock = catch_lock();
+        REQUIRE( i <= 4 ); // should be not too slow
+        // We have two buffers here: 1000 on the receiver, and 1000 on the client, which means we
+        // should be able to get 2000 out before we hit HWM.  We should only have been sent 501 so
+        // far (the "HELLO" handshake + 500 "y.y" messages).
+        REQUIRE( send_attempts.load() == 500 );
+        REQUIRE( send_failures.load() == 0 );
+    }
+
+    // Now we want to tell the server to send enough to fill the outgoing queue and start stalling.
+    // This is complicated as it depends on ZMQ internals *and* OS-level TCP buffers, so we really
+    // don't know precisely where this will start failing.
+    //
+    // In practice, I seem to reach HWM (for this test, with this amount of data being sent, on my
+    // Debian desktop) after 2499 messages (that is, queuing 2500 gives 1 failure).
+    int expected_attempts = 500;
+    for (int i = 0; i < 10; i++) {
+        client.send(zmq::message_t{"x.x", 3}, zmq::send_flags::none);
+        expected_attempts += 500;
+        if (i >= 4) {
+            std::this_thread::sleep_for(25ms);
+            if (send_failures.load() > 0)
+                break;
+        }
+    }
+
+    for (i = 0; i < 10; i++) {
+        if (send_attempts.load() >= expected_attempts)
+            break;
+        std::this_thread::sleep_for(25ms);
+    }
+    {
+        auto lock = catch_lock();
+        REQUIRE( i <= 8 );
+        REQUIRE( send_attempts.load() == expected_attempts );
+        REQUIRE( send_failures.load() > 0 );
+    }
+}
