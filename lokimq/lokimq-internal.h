@@ -38,40 +38,41 @@ inline zmq::message_t create_message(string_view data) {
 }
 
 template <typename It>
-void send_message_parts(zmq::socket_t &sock, It begin, It end) {
+bool send_message_parts(zmq::socket_t &sock, It begin, It end) {
     while (begin != end) {
-        // FIXME: for outgoing connections on ZMQ_DEALER we want to use ZMQ_DONTWAIT and handle
-        // EAGAIN error (which either means the peer HWM is hit -- probably indicating a connection
-        // failure -- or the underlying connect() system call failed).  Assuming it's an outgoing
-        // connection, we should destroy it.
         zmq::message_t &msg = *begin++;
-        sock.send(msg, begin == end ? zmq::send_flags::none : zmq::send_flags::sndmore);
+        if (!sock.send(msg, begin == end ? zmq::send_flags::dontwait : zmq::send_flags::dontwait | zmq::send_flags::sndmore))
+            return false;
     }
+    return true;
 }
 
 template <typename Container>
-void send_message_parts(zmq::socket_t &sock, Container &&c) {
-    send_message_parts(sock, c.begin(), c.end());
+bool send_message_parts(zmq::socket_t &sock, Container &&c) {
+    return send_message_parts(sock, c.begin(), c.end());
 }
 
 /// Sends a message with an initial route.  `msg` and `data` can be empty: if `msg` is empty then
 /// the msg frame will be an empty message; if `data` is empty then the data frame will be omitted.
-inline void send_routed_message(zmq::socket_t &socket, std::string route, std::string msg = {}, std::string data = {}) {
+/// `flags` is passed through to zmq: typically given `zmq::send_flags::dontwait` to throw rather
+/// than block if a message can't be queued.
+inline bool send_routed_message(zmq::socket_t &socket, std::string route, std::string msg = {}, std::string data = {}) {
     assert(!route.empty());
     std::array<zmq::message_t, 3> msgs{{create_message(std::move(route))}};
     if (!msg.empty())
         msgs[1] = create_message(std::move(msg));
     if (!data.empty())
         msgs[2] = create_message(std::move(data));
-    send_message_parts(socket, msgs.begin(), data.empty() ? std::prev(msgs.end()) : msgs.end());
+    return send_message_parts(socket, msgs.begin(), data.empty() ? std::prev(msgs.end()) : msgs.end());
 }
 
-// Sends some stuff to a socket directly.
-inline void send_direct_message(zmq::socket_t &socket, std::string msg, std::string data = {}) {
+// Sends some stuff to a socket directly.  If dontwait is true then we throw instead of blocking if
+// the message cannot be accepted by zmq (i.e. because the outgoing buffer is full).
+inline bool send_direct_message(zmq::socket_t &socket, std::string msg, std::string data = {}) {
     std::array<zmq::message_t, 2> msgs{{create_message(std::move(msg))}};
     if (!data.empty())
         msgs[1] = create_message(std::move(data));
-    send_message_parts(socket, msgs.begin(), data.empty() ? std::prev(msgs.end()) : msgs.end());
+    return send_message_parts(socket, msgs.begin(), data.empty() ? std::prev(msgs.end()) : msgs.end());
 }
 
 // Receive all the parts of a single message from the given socket.  Returns true if a message was

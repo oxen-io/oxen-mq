@@ -70,13 +70,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
         if (!data.skip_until("request_callback"))
             throw std::runtime_error("Internal error: received request without request_callback");
 
-        // The initiator gives up ownership of the callback to us (serializing it through a
-        // uintptr_t), so we take the pointer, move the value out of it, then destroy the pointer we
-        // were given.  Further down, if we are able to send the request successfully, we set up the
-        // pending request.
-        auto* cbptr = reinterpret_cast<ReplyCallback*>(data.consume_integer<uintptr_t>());
-        request_callback = std::move(*cbptr);
-        delete cbptr;
+        request_callback = detail::deserialize_object<ReplyCallback>(data.consume_integer<uintptr_t>());
 
         if (!data.skip_until("request_tag"))
             throw std::runtime_error("Internal error: received request without request_name");
@@ -88,11 +82,20 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
         throw std::runtime_error("Internal error: Invalid proxy send command; send parts missing");
     bt_list_consumer send = data.consume_list_consumer();
 
+    send_option::queue_failure::callback_t callback_nosend;
+    if (data.skip_until("send_fail"))
+        callback_nosend = detail::deserialize_object<decltype(callback_nosend)>(data.consume_integer<uintptr_t>());
+
+    send_option::queue_full::callback_t callback_noqueue;
+    if (data.skip_until("send_full_q"))
+        callback_noqueue = detail::deserialize_object<decltype(callback_noqueue)>(data.consume_integer<uintptr_t>());
+
     // Now figure out which socket to send to and do the actual sending.  We can repeat this loop
     // multiple times, if we're sending to a SN, because it's possible that we have multiple
     // connections open to that SN (e.g. one out + one in) so if one fails we can clean up that
     // connection and try the next one.
-    bool retry = true, sent = false;
+    bool retry = true, sent = false, warned = false;
+    std::unique_ptr<zmq::error_t> send_error;
     while (retry) {
         retry = false;
         zmq::socket_t *send_to;
@@ -103,7 +106,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
                     LMQ_LOG(debug, "Not sending: send is optional and no connection to ",
                             to_hex(conn_id.pk), " is currently established");
                 else
-                    LMQ_LOG(error, "Unable to send to ", to_hex(conn_id.pk), ": no connection address found");
+                    LMQ_LOG(error, "Unable to send to ", to_hex(conn_id.pk), ": no valid connection address found");
                 break;
             }
             send_to = sock_route.first;
@@ -126,8 +129,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
         }
 
         try {
-            send_message_parts(*send_to, build_send_parts(send, conn_id.route));
-            sent = true;
+            sent = send_message_parts(*send_to, build_send_parts(send, conn_id.route));
         } catch (const zmq::error_t &e) {
             if (e.num() == EHOSTUNREACH && !conn_id.route.empty() /*= incoming conn*/) {
 
@@ -158,6 +160,11 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
             }
             if (!retry) {
                 LMQ_LOG(warn, "Unable to send message to ", conn_id, ": ", e.what());
+                warned = true;
+                if (callback_nosend) {
+                    job([callback = std::move(callback_nosend), error = e] { callback(&error); });
+                    callback_nosend = nullptr;
+                }
             }
         }
     }
@@ -170,6 +177,14 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
             LMQ_LOG(debug, "Could not send request, scheduling request callback failure");
             job([callback = std::move(request_callback)] { callback(false, {}); });
         }
+    }
+    if (!sent) {
+        if (callback_nosend)
+            job([callback = std::move(callback_nosend)] { callback(nullptr); });
+        else if (callback_noqueue)
+            job(std::move(callback_noqueue));
+        else if (!warned)
+            LMQ_LOG(warn, "Unable to send message to ", conn_id, ": sending would block");
     }
 }
 
@@ -208,8 +223,7 @@ void LokiMQ::proxy_reply(bt_dict_consumer data) {
             break;
         } catch (const zmq::error_t &err) {
             if (err.num() == EHOSTUNREACH) {
-                LMQ_LOG(info, "Unable to send reply to incoming non-SN request: remote is no longer connected");
-                LMQ_LOG(debug, "Incoming connection is no longer valid; removing peer details");
+                LMQ_LOG(debug, "Unable to send reply to incoming non-SN request: remote is no longer connected; removing peer details");
                 it = peers.erase(it);
             } else {
                 LMQ_LOG(warn, "Unable to send reply to incoming non-SN request: ", err.what());
@@ -456,7 +470,7 @@ bool LokiMQ::proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>
         route = view(parts[0]);
         cmd = view(parts[1]);
     }
-    LMQ_TRACE("Checking for builtins: ", cmd, " from ", peer_address(parts.back()));
+    LMQ_TRACE("Checking for builtins: '", cmd, "' from ", peer_address(parts.back()));
 
     if (cmd == "REPLY") {
         size_t tag_pos = (outgoing ? 1 : 2);
@@ -485,7 +499,7 @@ bool LokiMQ::proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>
             LMQ_LOG(warn, "Got invalid 'HI' message on an outgoing connection; ignoring");
             return true;
         }
-        LMQ_LOG(info, "Incoming client from ", peer_address(parts.back()), " sent HI, replying with HELLO");
+        LMQ_LOG(debug, "Incoming client from ", peer_address(parts.back()), " sent HI, replying with HELLO");
         try {
             send_routed_message(connections[conn_index], std::string{route}, "HELLO");
         } catch (const std::exception &e) { LMQ_LOG(warn, "Couldn't reply with HELLO: ", e.what()); }
@@ -508,7 +522,7 @@ bool LokiMQ::proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>
             return true;
         }
 
-        LMQ_LOG(info, "Got initial HELLO server response from ", peer_address(parts.back()));
+        LMQ_LOG(debug, "Got initial HELLO server response from ", peer_address(parts.back()));
         proxy_schedule_reply_job([on_success=std::move(std::get<ConnectSuccess>(pc)),
                 conn=conn_index_to_id[conn_index]] {
             on_success(conn);
@@ -522,7 +536,7 @@ bool LokiMQ::proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>
             AuthLevel a;
             std::tie(pk, sn, a) = detail::extract_metadata(parts.back());
             ConnectionID conn = sn ? ConnectionID{std::move(pk)} : conn_index_to_id[conn_index];
-            LMQ_LOG(info, "BYE command received; disconnecting from ", conn);
+            LMQ_LOG(debug, "BYE command received; disconnecting from ", conn);
             proxy_disconnect(conn, 1s);
         } else {
             LMQ_LOG(warn, "Got invalid 'BYE' command on an incoming socket; ignoring");

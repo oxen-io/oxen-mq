@@ -203,9 +203,10 @@ LokiMQ::LokiMQ(
         std::string privkey_,
         bool service_node,
         SNRemoteAddress lookup,
-        Logger logger)
+        Logger logger,
+        LogLevel level)
     : object_id{next_id++}, pubkey{std::move(pubkey_)}, privkey{std::move(privkey_)}, local_service_node{service_node},
-        sn_lookup{std::move(lookup)}, logger{std::move(logger)}
+        sn_lookup{std::move(lookup)}, log_lvl{level}, logger{std::move(logger)}
 {
 
     LMQ_TRACE("Constructing listening LokiMQ, id=", object_id, ", this=", this);

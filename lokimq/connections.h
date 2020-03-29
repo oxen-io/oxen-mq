@@ -8,7 +8,7 @@ struct ConnectionID;
 
 namespace detail {
 template <typename... T>
-bt_dict build_send(ConnectionID to, string_view cmd, const T&... opts);
+bt_dict build_send(ConnectionID to, string_view cmd, T&&... opts);
 }
 
 /// Opaque data structure representing a connection which supports ==, !=, < and std::hash.  For
@@ -67,7 +67,7 @@ private:
     friend class LokiMQ;
     friend struct std::hash<ConnectionID>;
     template <typename... T>
-    friend bt_dict detail::build_send(ConnectionID to, string_view cmd, const T&... opts);
+    friend bt_dict detail::build_send(ConnectionID to, string_view cmd, T&&... opts);
     friend std::ostream& operator<<(std::ostream& o, const ConnectionID& conn);
 };
 
