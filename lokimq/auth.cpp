@@ -165,7 +165,7 @@ void LokiMQ::process_zap_requests() {
                     status_text = "Access denied";
                     user_id.clear();
                 } else {
-                    LMQ_LOG(info, "Accepted incoming ", view(frames[5]), (sn ? " service node" : " client"),
+                    LMQ_LOG(debug, "Accepted incoming ", view(frames[5]), (sn ? " service node" : " client"),
                             " connection with authentication level ", result.auth,
                             " from ", !user_id.empty() ? user_id + " at " : ""s, ip);
 

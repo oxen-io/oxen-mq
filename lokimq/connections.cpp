@@ -190,7 +190,7 @@ void LokiMQ::proxy_expire_idle_peers() {
                 ++it;
                 continue;
             }
-            LMQ_LOG(info, "Closing outgoing connection to ", it->first, ": idle timeout reached");
+            LMQ_LOG(debug, "Closing outgoing connection to ", it->first, ": idle timeout reached");
             proxy_close_connection(info.conn_index, CLOSE_LINGER);
         } else {
             ++it;
@@ -277,7 +277,7 @@ void LokiMQ::proxy_connect_remote(bt_dict_consumer data) {
     if (conn_id == -1 || remote.empty())
         throw std::runtime_error("Internal error: CONNECT_REMOTE proxy command missing required 'conn_id' and/or 'remote' value");
 
-    LMQ_LOG(info, "Establishing remote connection to ", remote, remote_pubkey.empty() ? " (NULL auth)" : " via CURVE expecting pubkey " + to_hex(remote_pubkey));
+    LMQ_LOG(debug, "Establishing remote connection to ", remote, remote_pubkey.empty() ? " (NULL auth)" : " via CURVE expecting pubkey " + to_hex(remote_pubkey));
 
     assert(conn_index_to_id.size() == connections.size());
 
@@ -332,7 +332,7 @@ void LokiMQ::proxy_disconnect(ConnectionID conn, std::chrono::milliseconds linge
     for (auto it = pr.first; it != pr.second; ++it) {
         auto& peer = it->second;
         if (peer.outgoing()) {
-            LMQ_LOG(info, "Closing outgoing connection to ", conn);
+            LMQ_LOG(debug, "Closing outgoing connection to ", conn);
             proxy_close_connection(peer.conn_index, linger);
             return;
         }

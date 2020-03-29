@@ -223,8 +223,7 @@ void LokiMQ::proxy_reply(bt_dict_consumer data) {
             break;
         } catch (const zmq::error_t &err) {
             if (err.num() == EHOSTUNREACH) {
-                LMQ_LOG(info, "Unable to send reply to incoming non-SN request: remote is no longer connected");
-                LMQ_LOG(debug, "Incoming connection is no longer valid; removing peer details");
+                LMQ_LOG(debug, "Unable to send reply to incoming non-SN request: remote is no longer connected; removing peer details");
                 it = peers.erase(it);
             } else {
                 LMQ_LOG(warn, "Unable to send reply to incoming non-SN request: ", err.what());
@@ -500,7 +499,7 @@ bool LokiMQ::proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>
             LMQ_LOG(warn, "Got invalid 'HI' message on an outgoing connection; ignoring");
             return true;
         }
-        LMQ_LOG(info, "Incoming client from ", peer_address(parts.back()), " sent HI, replying with HELLO");
+        LMQ_LOG(debug, "Incoming client from ", peer_address(parts.back()), " sent HI, replying with HELLO");
         try {
             send_routed_message(connections[conn_index], std::string{route}, "HELLO");
         } catch (const std::exception &e) { LMQ_LOG(warn, "Couldn't reply with HELLO: ", e.what()); }
@@ -523,7 +522,7 @@ bool LokiMQ::proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>
             return true;
         }
 
-        LMQ_LOG(info, "Got initial HELLO server response from ", peer_address(parts.back()));
+        LMQ_LOG(debug, "Got initial HELLO server response from ", peer_address(parts.back()));
         proxy_schedule_reply_job([on_success=std::move(std::get<ConnectSuccess>(pc)),
                 conn=conn_index_to_id[conn_index]] {
             on_success(conn);
@@ -537,7 +536,7 @@ bool LokiMQ::proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>
             AuthLevel a;
             std::tie(pk, sn, a) = detail::extract_metadata(parts.back());
             ConnectionID conn = sn ? ConnectionID{std::move(pk)} : conn_index_to_id[conn_index];
-            LMQ_LOG(info, "BYE command received; disconnecting from ", conn);
+            LMQ_LOG(debug, "BYE command received; disconnecting from ", conn);
             proxy_disconnect(conn, 1s);
         } else {
             LMQ_LOG(warn, "Got invalid 'BYE' command on an incoming socket; ignoring");
