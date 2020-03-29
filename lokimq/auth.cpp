@@ -48,20 +48,24 @@ bool LokiMQ::proxy_check_auth(size_t conn_index, bool outgoing, const peer_info&
         // Disconnect: we don't think the remote is a SN, but it issued a command only SNs should be
         // issuing.  Drop the connection; if the remote has something important to relay it will
         // reconnect, at which point we will reassess the SN status on the new incoming connection.
-        if (outgoing)
+        if (outgoing) {
             proxy_disconnect(peer.service_node ? ConnectionID{peer.pubkey} : conn_index_to_id[conn_index], 1s);
+            return false;
+        }
         else
-            send_routed_message(connections[conn_index], peer.route, "BYE");
-        return false;
+            reply = "BYE";
     }
 
     if (reply.empty())
         return true;
 
-    if (outgoing)
-        send_direct_message(connections[conn_index], std::move(reply), command);
-    else
-        send_routed_message(connections[conn_index], peer.route, std::move(reply), command);
+    try {
+        if (outgoing)
+            send_direct_message(connections[conn_index], std::move(reply), command);
+        else
+            send_routed_message(connections[conn_index], peer.route, std::move(reply), command);
+    } catch (const zmq::error_t&) { /* can't send: possibly already disconnected.  Ignore. */ }
+
     return false;
 }
 
@@ -161,7 +165,7 @@ void LokiMQ::process_zap_requests() {
                     status_text = "Access denied";
                     user_id.clear();
                 } else {
-                    LMQ_LOG(info, "Accepted incoming ", view(frames[5]), (sn ? " service node" : " client"),
+                    LMQ_LOG(debug, "Accepted incoming ", view(frames[5]), (sn ? " service node" : " client"),
                             " connection with authentication level ", result.auth,
                             " from ", !user_id.empty() ? user_id + " at " : ""s, ip);
 

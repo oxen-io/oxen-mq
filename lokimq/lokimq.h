@@ -419,9 +419,10 @@ private:
     // either accepting curve connections, or not accepting curve).
     void setup_outgoing_socket(zmq::socket_t& socket, string_view remote_pubkey = {});
 
-    /// Common connection implementation used by proxy_connect/proxy_send.  Returns the socket
-    /// and, if a routing prefix is needed, the required prefix (or an empty string if not needed).
-    /// For an optional connect that fail, returns nullptr for the socket.
+    /// Common connection implementation used by proxy_connect/proxy_send.  Returns the socket and,
+    /// if a routing prefix is needed, the required prefix (or an empty string if not needed).  For
+    /// an optional connect that fails (or some other connection failure), returns nullptr for the
+    /// socket.
     ///
     /// @param pubkey the pubkey to connect to
     /// @param connect_hint if we need a new connection and this is non-empty then we *may* use it
@@ -626,20 +627,26 @@ public:
      *
      * @param log a function or callable object that writes a log message.  If omitted then all log
      * messages are suppressed.
+     *
+     * @param level the initial log level; defaults to warn.  The log level can be changed later by
+     * calling log_level(...).
      */
     LokiMQ( std::string pubkey,
             std::string privkey,
             bool service_node,
             SNRemoteAddress sn_lookup,
-            Logger logger = [](LogLevel, const char*, int, std::string) { });
+            Logger logger = [](LogLevel, const char*, int, std::string) { },
+            LogLevel level = LogLevel::warn);
 
     /**
-     * Simplified LokiMQ constructor for a simple listener without any SN connection/authentication
-     * capabilities.  This treats all remotes as "basic", non-service node connections for command
-     * authentication purposes.
+     * Simplified LokiMQ constructor for a non-listening client or simple listener without any
+     * outgoing SN connection lookup capabilities.  The LokiMQ object will not be able to establish
+     * new connections (including reconnections) to service nodes by pubkey.
      */
-    explicit LokiMQ(Logger logger = [](LogLevel, const char*, int, std::string) { })
-        : LokiMQ("", "", false, [](auto) { return ""s; /*no peer lookups*/ }, std::move(logger)) {}
+    explicit LokiMQ(
+            Logger logger = [](LogLevel, const char*, int, std::string) { },
+            LogLevel level = LogLevel::warn)
+        : LokiMQ("", "", false, [](auto) { return ""s; /*no peer lookups*/ }, std::move(logger), level) {}
 
     /**
      * Destructor; instructs the proxy to quit.  The proxy tells all workers to quit, waits for them
@@ -1060,9 +1067,59 @@ struct request_timeout {
     explicit request_timeout(std::chrono::milliseconds time) : time{std::move(time)} {}
 };
 
+/// Specifies a callback to invoke if the message couldn't be queued for delivery.  There are
+/// generally two failure modes here: a full queue, and a send exception.  This callback is invoked
+/// for both; to only catch full queues see `queue_full` instead.
+///
+/// A full queue means there are too many messages queued for delivery already that haven't been
+/// delivered yet (i.e. because the remote is slow); this error is potentially recoverable if the
+/// remote end wakes up and receives/acknoledges its messages.
+///
+/// A send exception is not recoverable: it indicates some failure such as the remote having
+/// disconnected or an internal send error.
+///
+/// This callback can be used by a caller to log, attempt to resend, or take other appropriate
+/// action.
+///
+/// Note that this callback is *not* exhaustive for all possible send failures: there are failure
+/// cases (such as when a message is queued but the connection fails before delivery) that do not
+/// trigger this failure at all; rather this callback only signals an immediate queuing failure.
+struct queue_failure {
+    using callback_t = std::function<void(const zmq::error_t* exc)>;
+    /// Callback; invoked with nullptr for a queue full failure, otherwise will be set to a copy of
+    /// the raised exception.
+    callback_t callback;
+};
+
+/// This is similar to queue_failure_callback, but is only invoked on a (potentially recoverable)
+/// full queue failure.  Send failures are simply dropped.
+struct queue_full {
+    using callback_t = std::function<void()>;
+    callback_t callback;
+};
+
 }
 
 namespace detail {
+
+/// Takes an rvalue reference, moves it into a new instance then returns a uintptr_t value
+/// containing the pointer to be serialized to pass (via lokimq queues) from one thread to another.
+/// Must be matched with a deserializer_pointer on the other side to reconstitute the object and
+/// destroy the intermediate pointer.
+template <typename T> uintptr_t serialize_object(T&& obj) {
+    auto* ptr = new T{std::forward<T>(obj)};
+    return reinterpret_cast<uintptr_t>(ptr);
+}
+
+/// Takes a uintptr_t as produced by serialize_pointer and the type, converts the serialized value
+/// back into a pointer, moves it into a new instance (to be returned) and destroys the
+/// intermediate.
+template <typename T> T deserialize_object(uintptr_t ptrval) {
+    auto* ptr = reinterpret_cast<T*>(ptrval);
+    T ret{std::move(*ptr)};
+    delete ptr;
+    return ret;
+}
 
 // Sends a control message to the given socket consisting of the command plus optional dict
 // data (only sent if the data is non-empty).
@@ -1105,20 +1162,28 @@ inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option
     control_data["request_timeout"] = timeout.time.count();
 }
 
+/// `queue_failure` specialization
+inline void apply_send_option(bt_list&, bt_dict& control_data, send_option::queue_failure f) {
+    control_data["send_fail"] = serialize_object(std::move(f.callback));
+}
 
+/// `queue_full` specialization
+inline void apply_send_option(bt_list&, bt_dict& control_data, send_option::queue_full f) {
+    control_data["send_full_q"] = serialize_object(std::move(f.callback));
+}
 
 /// Extracts a pubkey, SN status, and auth level from a zmq message received on a *listening*
 /// socket.
 std::tuple<std::string, bool, AuthLevel> extract_metadata(zmq::message_t& msg);
 
 template <typename... T>
-bt_dict build_send(ConnectionID to, string_view cmd, const T&... opts) {
+bt_dict build_send(ConnectionID to, string_view cmd, T&&... opts) {
     bt_dict control_data;
     bt_list parts{{cmd}};
 #ifdef __cpp_fold_expressions
-    (detail::apply_send_option(parts, control_data, opts),...);
+    (detail::apply_send_option(parts, control_data, std::forward<T>(opts)),...);
 #else
-    (void) std::initializer_list<int>{(detail::apply_send_option(parts, control_data, opts), 0)...};
+    (void) std::initializer_list<int>{(detail::apply_send_option(parts, control_data, std::forward<T>(opts)), 0)...};
 #endif
 
     if (to.sn())
@@ -1148,7 +1213,7 @@ void LokiMQ::request(ConnectionID to, string_view cmd, ReplyCallback callback, c
     const auto reply_tag = make_random_string(15); // 15 random bytes is lots and should keep us in most stl implementations' small string optimization
     bt_dict control_data = detail::build_send(std::move(to), cmd, reply_tag, opts...);
     control_data["request"] = true;
-    control_data["request_callback"] = reinterpret_cast<uintptr_t>(new ReplyCallback{std::move(callback)});
+    control_data["request_callback"] = detail::serialize_object(std::move(callback));
     control_data["request_tag"] = string_view{reply_tag};
     detail::send_control(get_control_socket(), "SEND", bt_serialize(std::move(control_data)));
 }

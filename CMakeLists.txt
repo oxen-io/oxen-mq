@@ -6,7 +6,7 @@ include(GNUInstallDirs)
 
 set(LOKIMQ_VERSION_MAJOR 1)
 set(LOKIMQ_VERSION_MINOR 0)
-set(LOKIMQ_VERSION_PATCH 3)
+set(LOKIMQ_VERSION_PATCH 4)
 set(LOKIMQ_VERSION "${LOKIMQ_VERSION_MAJOR}.${LOKIMQ_VERSION_MINOR}.${LOKIMQ_VERSION_PATCH}")
 message(STATUS "lokimq v${LOKIMQ_VERSION}")
 
@@ -23,7 +23,6 @@ configure_file(liblokimq.pc.in liblokimq.pc @ONLY)
 
 add_library(lokimq
     lokimq/auth.cpp
-    lokimq/batch.cpp
     lokimq/bt_serialize.cpp
     lokimq/connections.cpp
     lokimq/jobs.cpp
