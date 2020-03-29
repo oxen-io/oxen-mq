@@ -1,5 +1,6 @@
 #include "lokimq.h"
 #include "batch.h"
+#include "hex.h"
 #include "lokimq-internal.h"
 
 namespace lokimq {
@@ -230,10 +231,13 @@ void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
     auto cat_call = get_command(command);
 
     if (!cat_call.first) {
-        if (outgoing)
-            send_direct_message(connections[conn_index], "UNKNOWNCOMMAND", command);
-        else
-            send_routed_message(connections[conn_index], peer->route, "UNKNOWNCOMMAND", command);
+        LMQ_LOG(warn, "Invalid command '", command, "' sent by remote [", to_hex(peer->pubkey), "]/", peer_address(parts.back()));
+        try {
+            if (outgoing)
+                send_direct_message(connections[conn_index], "UNKNOWNCOMMAND");
+            else
+                send_routed_message(connections[conn_index], peer->route, "UNKNOWNCOMMAND");
+        } catch (const zmq::error_t&) { /* can't send: possibly already disconnected. Ignore. */ }
         return;
     }
 
