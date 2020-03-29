@@ -23,7 +23,6 @@ configure_file(liblokimq.pc.in liblokimq.pc @ONLY)
 
 add_library(lokimq
     lokimq/auth.cpp
-    lokimq/batch.cpp
     lokimq/bt_serialize.cpp
     lokimq/connections.cpp
     lokimq/jobs.cpp
