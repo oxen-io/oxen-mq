@@ -169,16 +169,21 @@ The following example shows how to define a category with commands:
         ;
 ```
 
-The Message object also provides methods for replying to the caller.  Simple replies queue a reply
-if the client is still connected.  Replies to service nodes can also be "strong" replies: when
-replying to a SN that has closed connection with a strong reply we will attempt to reestablish a
-connection to deliver the message.  In order for this to work the LokiMQ caller must provide a
-lookup function to retrieve the remote address given a SN x25519 pubkey.
+The `Message` object provides methods for replying to the caller, generally through either the
+`send_back()` or `send_reply()`: the former sends a new message to whoever sent this message; the
+latter sends a specially formulated reply as a response to a request command (see above).
 
-### Callbacks
+For a general, non-service node connection, this send-back or send-reply will be sent back along the
+connection on which the message was received.  If the remote has disconnected then the message is
+simply dropped.  If the remote is known to be a service node, however (and LokiMQ has been
+configured with a service node lookup function) then the sent message will be a "strong" reply: if
+there is another established connection with the service node then that connection will be used; if
+there is no connection at all then LokiMQ will attempt to establish a new connection to the SN to
+deliver the response.
 
 Invoked command functions are always invoked with exactly one arguments: a non-const LokiMQ::Message
-reference from which the connection info, LokiMQ object, and message data can be obtained.
+reference from which the connection info, LokiMQ object, and message data can be obtained.  (You are
+free and intended to `std::move` the data messages to avoid copying them).
 
 The Message object also contains a `ConnectionID` object as the public `conn` member; it is safe to
 take a copy of this and then use it later to send commands to this peer.  (For example, a wallet
