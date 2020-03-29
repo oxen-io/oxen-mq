@@ -28,8 +28,8 @@ void LokiMQ::proxy_schedule_reply_job(std::function<void()> f) {
 }
 
 void LokiMQ::proxy_run_batch_jobs(std::queue<batch_job>& jobs, const int reserved, int& active, bool reply) {
-    while (!jobs.empty() &&
-            (active < reserved || static_cast<int>(workers.size() - idle_workers.size()) < general_workers)) {
+    while (!jobs.empty() && static_cast<int>(workers.size()) < max_workers &&
+            (active < reserved || active_workers() < general_workers)) {
         proxy_run_worker(get_idle_worker().load(std::move(jobs.front()), reply));
         jobs.pop();
         active++;
