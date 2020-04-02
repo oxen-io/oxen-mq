@@ -206,6 +206,8 @@ public:
      */
     std::chrono::milliseconds CONN_CHECK_INTERVAL = 250ms;
 
+    /// Allows you to set options on the internal zmq context object.  For advanced use only.
+    int set_zmq_context_option(int option, int value);
 
 private:
 
