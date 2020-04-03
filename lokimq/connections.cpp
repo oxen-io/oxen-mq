@@ -32,6 +32,7 @@ void LokiMQ::rebuild_pollitems() {
 
     for (auto& s : connections)
         add_pollitem(pollitems, s);
+    pollitems_stale = false;
 }
 
 void LokiMQ::setup_outgoing_socket(zmq::socket_t& socket, string_view remote_pubkey) {
