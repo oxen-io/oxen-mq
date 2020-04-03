@@ -299,15 +299,13 @@ void LokiMQ::proxy_loop() {
         max_workers += cat.second.reserved_threads;
     }
 
-#ifndef NDEBUG
-    if (log_level() >= LogLevel::trace) {
-        LMQ_TRACE("Reserving space for ", max_workers, " max workers = ", general_workers, " general plus reservations for:");
+    if (log_level() >= LogLevel::debug) {
+        LMQ_LOG(debug, "Reserving space for ", max_workers, " max workers = ", general_workers, " general plus reservations for:");
         for (const auto& cat : categories)
-            LMQ_TRACE("    - ", cat.first, ": ", cat.second.reserved_threads);
-        LMQ_TRACE("    - (batch jobs): ", batch_jobs_reserved);
-        LMQ_TRACE("    - (reply jobs): ", reply_jobs_reserved);
+            LMQ_LOG(debug, "    - ", cat.first, ": ", cat.second.reserved_threads);
+        LMQ_LOG(debug, "    - (batch jobs): ", batch_jobs_reserved);
+        LMQ_LOG(debug, "    - (reply jobs): ", reply_jobs_reserved);
     }
-#endif
 
     workers.reserve(max_workers);
     if (!workers.empty())
