@@ -33,6 +33,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
     std::chrono::milliseconds keep_alive{DEFAULT_SEND_KEEP_ALIVE};
     std::chrono::milliseconds request_timeout{DEFAULT_REQUEST_TIMEOUT};
     bool optional = false;
+    bool outgoing = false;
     bool incoming = false;
     bool request = false;
     bool have_conn_id = false;
@@ -63,6 +64,8 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
         keep_alive = std::chrono::milliseconds{data.consume_integer<uint64_t>()};
     if (data.skip_until("optional"))
         optional = data.consume_integer<bool>();
+    if (data.skip_until("outgoing"))
+        outgoing = data.consume_integer<bool>();
 
     if (data.skip_until("request"))
         request = data.consume_integer<bool>();
@@ -100,7 +103,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
         retry = false;
         zmq::socket_t *send_to;
         if (conn_id.sn()) {
-            auto sock_route = proxy_connect_sn(conn_id.pk, hint, optional, incoming, keep_alive);
+            auto sock_route = proxy_connect_sn(conn_id.pk, hint, optional, incoming, outgoing, keep_alive);
             if (!sock_route.first) {
                 if (optional)
                     LMQ_LOG(debug, "Not sending: send is optional and no connection to ",
