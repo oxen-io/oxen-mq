@@ -1,3 +1,15 @@
+lokimq (1.0.5-1~ubuntu1804) bionic; urgency=medium
+
+  * Change thread count logs to debug from trace
+  * Reset stale pollitems
+  * Add `send_option::outgoing` to force a send on an outgoing connection
+  * Expose advanced zmq context setting ability
+  * Made simple_string_view take a char type
+  * Fix pollitems_stale not being set in some cases
+  * Bump version to 1.0.5
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Mon, 06 Apr 2020 18:19:37 -0300
+
 lokimq (1.0.4-1~ubuntu1804) bionic; urgency=medium
 
   * Catch errors on internal msgs; support non-blocking sends
