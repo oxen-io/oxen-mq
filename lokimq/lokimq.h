@@ -206,6 +206,8 @@ public:
      */
     std::chrono::milliseconds CONN_CHECK_INTERVAL = 250ms;
 
+    /// Allows you to set options on the internal zmq context object.  For advanced use only.
+    int set_zmq_context_option(int option, int value);
 
 private:
 
@@ -434,7 +436,7 @@ private:
     /// connection.  If we already have an outgoing connection then its keep-alive gets increased to
     /// this if currently less than this.
     std::pair<zmq::socket_t*, std::string> proxy_connect_sn(string_view pubkey, string_view connect_hint,
-            bool optional, bool incoming_only, std::chrono::milliseconds keep_alive);
+            bool optional, bool incoming_only, bool outgoing_only, std::chrono::milliseconds keep_alive);
 
     /// CONNECT_SN command telling us to connect to a new pubkey.  Returns the socket (which could
     /// be existing or a new one).  This basically just unpacks arguments and passes them on to
@@ -1050,6 +1052,19 @@ struct incoming {
     explicit incoming(bool inc = true) : is_incoming{inc} {}
 };
 
+/// Specifies that the message must use an outgoing connection; for messages to a service node the
+/// message will be delivered over an existing outgoing connection, if one is established, and a new
+/// outgoing connection opened to deliver the message if none is currently established.  For non-SN
+/// messages, the message will simply be dropped if it is attempting to be sent on an incoming
+/// socket, and send otherwise on an outgoing socket (this option is primarily aimed at SN
+/// messages).
+struct outgoing {
+    bool is_outgoing = true;
+    // Constructor; default construction gives you an outgoing-only, but the bool parameter can be
+    // specified as false to explicitly disable the outgoing-only flag.
+    explicit outgoing(bool out = true) : is_outgoing{out} {}
+};
+
 /// Specifies the idle timeout for the connection - if a new or existing outgoing connection is used
 /// for the send and its current idle timeout setting is less than this value then it is updated.
 struct keep_alive {
@@ -1150,6 +1165,11 @@ inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option
 /// `incoming` specialization: sets the incoming-only flag in the control data
 inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::incoming& i) {
     control_data["incoming"] = i.is_incoming;
+}
+
+/// `outgoing` specialization: sets the outgoing-only flag in the control data
+inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::outgoing& o) {
+    control_data["outgoing"] = o.is_outgoing;
 }
 
 /// `keep_alive` specialization: increases the outgoing socket idle timeout (if shorter)

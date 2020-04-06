@@ -32,6 +32,7 @@ void LokiMQ::rebuild_pollitems() {
 
     for (auto& s : connections)
         add_pollitem(pollitems, s);
+    pollitems_stale = false;
 }
 
 void LokiMQ::setup_outgoing_socket(zmq::socket_t& socket, string_view remote_pubkey) {
@@ -53,13 +54,15 @@ void LokiMQ::setup_outgoing_socket(zmq::socket_t& socket, string_view remote_pub
 }
 
 std::pair<zmq::socket_t *, std::string>
-LokiMQ::proxy_connect_sn(string_view remote, string_view connect_hint, bool optional, bool incoming_only, std::chrono::milliseconds keep_alive) {
+LokiMQ::proxy_connect_sn(string_view remote, string_view connect_hint, bool optional, bool incoming_only, bool outgoing_only, std::chrono::milliseconds keep_alive) {
     ConnectionID remote_cid{remote};
     auto its = peers.equal_range(remote_cid);
     peer_info* peer = nullptr;
     for (auto it = its.first; it != its.second; ++it) {
         if (incoming_only && it->second.route.empty())
             continue; // outgoing connection but we were asked to only use incoming connections
+        if (outgoing_only && !it->second.route.empty())
+            continue;
         peer = &it->second;
         break;
     }
@@ -121,6 +124,7 @@ LokiMQ::proxy_connect_sn(string_view remote, string_view connect_hint, bool opti
     conn_index_to_id.push_back(remote_cid);
     peers.emplace(std::move(remote_cid), std::move(p));
     connections.push_back(std::move(socket));
+    pollitems_stale = true;
 
     return {&connections.back(), ""s};
 }
@@ -128,7 +132,7 @@ LokiMQ::proxy_connect_sn(string_view remote, string_view connect_hint, bool opti
 std::pair<zmq::socket_t *, std::string> LokiMQ::proxy_connect_sn(bt_dict_consumer data) {
     string_view hint, remote_pk;
     std::chrono::milliseconds keep_alive;
-    bool optional = false, incoming_only = false;
+    bool optional = false, incoming_only = false, outgoing_only = false;
 
     // Alphabetical order
     if (data.skip_until("hint"))
@@ -139,11 +143,13 @@ std::pair<zmq::socket_t *, std::string> LokiMQ::proxy_connect_sn(bt_dict_consume
         keep_alive = std::chrono::milliseconds{data.consume_integer<uint64_t>()};
     if (data.skip_until("optional"))
         optional = data.consume_integer<bool>();
+    if (data.skip_until("outgoing_only"))
+        outgoing_only = data.consume_integer<bool>();
     if (!data.skip_until("pubkey"))
         throw std::runtime_error("Internal error: Invalid proxy_connect_sn command; pubkey missing");
     remote_pk = data.consume_string();
 
-    return proxy_connect_sn(remote_pk, hint, optional, incoming_only, keep_alive);
+    return proxy_connect_sn(remote_pk, hint, optional, incoming_only, outgoing_only, keep_alive);
 }
 
 template <typename Container, typename AccessIndex>
@@ -293,6 +299,7 @@ void LokiMQ::proxy_connect_remote(bt_dict_consumer data) {
     }
 
     connections.push_back(std::move(sock));
+    pollitems_stale = true;
     LMQ_LOG(debug, "Opened new zmq socket to ", remote, ", conn_id ", conn_id, "; sending HI");
     send_direct_message(connections.back(), "HI");
     pending_connects.emplace_back(connections.size()-1, conn_id, std::chrono::steady_clock::now() + timeout,
