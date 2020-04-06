@@ -75,6 +75,13 @@ inline std::string to_hex(string_view s) {
     return hex;
 }
 
+inline std::string to_hex(ustring_view s) {
+    std::string hex;
+    hex.reserve(s.size() * 2);
+    to_hex(s.begin(), s.end(), std::back_inserter(hex));
+    return hex;
+}
+
 /// Returns true if all elements in the range are hex characters
 template <typename It>
 constexpr bool is_hex(It begin, It end) {
@@ -87,6 +94,7 @@ constexpr bool is_hex(It begin, It end) {
 
 /// Returns true if all elements in the string-like value are hex characters
 constexpr bool is_hex(string_view s) { return is_hex(s.begin(), s.end()); }
+constexpr bool is_hex(ustring_view s) { return is_hex(s.begin(), s.end()); }
 
 /// Convert a hex digit into its numeric (0-15) value
 constexpr char from_hex_digit(unsigned char x) noexcept {
@@ -113,6 +121,13 @@ void from_hex(InputIt begin, InputIt end, OutputIt out) {
 /// Converts hex digits from a std::string-like object into a std::string of bytes.  Undefined
 /// behaviour if any characters are not in [0-9a-fA-F] or if the input sequence length is not even.
 inline std::string from_hex(string_view s) {
+    std::string bytes;
+    bytes.reserve(s.size() / 2);
+    from_hex(s.begin(), s.end(), std::back_inserter(bytes));
+    return bytes;
+}
+
+inline std::string from_hex(ustring_view s) {
     std::string bytes;
     bytes.reserve(s.size() / 2);
     from_hex(s.begin(), s.end(), std::back_inserter(bytes));

@@ -85,6 +85,10 @@ std::tuple<std::string, bool, AuthLevel> extract_metadata(zmq::message_t& msg) {
 
 } // namespace detail
 
+int LokiMQ::set_zmq_context_option(int option, int value) {
+    return context.setctxopt(option, value);
+}
+
 void LokiMQ::log_level(LogLevel level) {
     log_lvl.store(level, std::memory_order_relaxed);
 }

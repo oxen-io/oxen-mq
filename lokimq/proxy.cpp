@@ -33,6 +33,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
     std::chrono::milliseconds keep_alive{DEFAULT_SEND_KEEP_ALIVE};
     std::chrono::milliseconds request_timeout{DEFAULT_REQUEST_TIMEOUT};
     bool optional = false;
+    bool outgoing = false;
     bool incoming = false;
     bool request = false;
     bool have_conn_id = false;
@@ -63,6 +64,8 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
         keep_alive = std::chrono::milliseconds{data.consume_integer<uint64_t>()};
     if (data.skip_until("optional"))
         optional = data.consume_integer<bool>();
+    if (data.skip_until("outgoing"))
+        outgoing = data.consume_integer<bool>();
 
     if (data.skip_until("request"))
         request = data.consume_integer<bool>();
@@ -100,7 +103,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
         retry = false;
         zmq::socket_t *send_to;
         if (conn_id.sn()) {
-            auto sock_route = proxy_connect_sn(conn_id.pk, hint, optional, incoming, keep_alive);
+            auto sock_route = proxy_connect_sn(conn_id.pk, hint, optional, incoming, outgoing, keep_alive);
             if (!sock_route.first) {
                 if (optional)
                     LMQ_LOG(debug, "Not sending: send is optional and no connection to ",
@@ -299,15 +302,13 @@ void LokiMQ::proxy_loop() {
         max_workers += cat.second.reserved_threads;
     }
 
-#ifndef NDEBUG
-    if (log_level() >= LogLevel::trace) {
-        LMQ_TRACE("Reserving space for ", max_workers, " max workers = ", general_workers, " general plus reservations for:");
+    if (log_level() >= LogLevel::debug) {
+        LMQ_LOG(debug, "Reserving space for ", max_workers, " max workers = ", general_workers, " general plus reservations for:");
         for (const auto& cat : categories)
-            LMQ_TRACE("    - ", cat.first, ": ", cat.second.reserved_threads);
-        LMQ_TRACE("    - (batch jobs): ", batch_jobs_reserved);
-        LMQ_TRACE("    - (reply jobs): ", reply_jobs_reserved);
+            LMQ_LOG(debug, "    - ", cat.first, ": ", cat.second.reserved_threads);
+        LMQ_LOG(debug, "    - (batch jobs): ", batch_jobs_reserved);
+        LMQ_LOG(debug, "    - (reply jobs): ", reply_jobs_reserved);
     }
-#endif
 
     workers.reserve(max_workers);
     if (!workers.empty())
