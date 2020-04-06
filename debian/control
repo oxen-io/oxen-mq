@@ -9,7 +9,7 @@ Homepage: https://github.com/loki-project/loki-mq
 Package: liblokimq-dev
 Section: libdevel
 Architecture: any
-Depends: liblokimq1.0.4 (= ${binary:Version}), ${misc:Depends}, libzmq3-dev (>= 4.3), libmapbox-variant-dev
+Depends: liblokimq1.0.5 (= ${binary:Version}), ${misc:Depends}, libzmq3-dev (>= 4.3), libmapbox-variant-dev
 Description: zeromq-based Loki message passing library (headers)
  This C++14 library contains an abstraction layer around ZeroMQ to support
  integration with Loki authentication, RPC, and message passing.  It is
@@ -22,7 +22,7 @@ Description: zeromq-based Loki message passing library (headers)
  This package contains the library headers and other development files needed
  to build software using lokimq.
 
-Package: liblokimq1.0.4
+Package: liblokimq1.0.5
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: zeromq-based Loki message passing library
