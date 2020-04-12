@@ -21,13 +21,12 @@ struct Access {
     bool remote_sn = false;
     /// If true the category requires that the local node is a SN
     bool local_sn = false;
-};
 
-/// Return type of the AllowFunc: this determines whether we allow the connection at all, and if so,
-/// sets the initial authentication level and tells LokiMQ whether the other end is an active SN.
-struct Allow {
-    AuthLevel auth = AuthLevel::none;
-    bool remote_sn = false;
+    /// Constructor.  Intentionally allows implicit conversion from an AuthLevel so that an
+    /// AuthLevel can be passed anywhere an Access is required (the resulting Access will have both
+    /// remote and local sn set to false).
+    Access(AuthLevel auth, bool remote_sn = false, bool local_sn = false)
+        : auth{auth}, remote_sn{remote_sn}, local_sn{local_sn} {}
 };
 
 }

@@ -1,5 +1,6 @@
 #pragma once
 #include "string_view.h"
+#include <cstring>
 
 namespace lokimq {
 
@@ -71,11 +72,24 @@ private:
     friend std::ostream& operator<<(std::ostream& o, const ConnectionID& conn);
 };
 
+/// Simple hash implementation for a string that is *already* a hash-like value (such as a pubkey).
+/// Falls back to std::hash<std::string> if given a string smaller than a size_t.
+struct already_hashed {
+    size_t operator()(const std::string& s) const {
+        if (s.size() < sizeof(size_t))
+            return std::hash<std::string>{}(s);
+        size_t hash;
+        std::memcpy(&hash, &s[0], sizeof(hash));
+        return hash;
+    }
+};
+
+
 } // namespace lokimq
 namespace std {
     template <> struct hash<lokimq::ConnectionID> {
         size_t operator()(const lokimq::ConnectionID &c) const {
-            return c.sn() ? std::hash<std::string>{}(c.pk) :
+            return c.sn() ? lokimq::already_hashed{}(c.pk) :
                 std::hash<long long>{}(c.id);
         }
     };

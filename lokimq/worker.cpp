@@ -201,22 +201,24 @@ void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
         }
         peer = &it->second;
     } else {
-        std::tie(tmp_peer.pubkey, tmp_peer.service_node, tmp_peer.auth_level) = detail::extract_metadata(parts.back());
+        std::tie(tmp_peer.pubkey, tmp_peer.auth_level) = detail::extract_metadata(parts.back());
+        tmp_peer.service_node = tmp_peer.pubkey.size() == 32 && active_service_nodes.count(tmp_peer.pubkey);
+
         if (tmp_peer.service_node) {
             // It's a service node so we should have a peer_info entry; see if we can find one with
             // the same route, and if not, add one.
             auto pr = peers.equal_range(tmp_peer.pubkey);
             for (auto it = pr.first; it != pr.second; ++it) {
-                if (it->second.route == tmp_peer.route) {
+                if (it->second.conn_index == tmp_peer.conn_index && it->second.route == tmp_peer.route) {
                     peer = &it->second;
-                    // Upgrade permissions in case we have something higher on the socket
-                    peer->service_node |= tmp_peer.service_node;
-                    if (tmp_peer.auth_level > peer->auth_level)
-                        peer->auth_level = tmp_peer.auth_level;
+                    // Update the stored auth level just in case the peer reconnected
+                    peer->auth_level = tmp_peer.auth_level;
                     break;
                 }
             }
             if (!peer) {
+                // We don't have a record: this is either a new SN connection or a new message on a
+                // connection that recently gained SN status.
                 peer = &peers.emplace(ConnectionID{tmp_peer.pubkey}, std::move(tmp_peer))->second;
             }
         } else {
@@ -228,23 +230,6 @@ void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
 
     size_t command_part_index = outgoing ? 0 : 1;
     std::string command = parts[command_part_index].to_string();
-    auto cat_call = get_command(command);
-
-    if (!cat_call.first) {
-        LMQ_LOG(warn, "Invalid command '", command, "' sent by remote [", to_hex(peer->pubkey), "]/", peer_address(parts.back()));
-        try {
-            if (outgoing)
-                send_direct_message(connections[conn_index], "UNKNOWNCOMMAND");
-            else
-                send_routed_message(connections[conn_index], peer->route, "UNKNOWNCOMMAND");
-        } catch (const zmq::error_t&) { /* can't send: possibly already disconnected. Ignore. */ }
-        return;
-    }
-
-    auto& category = *cat_call.first;
-
-    if (!proxy_check_auth(conn_index, outgoing, *peer, command, category, parts.back()))
-        return;
 
     // Steal any data message parts
     size_t data_part_index = command_part_index + 1;
@@ -252,6 +237,14 @@ void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
     data_parts.reserve(parts.size() - data_part_index);
     for (auto it = parts.begin() + data_part_index; it != parts.end(); ++it)
         data_parts.push_back(std::move(*it));
+
+    auto cat_call = get_command(command);
+
+    // Check that command is valid, that we have permission, etc.
+    if (!proxy_check_auth(conn_index, outgoing, *peer, parts[command_part_index], cat_call, data_parts))
+        return;
+
+    auto& category = *cat_call.first;
 
     if (category.active_threads >= category.reserved_threads && active_workers() >= general_workers) {
         // No free reserved or general spots, try to queue it for later
