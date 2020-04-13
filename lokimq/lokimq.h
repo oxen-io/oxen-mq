@@ -86,14 +86,6 @@ static constexpr size_t MAX_COMMAND_LENGTH = 200;
 
 class CatHelper;
 
-/// std::unordered_set specialization for specifying pubkeys (used, in particular, by
-/// LokiMQ::set_active_sns and LokiMQ::update_active_sns); this is a std::string unordered_set that
-/// also uses a specialized trivial hash function that uses part of the value itself (i.e. the
-/// pubkey) directly as a hash value.  (This is nice and fast for uniformly distributed values like
-/// pubkeys and a terrible hash choice for anything else).
-using pubkey_set = std::unordered_set<std::string, already_hashed>;
-
-
 /**
  * Class that handles LokiMQ listeners, connections, proxying, and workers.  An application
  * typically has just one instance of this class.
