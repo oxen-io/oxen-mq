@@ -256,6 +256,8 @@ void LokiMQ::proxy_control_message(std::vector<zmq::message_t>& parts) {
             LMQ_TRACE("proxy batch jobs");
             auto ptrval = bt_deserialize<uintptr_t>(data);
             return proxy_batch(reinterpret_cast<detail::Batch*>(ptrval));
+        } else if (cmd == "SET_SNS") {
+            return proxy_set_active_sns(data);
         } else if (cmd == "UPDATE_SNS") {
             return proxy_update_active_sns(data);
         } else if (cmd == "CONNECT_SN") {
