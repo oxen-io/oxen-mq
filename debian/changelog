@@ -1,3 +1,11 @@
+lokimq (1.1.0-1~ubuntu2004) focal; urgency=medium
+
+  * 1.1.0: invocation-time SN auth; failure responses
+  * Move pubkey_set into auth.h header
+  * Add missing SET_SNS proxy handler
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Tue, 14 Apr 2020 13:06:41 -0300
+
 lokimq (1.0.5-1~ubuntu2004) focal; urgency=medium
 
   * Change thread count logs to debug from trace
