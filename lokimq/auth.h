@@ -1,5 +1,8 @@
 #pragma once
 #include <iostream>
+#include <string>
+#include <cstring>
+#include <unordered_set>
 
 namespace lokimq {
 
@@ -21,13 +24,32 @@ struct Access {
     bool remote_sn = false;
     /// If true the category requires that the local node is a SN
     bool local_sn = false;
+
+    /// Constructor.  Intentionally allows implicit conversion from an AuthLevel so that an
+    /// AuthLevel can be passed anywhere an Access is required (the resulting Access will have both
+    /// remote and local sn set to false).
+    Access(AuthLevel auth, bool remote_sn = false, bool local_sn = false)
+        : auth{auth}, remote_sn{remote_sn}, local_sn{local_sn} {}
 };
 
-/// Return type of the AllowFunc: this determines whether we allow the connection at all, and if so,
-/// sets the initial authentication level and tells LokiMQ whether the other end is an active SN.
-struct Allow {
-    AuthLevel auth = AuthLevel::none;
-    bool remote_sn = false;
+/// Simple hash implementation for a string that is *already* a hash-like value (such as a pubkey).
+/// Falls back to std::hash<std::string> if given a string smaller than a size_t.
+struct already_hashed {
+    size_t operator()(const std::string& s) const {
+        if (s.size() < sizeof(size_t))
+            return std::hash<std::string>{}(s);
+        size_t hash;
+        std::memcpy(&hash, &s[0], sizeof(hash));
+        return hash;
+    }
 };
+
+/// std::unordered_set specialization for specifying pubkeys (used, in particular, by
+/// LokiMQ::set_active_sns and LokiMQ::update_active_sns); this is a std::string unordered_set that
+/// also uses a specialized trivial hash function that uses part of the value itself (i.e. the
+/// pubkey) directly as a hash value.  (This is nice and fast for uniformly distributed values like
+/// pubkeys and a terrible hash choice for anything else).
+using pubkey_set = std::unordered_set<std::string, already_hashed>;
+
 
 }
