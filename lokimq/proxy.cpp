@@ -333,6 +333,11 @@ void LokiMQ::proxy_loop() {
             listener.setsockopt(ZMQ_CURVE_SECRETKEY, privkey.data(), privkey.size());
         }
         listener.setsockopt(ZMQ_HANDSHAKE_IVL, (int) HANDSHAKE_TIME.count());
+        if (CONN_HEARTBEAT > 0s) {
+            listener.setsockopt(ZMQ_HEARTBEAT_IVL, (int) CONN_HEARTBEAT.count());
+            if (CONN_HEARTBEAT_TIMEOUT > 0s)
+                listener.setsockopt(ZMQ_HEARTBEAT_TIMEOUT, (int) CONN_HEARTBEAT_TIMEOUT.count());
+        }
         listener.setsockopt<int64_t>(ZMQ_MAXMSGSIZE, MAX_MSG_SIZE);
         listener.setsockopt<int>(ZMQ_ROUTER_HANDOVER, 1);
         listener.setsockopt<int>(ZMQ_ROUTER_MANDATORY, 1);
