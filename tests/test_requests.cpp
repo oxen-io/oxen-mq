@@ -182,7 +182,7 @@ TEST_CASE("request timeouts", "[requests][timeout]") {
         lokimq::send_option::request_timeout{100ms}
     );
 
-    std::this_thread::sleep_for(30ms);
+    std::this_thread::sleep_for(40ms);
     REQUIRE( got_triggered );
     REQUIRE_FALSE( got_triggered2 );
     REQUIRE_FALSE( success );
