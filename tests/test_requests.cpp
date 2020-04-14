@@ -1,5 +1,4 @@
 #include "common.h"
-#include <future>
 #include <lokimq/hex.h>
 
 using namespace lokimq;
@@ -36,17 +35,11 @@ TEST_CASE("basic requests", "[requests]") {
             [&](auto, auto) { failed = true; },
             server.get_pubkey());
 
-    int i;
-    for (i = 0; i < 5; i++) {
-        if (connected.load())
-            break;
-        std::this_thread::sleep_for(50ms);
-    }
+    wait_for([&] { return connected || failed; });
     {
         auto lock = catch_lock();
-        REQUIRE( connected.load() );
-        REQUIRE( !failed.load() );
-        REQUIRE( i <= 1 );
+        REQUIRE( connected );
+        REQUIRE_FALSE( failed );
         REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
     }
 
@@ -59,11 +52,13 @@ TEST_CASE("basic requests", "[requests]") {
             data = std::move(data_);
     });
 
-    std::this_thread::sleep_for(50ms);
-    auto lock = catch_lock();
-    REQUIRE( got_reply.load() );
-    REQUIRE( success );
-    REQUIRE( data == std::vector<std::string>{{"123"}} );
+    reply_sleep();
+    {
+        auto lock = catch_lock();
+        REQUIRE( got_reply.load() );
+        REQUIRE( success );
+        REQUIRE( data == std::vector<std::string>{{"123"}} );
+    }
 }
 
 TEST_CASE("request from server to client", "[requests]") {
@@ -161,15 +156,10 @@ TEST_CASE("request timeouts", "[requests][timeout]") {
             [&](auto, auto) { failed = true; },
             server.get_pubkey());
 
-    int i;
-    for (i = 0; i < 5; i++) {
-        if (connected.load())
-            break;
-        std::this_thread::sleep_for(50ms);
-    }
-    REQUIRE( connected.load() );
-    REQUIRE( !failed.load() );
-    REQUIRE( i <= 1 );
+    wait_for([&] { return connected || failed; });
+
+    REQUIRE( connected );
+    REQUIRE_FALSE( failed );
     REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
 
     std::atomic<bool> got_triggered{false};
@@ -180,7 +170,7 @@ TEST_CASE("request timeouts", "[requests][timeout]") {
             success = ok;
             data = std::move(data_);
         },
-        lokimq::send_option::request_timeout{30ms}
+        lokimq::send_option::request_timeout{20ms}
     );
 
     std::atomic<bool> got_triggered2{false};
@@ -192,10 +182,10 @@ TEST_CASE("request timeouts", "[requests][timeout]") {
         lokimq::send_option::request_timeout{100ms}
     );
 
-    std::this_thread::sleep_for(50ms);
-    REQUIRE( got_triggered.load() );
+    std::this_thread::sleep_for(30ms);
+    REQUIRE( got_triggered );
+    REQUIRE_FALSE( got_triggered2 );
     REQUIRE_FALSE( success );
-    REQUIRE( data.size() == 0 );
+    REQUIRE( data == std::vector<std::string>{{"TIMEOUT"}} );
 
-    REQUIRE_FALSE( got_triggered2.load() );
 }
