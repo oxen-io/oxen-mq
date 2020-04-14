@@ -134,16 +134,18 @@ private:
 public:
 
     /// Callback type invoked to determine whether the given new incoming connection is allowed to
-    /// connect to us and to set its initial authentication level.
+    /// connect to us and to set its authentication level.
     ///
     /// @param ip - the ip address of the incoming connection
     /// @param pubkey - the x25519 pubkey of the connecting client (32 byte string).  Note that this
     /// will only be non-empty for incoming connections on `listen_curve` sockets; `listen_plain`
     /// sockets do not have a pubkey.
+    /// @param service_node - will be true if the `pubkey` is in the set of known active service
+    /// nodes.
     ///
     /// @returns an `AuthLevel` enum value indicating the default auth level for the incoming
     /// connection, or AuthLevel::denied if the connection should be refused.
-    using AllowFunc = std::function<Allow(string_view ip, string_view pubkey)>;
+    using AllowFunc = std::function<AuthLevel(string_view ip, string_view pubkey, bool service_node)>;
 
     /// Callback that is invoked when we need to send a "strong" message to a SN that we aren't
     /// already connected to and need to establish a connection.  This callback returns the ZMQ
@@ -244,7 +246,9 @@ private:
     std::vector<std::pair<std::string, bind_data>> bind;
 
     /// Info about a peer's established connection with us.  Note that "established" means both
-    /// connected and authenticated.
+    /// connected and authenticated.  Note that we only store peer info data for SN connections (in
+    /// or out), and outgoing non-SN connections.  Incoming non-SN connections are handled on the
+    /// fly.
     struct peer_info {
         /// Pubkey of the remote, if this connection is a curve25519 connection; empty otherwise.
         std::string pubkey;
@@ -521,15 +525,26 @@ private:
     /// done).
     std::unordered_map<std::string, std::string> command_aliases;
 
+    using cat_call_t = std::pair<category*, const std::pair<CommandCallback, bool>*>;
     /// Retrieve category and callback from a command name, including alias mapping.  Warns on
     /// invalid commands and returns nullptrs.  The command name will be updated in place if it is
     /// aliased to another command.
-    std::pair<category*, const std::pair<CommandCallback, bool>*> get_command(std::string& command);
+    cat_call_t get_command(std::string& command);
 
     /// Checks a peer's authentication level.  Returns true if allowed, warns and returns false if
     /// not.
     bool proxy_check_auth(size_t conn_index, bool outgoing, const peer_info& peer,
-            const std::string& command, const category& cat, zmq::message_t& msg);
+            zmq::message_t& command, const cat_call_t& cat_call, std::vector<zmq::message_t>& data);
+
+    /// Set of active service nodes.
+    pubkey_set active_service_nodes;
+
+    /// Resets or updates the stored set of active SN pubkeys
+    void proxy_set_active_sns(string_view data);
+    void proxy_set_active_sns(pubkey_set pubkeys);
+    void proxy_update_active_sns(bt_list_consumer data);
+    void proxy_update_active_sns(pubkey_set added, pubkey_set removed);
+    void proxy_update_active_sns_clean(pubkey_set added, pubkey_set removed);
 
     /// Details for a pending command; such a command already has authenticated access and is just
     /// waiting for a thread to become available to handle it.
@@ -775,8 +790,15 @@ public:
      * Finish starting up: binds to the bind locations given in the constructor and launches the
      * proxy thread to handle message dispatching between remote nodes and worker threads.
      *
-     * You will need to call `add_category` and `add_command` to register commands before calling
-     * `start()`; once start() is called commands cannot be changed.
+     * Things you want to do before calling this:
+     * - Use `add_category`/`add_command` to set up any commands remote connections can invoke.
+     * - If any commands require SN authentication, specify a list of currently active service node
+     *   pubkeys via `set_active_sns()` (and make sure this gets updated when things change by
+     *   another `set_active_sns()` or a `update_active_sns()` call).  It *is* possible to make the
+     *   initial call after calling `start()`, but that creates a window during which incoming
+     *   remote SN connections will be erroneously treated as non-SN connections.
+     * - If this LMQ instance should accept incoming connections, set up any listening ports via
+     *   `listen_curve()` and/or `listen_plain()`.
      */
     void start();
 
@@ -789,10 +811,10 @@ public:
      * such as: "tcp://\*:4567" or "tcp://1.2.3.4:5678".
      *
      * @param allow_connection function to call to determine whether to allow the connection and, if
-     * so, the authentication level it receives.  If omitted the default returns non-service node,
-     * AuthLevel::none access.
+     * so, the authentication level it receives.  If omitted the default returns AuthLevel::none
+     * access.
      */
-    void listen_curve(std::string bind, AllowFunc allow_connection = [](auto, auto) { return Allow{AuthLevel::none, false}; });
+    void listen_curve(std::string bind, AllowFunc allow_connection = [](auto, auto, auto) { return AuthLevel::none; });
 
     /** Start listening on the given bind address in unauthenticated plain text mode.  Incoming
      * connections can come from anywhere.  `allow_connection` is invoked for any incoming
@@ -803,10 +825,10 @@ public:
      * such as: "tcp://\*:4567" or "tcp://1.2.3.4:5678".
      *
      * @param allow_connection function to call to determine whether to allow the connection and, if
-     * so, the authentication level it receives.  If omitted the default returns non-service node,
-     * AuthLevel::none access.
+     * so, the authentication level it receives.  If omitted the default returns AuthLevel::none
+     * access.
      */
-    void listen_plain(std::string bind, AllowFunc allow_connection = [](auto, auto) { return Allow{AuthLevel::none, false}; });
+    void listen_plain(std::string bind, AllowFunc allow_connection = [](auto, auto, auto) { return AuthLevel::none; });
 
     /**
      * Try to initiate a connection to the given SN in anticipation of needing a connection in the
@@ -939,9 +961,23 @@ public:
      * @param to - the pubkey string or ConnectionID to send this request to
      * @param cmd - the command name
      * @param callback - the callback to invoke when we get a reply.  Called with a true value and
-     * the data strings when a reply is received, or false and an empty vector of data parts if we
-     * get no reply in the timeout interval.
+     * the data strings when a reply is received, or false with error string(s) indicating the
+     * failure reason upon failure or timeout.
      * @param opts - anything else (i.e. strings, send_options) is forwarded to send().
+     *
+     * Possible error data values:
+     * - ["TIMEOUT"] - we got no reply within the timeout window
+     * - ["UNKNOWNCOMMAND"] - the remote did not recognize the given request command
+     * - ["NO_REPLY_TAG"] - the invoked command is a request command but no reply tag was included
+     * - ["FORBIDDEN"] - the command requires an authorization level (e.g. Basic or Admin) that we
+     *   do not have.
+     * - ["FORBIDDEN_SN"] - the command requires service node authentication, but the remote did not
+     *   recognize us as a service node.  You *may* want to retry the request a limited number of
+     *   times (but do not retry indefinitely as that can be an infinite loop!) because this is
+     *   typically also followed by a disconnection; a retried message would reconnect and
+     *   reauthenticate which *may* result in picking up the SN authentication.
+     * - ["NOT_A_SERVICE_NODE"] - this command is only invokable on service nodes, and the remote is
+     *   not running as a service node.
      */
     template <typename... T>
     void request(ConnectionID to, string_view cmd, ReplyCallback callback, const T&... opts);
@@ -950,6 +986,41 @@ public:
     /// this returns the generated keys.
     const std::string& get_pubkey() const { return pubkey; }
     const std::string& get_privkey() const { return privkey; }
+
+    /** Updates (or initially sets) LokiMQ's list of service node pubkeys with the given list.
+     *
+     * This has two main effects:
+     *
+     * - All commands processed after the update will have SN status determined by the new list.
+     * - All outgoing connections to service nodes that are no longer on the list will be closed.
+     *   This includes both explicit connections (established by `connect_sn()`) and implicit ones
+     *   (established by sending to a SN that wasn't connected).
+     *
+     * As this update is potentially quite heavy it is recommended that this be called only when
+     * necessary--i.e. when the list has changed (or potentially changed), but *not* on a short
+     * periodic timer.
+     *
+     * This method may (and should!) be called before start() to load an initial set of SNs.
+     *
+     * Once a full list has been set, updates on changes can either call this again with the new
+     * list, or use the more efficient update_active_sns() call if incremental results are
+     * available.
+     */
+    void set_active_sns(pubkey_set pubkeys);
+
+    /** Updates the list of active pubkeys by adding or removing the given pubkeys from the existing
+     * list.  This is more efficient when the incremental information is already available; if it
+     * isn't, simply call set_active_sns with a new list to have LokiMQ figure out what was added or
+     * removed.
+     *
+     * \param added new pubkeys that were added since the last set_active_sns or update_active_sns
+     * call.
+     *
+     * \param removed pubkeys that were removed from active SN status since the last call.  If a
+     * pubkey is in both `added` and `removed` for some reason then its presence in `removed` will
+     * be ignored.
+     */
+    void update_active_sns(pubkey_set added, pubkey_set removed);
 
     /**
      * Batches a set of jobs to be executed by workers, optionally followed by a completion function.
@@ -1121,7 +1192,9 @@ namespace detail {
 /// containing the pointer to be serialized to pass (via lokimq queues) from one thread to another.
 /// Must be matched with a deserializer_pointer on the other side to reconstitute the object and
 /// destroy the intermediate pointer.
-template <typename T> uintptr_t serialize_object(T&& obj) {
+template <typename T>
+uintptr_t serialize_object(T&& obj) {
+    static_assert(std::is_rvalue_reference<decltype(obj)>::value, "serialize_object must be given an rvalue reference");
     auto* ptr = new T{std::forward<T>(obj)};
     return reinterpret_cast<uintptr_t>(ptr);
 }
@@ -1192,9 +1265,8 @@ inline void apply_send_option(bt_list&, bt_dict& control_data, send_option::queu
     control_data["send_full_q"] = serialize_object(std::move(f.callback));
 }
 
-/// Extracts a pubkey, SN status, and auth level from a zmq message received on a *listening*
-/// socket.
-std::tuple<std::string, bool, AuthLevel> extract_metadata(zmq::message_t& msg);
+/// Extracts a pubkey and auth level from a zmq message received on a *listening* socket.
+std::pair<std::string, AuthLevel> extract_metadata(zmq::message_t& msg);
 
 template <typename... T>
 bt_dict build_send(ConnectionID to, string_view cmd, T&&... opts) {

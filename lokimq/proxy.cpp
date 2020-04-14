@@ -178,7 +178,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
                 std::chrono::steady_clock::now() + request_timeout, std::move(request_callback) }});
         } else {
             LMQ_LOG(debug, "Could not send request, scheduling request callback failure");
-            job([callback = std::move(request_callback)] { callback(false, {}); });
+            job([callback = std::move(request_callback)] { callback(false, {{"TIMEOUT"s}}); });
         }
     }
     if (!sent) {
@@ -237,31 +237,38 @@ void LokiMQ::proxy_reply(bt_dict_consumer data) {
 }
 
 void LokiMQ::proxy_control_message(std::vector<zmq::message_t>& parts) {
+    // We throw an uncaught exception here because we only generate control messages internally in
+    // lokimq code: if one of these condition fail it's a lokimq bug.
     if (parts.size() < 2)
-        throw std::logic_error("Expected 2-3 message parts for a proxy control message");
+        throw std::logic_error("LokiMQ bug: Expected 2-3 message parts for a proxy control message");
     auto route = view(parts[0]), cmd = view(parts[1]);
     LMQ_TRACE("control message: ", cmd);
     if (parts.size() == 3) {
         LMQ_TRACE("...: ", parts[2]);
+        auto data = view(parts[2]);
         if (cmd == "SEND") {
             LMQ_TRACE("proxying message");
-            return proxy_send(view(parts[2]));
+            return proxy_send(data);
         } else if (cmd == "REPLY") {
             LMQ_TRACE("proxying reply to non-SN incoming message");
-            return proxy_reply(view(parts[2]));
+            return proxy_reply(data);
         } else if (cmd == "BATCH") {
             LMQ_TRACE("proxy batch jobs");
-            auto ptrval = bt_deserialize<uintptr_t>(view(parts[2]));
+            auto ptrval = bt_deserialize<uintptr_t>(data);
             return proxy_batch(reinterpret_cast<detail::Batch*>(ptrval));
+        } else if (cmd == "SET_SNS") {
+            return proxy_set_active_sns(data);
+        } else if (cmd == "UPDATE_SNS") {
+            return proxy_update_active_sns(data);
         } else if (cmd == "CONNECT_SN") {
-            proxy_connect_sn(view(parts[2]));
+            proxy_connect_sn(data);
             return;
         } else if (cmd == "CONNECT_REMOTE") {
-            return proxy_connect_remote(view(parts[2]));
+            return proxy_connect_remote(data);
         } else if (cmd == "DISCONNECT") {
-            return proxy_disconnect(view(parts[2]));
+            return proxy_disconnect(data);
         } else if (cmd == "TIMER") {
-            return proxy_timer(view(parts[2]));
+            return proxy_timer(data);
         }
     } else if (parts.size() == 2) {
         if (cmd == "START") {
@@ -279,8 +286,8 @@ void LokiMQ::proxy_control_message(std::vector<zmq::message_t>& parts) {
             return;
         }
     }
-    throw std::runtime_error("Proxy received invalid control command: " + std::string{cmd} +
-            " (" + std::to_string(parts.size()) + ")");
+    throw std::runtime_error("LokiMQ bug: Proxy received invalid control command: " +
+            std::string{cmd} + " (" + std::to_string(parts.size()) + ")");
 }
 
 void LokiMQ::proxy_loop() {
@@ -455,26 +462,31 @@ void LokiMQ::proxy_loop() {
     }
 }
 
+static bool is_error_response(string_view cmd) {
+    return cmd == "FORBIDDEN" || cmd == "FORBIDDEN_SN" || cmd == "NOT_A_SERVICE_NODE" || cmd == "UNKNOWNCOMMAND" || cmd == "NO_REPLY_TAG";
+}
+
 // Return true if we recognized/handled the builtin command (even if we reject it for whatever
 // reason)
 bool LokiMQ::proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>& parts) {
-    bool outgoing = connections[conn_index].getsockopt<int>(ZMQ_TYPE) == ZMQ_DEALER;
+    // Doubling as a bool and an offset:
+    size_t incoming = connections[conn_index].getsockopt<int>(ZMQ_TYPE) == ZMQ_ROUTER;
 
     string_view route, cmd;
-    if (parts.size() < (outgoing ? 1 : 2)) {
+    if (parts.size() < 1 + incoming) {
         LMQ_LOG(warn, "Received empty message; ignoring");
         return true;
     }
-    if (outgoing) {
-        cmd = view(parts[0]);
-    } else {
+    if (incoming) {
         route = view(parts[0]);
         cmd = view(parts[1]);
+    } else {
+        cmd = view(parts[0]);
     }
     LMQ_TRACE("Checking for builtins: '", cmd, "' from ", peer_address(parts.back()));
 
     if (cmd == "REPLY") {
-        size_t tag_pos = (outgoing ? 1 : 2);
+        size_t tag_pos = 1 + incoming;
         if (parts.size() <= tag_pos) {
             LMQ_LOG(warn, "Received REPLY without a reply tag; ignoring");
             return true;
@@ -482,7 +494,7 @@ bool LokiMQ::proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>
         std::string reply_tag{view(parts[tag_pos])};
         auto it = pending_requests.find(reply_tag);
         if (it != pending_requests.end()) {
-            LMQ_LOG(debug, "Received REPLY for pending command", to_hex(reply_tag), "; scheduling callback");
+            LMQ_LOG(debug, "Received REPLY for pending command ", to_hex(reply_tag), "; scheduling callback");
             std::vector<std::string> data;
             data.reserve(parts.size() - (tag_pos + 1));
             for (auto it = parts.begin() + (tag_pos + 1); it != parts.end(); ++it)
@@ -496,7 +508,7 @@ bool LokiMQ::proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>
         }
         return true;
     } else if (cmd == "HI") {
-        if (outgoing) {
+        if (!incoming) {
             LMQ_LOG(warn, "Got invalid 'HI' message on an outgoing connection; ignoring");
             return true;
         }
@@ -506,7 +518,7 @@ bool LokiMQ::proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>
         } catch (const std::exception &e) { LMQ_LOG(warn, "Couldn't reply with HELLO: ", e.what()); }
         return true;
     } else if (cmd == "HELLO") {
-        if (!outgoing) {
+        if (incoming) {
             LMQ_LOG(warn, "Got invalid 'HELLO' message on an incoming connection; ignoring");
             return true;
         }
@@ -531,22 +543,50 @@ bool LokiMQ::proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>
         pending_connects.erase(it);
         return true;
     } else if (cmd == "BYE") {
-        if (outgoing) {
-            std::string pk;
-            bool sn;
-            AuthLevel a;
-            std::tie(pk, sn, a) = detail::extract_metadata(parts.back());
-            ConnectionID conn = sn ? ConnectionID{std::move(pk)} : conn_index_to_id[conn_index];
-            LMQ_LOG(debug, "BYE command received; disconnecting from ", conn);
-            proxy_disconnect(conn, 1s);
+        if (!incoming) {
+            LMQ_LOG(debug, "BYE command received; disconnecting from ", peer_address(parts.back()));
+            proxy_close_connection(conn_index, 0s);
         } else {
             LMQ_LOG(warn, "Got invalid 'BYE' command on an incoming socket; ignoring");
         }
 
         return true;
     }
-    else if (cmd == "FORBIDDEN" || cmd == "NOT_A_SERVICE_NODE") {
-        return true; // FIXME - ignore these?  Log?
+    else if (is_error_response(cmd)) {
+        // These messages (FORBIDDEN, UNKNOWNCOMMAND, etc.) are sent in response to us trying to
+        // invoke something that doesn't exist or we don't have permission to access.  These have
+        // two forms (the latter is only sent by remotes running 1.0.6+).
+        // - ["XXX", "whatever.command"]
+        // - ["XXX", "REPLY", replytag]
+        // (ignoring the routing prefix on incoming commands).
+        // For the former, we log; for the latter we trigger the reply callback with a failure
+
+        if (parts.size() == (2 + incoming) && is_error_response(view(parts[1 + incoming]))) {
+            // Something like ["UNKNOWNCOMMAND", "FORBIDDEN_SN"] which can happen because the remote
+            // is running an older version that didn't understand the FORBIDDEN_SN (or whatever)
+            // error reply that we sent them. We just ignore it because anything else could trigger
+            // an infinite cycle.
+            LMQ_LOG(debug, "Received [", cmd, ",", view(parts[1 + incoming]), "]; remote is probably an older lokimq. Ignoring.");
+            return true;
+        }
+
+        if (parts.size() == (3 + incoming) && view(parts[1 + incoming]) == "REPLY") {
+            std::string reply_tag{view(parts[2 + incoming])};
+            auto it = pending_requests.find(reply_tag);
+            if (it != pending_requests.end()) {
+                LMQ_LOG(debug, "Received ", cmd, " REPLY for pending command ", to_hex(reply_tag), "; scheduling failure callback");
+                proxy_schedule_reply_job([callback=std::move(it->second.second), cmd=std::string{cmd}] {
+                    callback(false, {{std::move(cmd)}});
+                });
+                pending_requests.erase(it);
+            } else {
+                LMQ_LOG(warn, "Received REPLY with unknown or already handled reply tag (", to_hex(reply_tag), "); ignoring");
+            }
+        } else {
+            LMQ_LOG(warn, "Received ", cmd, ':', (parts.size() > 1 + incoming ? view(parts[1 + incoming]) : "(unknown command)"_sv),
+                        " from ", peer_address(parts.back()));
+        }
+        return true;
     }
     return false;
 }

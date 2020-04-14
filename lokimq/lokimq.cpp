@@ -26,11 +26,6 @@ std::vector<std::string> as_strings(const MessageContainer& msgs) {
     return result;
 }
 
-void check_started(const std::thread& proxy_thread, const std::string &verb) {
-    if (!proxy_thread.joinable())
-        throw std::logic_error("Cannot " + verb + " before calling `start()`");
-}
-
 void check_not_started(const std::thread& proxy_thread, const std::string &verb) {
     if (proxy_thread.joinable())
         throw std::logic_error("Cannot " + verb + " after calling `start()`");
@@ -54,29 +49,20 @@ void send_control(zmq::socket_t& sock, string_view cmd, std::string data) {
     }
 }
 
-/// Extracts a pubkey, SN status, and auth level from a zmq message received on a *listening*
-/// socket.
-std::tuple<std::string, bool, AuthLevel> extract_metadata(zmq::message_t& msg) {
-    auto result = std::make_tuple(""s, false, AuthLevel::none);
+/// Extracts a pubkey and and auth level from a zmq message received on a *listening* socket.
+std::pair<std::string, AuthLevel> extract_metadata(zmq::message_t& msg) {
+    auto result = std::make_pair(""s, AuthLevel::none);
     try {
         string_view pubkey_hex{msg.gets("User-Id")};
         if (pubkey_hex.size() != 64)
             throw std::logic_error("bad user-id");
         assert(is_hex(pubkey_hex.begin(), pubkey_hex.end()));
-        auto& pubkey = std::get<std::string>(result);
-        pubkey.resize(32, 0);
-        from_hex(pubkey_hex.begin(), pubkey_hex.end(), pubkey.begin());
+        result.first.resize(32, 0);
+        from_hex(pubkey_hex.begin(), pubkey_hex.end(), result.first.begin());
     } catch (...) {}
 
     try {
-        string_view is_sn{msg.gets("X-SN")};
-        if (is_sn.size() == 1 && is_sn[0] == '1')
-            std::get<bool>(result) = true;
-    } catch (...) {}
-
-    try {
-        string_view auth_level{msg.gets("X-AuthLevel")};
-        std::get<AuthLevel>(result) = auth_from_string(auth_level);
+        result.second = auth_from_string(msg.gets("X-AuthLevel"));
     } catch (...) {}
 
     return result;
@@ -383,46 +369,6 @@ LokiMQ::~LokiMQ() {
     detail::send_control(get_control_socket(), "QUIT");
     proxy_thread.join();
     LMQ_LOG(info, "LokiMQ proxy thread has stopped");
-}
-
-ConnectionID LokiMQ::connect_sn(string_view pubkey, std::chrono::milliseconds keep_alive, string_view hint) {
-    check_started(proxy_thread, "connect");
-
-    detail::send_control(get_control_socket(), "CONNECT_SN", bt_serialize<bt_dict>({{"pubkey",pubkey}, {"keep_alive",keep_alive.count()}, {"hint",hint}}));
-
-    return pubkey;
-}
-
-ConnectionID LokiMQ::connect_remote(string_view remote, ConnectSuccess on_connect, ConnectFailure on_failure,
-        string_view pubkey, AuthLevel auth_level, std::chrono::milliseconds timeout) {
-    if (!proxy_thread.joinable())
-        LMQ_LOG(warn, "connect_remote() called before start(); this won't take effect until start() is called");
-
-    if (remote.size() < 7 || !(remote.substr(0, 6) == "tcp://" || remote.substr(0, 6) == "ipc://" /* unix domain sockets */))
-        throw std::runtime_error("Invalid connect_remote: remote address '" + std::string{remote} + "' is not a valid or supported zmq connect string");
-
-    auto id = next_conn_id++;
-    LMQ_TRACE("telling proxy to connect to ", remote, ", id ", id,
-            pubkey.empty() ? "using NULL auth" : ", using CURVE with remote pubkey [" + to_hex(pubkey) + "]");
-    detail::send_control(get_control_socket(), "CONNECT_REMOTE", bt_serialize<bt_dict>({
-        {"auth_level", static_cast<std::underlying_type_t<AuthLevel>>(auth_level)},
-        {"conn_id", id},
-        {"connect", reinterpret_cast<uintptr_t>(new ConnectSuccess{std::move(on_connect)})},
-        {"failure", reinterpret_cast<uintptr_t>(new ConnectFailure{std::move(on_failure)})},
-        {"pubkey", pubkey},
-        {"remote", remote},
-        {"timeout", timeout.count()},
-    }));
-
-    return id;
-}
-
-void LokiMQ::disconnect(ConnectionID id, std::chrono::milliseconds linger) {
-    detail::send_control(get_control_socket(), "DISCONNECT", bt_serialize<bt_dict>({
-            {"conn_id", id.id},
-            {"linger_ms", linger.count()},
-            {"pubkey", id.pk},
-    }));
 }
 
 std::ostream &operator<<(std::ostream &os, LogLevel lvl) {
