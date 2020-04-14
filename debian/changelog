@@ -1,5 +1,6 @@
 lokimq (1.1.0-1~ubuntu2004) focal; urgency=medium
 
+  * Add ZMTP heartbeating (enabled by default)
   * 1.1.0: invocation-time SN auth; failure responses
   * Move pubkey_set into auth.h header
   * Add missing SET_SNS proxy handler
