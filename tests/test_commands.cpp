@@ -1,5 +1,4 @@
 #include "common.h"
-#include <future>
 #include <lokimq/hex.h>
 #include <map>
 #include <set>
@@ -12,10 +11,10 @@ TEST_CASE("basic commands", "[commands]") {
         "", "", // generate ephemeral keys
         false, // not a service node
         [](auto) { return ""; },
-        get_logger("S» ")
+        get_logger("S» "),
+        LogLevel::trace
     };
-    server.log_level(LogLevel::trace);
-    server.listen_curve(listen, [](auto /*ip*/, auto /*pk*/) { return Allow{AuthLevel::none, false}; });
+    server.listen_curve(listen);
 
     std::atomic<int> hellos{0}, his{0};
 
@@ -32,41 +31,33 @@ TEST_CASE("basic commands", "[commands]") {
 
     server.start();
 
-    LokiMQ client{
-        get_logger("C» ")
-    };
-    client.log_level(LogLevel::trace);
+    LokiMQ client{get_logger("C» "), LogLevel::trace};
 
     client.add_category("public", Access{AuthLevel::none});
     client.add_command("public", "hi", [&](auto&) { his++; });
     client.start();
 
-    std::atomic<bool> connected{false}, failed{false};
+    std::atomic<bool> got{false};
+    bool success = false, failed = false;
     std::string pubkey;
 
     auto c = client.connect_remote(listen,
-            [&](auto conn) { pubkey = conn.pubkey(); connected = true; },
-            [&](auto conn, string_view) { failed = true; },
+            [&](auto conn) { pubkey = conn.pubkey(); success = true; got = true; },
+            [&](auto conn, string_view) { failed = true; got = true; },
             server.get_pubkey());
 
-    int i;
-    for (i = 0; i < 5; i++) {
-        if (connected.load())
-            break;
-        std::this_thread::sleep_for(50ms);
-    }
+    wait_for_conn(got);
     {
         auto lock = catch_lock();
-        REQUIRE( connected.load() );
-        REQUIRE( i <= 1 ); // should be fast
-        REQUIRE( !failed.load() );
+        REQUIRE( got );
+        REQUIRE( success );
+        REQUIRE_FALSE( failed );
         REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
     }
 
     client.send(c, "public.hello");
     client.send(c, "public.client.pubkey");
-
-    std::this_thread::sleep_for(50ms);
+    reply_sleep();
     {
         auto lock = catch_lock();
         REQUIRE( hellos == 1 );
@@ -77,7 +68,7 @@ TEST_CASE("basic commands", "[commands]") {
     for (int i = 0; i < 50; i++)
         client.send(c, "public.hello");
 
-    std::this_thread::sleep_for(100ms);
+    wait_for([&] { return his == 26; });
     {
         auto lock = catch_lock();
         REQUIRE( hellos == 51 );
@@ -91,10 +82,10 @@ TEST_CASE("outgoing auth level", "[commands][auth]") {
         "", "", // generate ephemeral keys
         false, // not a service node
         [](auto) { return ""; },
-        get_logger("S» ")
+        get_logger("S» "),
+        LogLevel::trace
     };
-    server.log_level(LogLevel::trace);
-    server.listen_curve(listen, [](auto /*ip*/, auto /*pk*/) { return Allow{AuthLevel::none, false}; });
+    server.listen_curve(listen);
 
     std::atomic<int> hellos{0};
 
@@ -103,10 +94,7 @@ TEST_CASE("outgoing auth level", "[commands][auth]") {
 
     server.start();
 
-    LokiMQ client{
-        get_logger("C» ")
-    };
-    client.log_level(LogLevel::trace);
+    LokiMQ client{get_logger("C» "), LogLevel::trace};
 
     std::atomic<int> public_hi{0}, basic_hi{0}, admin_hi{0};
     client.add_category("public", Access{AuthLevel::none});
@@ -124,8 +112,7 @@ TEST_CASE("outgoing auth level", "[commands][auth]") {
     auto admin_c = client.connect_remote(listen, [](...) {}, [](...) {}, server.get_pubkey(), AuthLevel::admin);
 
     client.send(public_c, "public.reflect", "public.hi");
-    std::this_thread::sleep_for(50ms);
-
+    wait_for([&] { return public_hi == 1; });
     {
         auto lock = catch_lock();
         REQUIRE( public_hi == 1 );
@@ -138,7 +125,7 @@ TEST_CASE("outgoing auth level", "[commands][auth]") {
     client.send(admin_c, "public.reflect", "admin.hi");
     client.send(basic_c, "public.reflect", "basic.hi");
 
-    std::this_thread::sleep_for(50ms);
+    wait_for([&] { return public_hi == 2; });
     {
         auto lock = catch_lock();
         REQUIRE( admin_hi == 3 );
@@ -160,7 +147,7 @@ TEST_CASE("outgoing auth level", "[commands][auth]") {
     client.send(admin_c, "public.reflect", "basic.hi");
     client.send(admin_c, "public.reflect", "public.hi");
 
-    std::this_thread::sleep_for(50ms);
+    wait_for([&] { return public_hi == 3; });
     auto lock = catch_lock();
     REQUIRE( admin_hi == 1 );
     REQUIRE( basic_hi == 2 );
@@ -176,10 +163,10 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
         "", "", // generate ephemeral keys
         false, // not a service node
         [](auto) { return ""; },
-        get_logger("S» ")
+        get_logger("S» "),
+        LogLevel::trace
     };
-    server.log_level(LogLevel::trace);
-    server.listen_curve(listen, [](auto /*ip*/, auto /*pk*/) { return Allow{AuthLevel::none, false}; });
+    server.listen_curve(listen);
 
     std::vector<std::pair<ConnectionID, std::string>> subscribers;
     ConnectionID backdoor;
@@ -221,8 +208,7 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
     auto nsa_c = nsa.connect_remote(listen, connect_success, connect_failure, server.get_pubkey(), AuthLevel::admin);
     nsa.send(nsa_c, "hey google.install backdoor");
 
-    std::this_thread::sleep_for(50ms);
-
+    wait_for([&] { auto lock = catch_lock(); return (bool) backdoor; });
     {
         auto l = catch_lock();
         REQUIRE( backdoor );
@@ -243,9 +229,10 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
     std::map<int, std::set<std::string>> google_knows;
     int things_remembered{0};
     for (int i = 0; i < 5; i++) {
-        clients.push_back(std::make_unique<LokiMQ>(get_logger("C" + std::to_string(i) + "» ")));
+        clients.push_back(std::make_unique<LokiMQ>(
+            get_logger("C" + std::to_string(i) + "» "), LogLevel::trace
+        ));
         auto& c = clients.back();
-        c->log_level(LogLevel::trace);
         c->add_category("personal", Access{AuthLevel::basic});
         c->add_command("personal", "detail", [&,i](Message& m) {
             auto l = catch_lock();
@@ -265,7 +252,7 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
                 },
                 personal_detail);
     }
-    std::this_thread::sleep_for(50ms);
+    wait_for([&] { auto lock = catch_lock(); return things_remembered == all_the_things.size(); });
     {
         auto l = catch_lock();
         REQUIRE( things_remembered == all_the_things.size() );
@@ -273,7 +260,7 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
     }
 
     clients[0]->send(conns[0], "hey google.recall");
-    std::this_thread::sleep_for(50ms);
+    reply_sleep();
     {
         auto l = catch_lock();
         REQUIRE( google_knows == personal_details );
@@ -286,10 +273,10 @@ TEST_CASE("send failure callbacks", "[commands][queue_full]") {
         "", "", // generate ephemeral keys
         false, // not a service node
         [](auto) { return ""; },
-        get_logger("S» ")
+        get_logger("S» "),
+        LogLevel::debug // This test traces so much that it takes 2.5-3s of CPU time at trace level, so don't do that.
     };
-    server.log_level(LogLevel::debug);
-    server.listen_plain(listen, [](auto /*ip*/, auto /*pk*/) { return Allow{AuthLevel::none, false}; });
+    server.listen_plain(listen);
 
     std::atomic<int> send_attempts{0};
     std::atomic<int> send_failures{0};
@@ -331,7 +318,7 @@ TEST_CASE("send failure callbacks", "[commands][queue_full]") {
     for (i = 0; i < 20; i++) {
         if (send_attempts.load() >= 500)
             break;
-        std::this_thread::sleep_for(25ms);
+        std::this_thread::sleep_for(10ms);
     }
     {
         auto lock = catch_lock();
@@ -354,20 +341,20 @@ TEST_CASE("send failure callbacks", "[commands][queue_full]") {
         client.send(zmq::message_t{"x.x", 3}, zmq::send_flags::none);
         expected_attempts += 500;
         if (i >= 4) {
-            std::this_thread::sleep_for(25ms);
             if (send_failures.load() > 0)
                 break;
+            std::this_thread::sleep_for(25ms);
         }
     }
 
-    for (i = 0; i < 10; i++) {
+    for (i = 0; i < 20; i++) {
         if (send_attempts.load() >= expected_attempts)
             break;
-        std::this_thread::sleep_for(25ms);
+        std::this_thread::sleep_for(10ms);
     }
     {
         auto lock = catch_lock();
-        REQUIRE( i <= 8 );
+        REQUIRE( i < 20 );
         REQUIRE( send_attempts.load() == expected_attempts );
         REQUIRE( send_failures.load() > 0 );
     }

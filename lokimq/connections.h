@@ -1,4 +1,5 @@
 #pragma once
+#include "auth.h"
 #include "string_view.h"
 
 namespace lokimq {
@@ -75,7 +76,7 @@ private:
 namespace std {
     template <> struct hash<lokimq::ConnectionID> {
         size_t operator()(const lokimq::ConnectionID &c) const {
-            return c.sn() ? std::hash<std::string>{}(c.pk) :
+            return c.sn() ? lokimq::already_hashed{}(c.pk) :
                 std::hash<long long>{}(c.id);
         }
     };

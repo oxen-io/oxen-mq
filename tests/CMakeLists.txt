@@ -6,6 +6,7 @@ set(LMQ_TEST_SRC
     test_batch.cpp
     test_connect.cpp
     test_commands.cpp
+    test_failures.cpp
     test_requests.cpp
     test_string_view.cpp
     )
