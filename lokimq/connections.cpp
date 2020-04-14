@@ -43,6 +43,12 @@ void LokiMQ::setup_outgoing_socket(zmq::socket_t& socket, string_view remote_pub
     }
     socket.setsockopt(ZMQ_HANDSHAKE_IVL, (int) HANDSHAKE_TIME.count());
     socket.setsockopt<int64_t>(ZMQ_MAXMSGSIZE, MAX_MSG_SIZE);
+    if (CONN_HEARTBEAT > 0s) {
+        socket.setsockopt(ZMQ_HEARTBEAT_IVL, (int) CONN_HEARTBEAT.count());
+        if (CONN_HEARTBEAT_TIMEOUT > 0s)
+            socket.setsockopt(ZMQ_HEARTBEAT_TIMEOUT, (int) CONN_HEARTBEAT_TIMEOUT.count());
+    }
+
     if (PUBKEY_BASED_ROUTING_ID) {
         std::string routing_id;
         routing_id.reserve(33);

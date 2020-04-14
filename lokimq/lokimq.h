@@ -208,6 +208,23 @@ public:
      */
     std::chrono::milliseconds CONN_CHECK_INTERVAL = 250ms;
 
+    /** Whether to enable heartbeats on incoming/outgoing connections.  If set to > 0 then we set up
+     * ZMQ to send a heartbeat ping over the socket this often, which helps keep the connection
+     * alive and lets failed connections be detected sooner (see the next option).
+     *
+     * Only new connections created after changing this are affected, so if changing it is
+     * recommended to set it before calling `start()`.
+     */
+    std::chrono::milliseconds CONN_HEARTBEAT = 3s;
+
+    /** When CONN_HEARTBEAT is enabled, this sets how long we wait for a reply on a socket before
+     * considering the socket to have died and closing it.
+     *
+     * Only new connections created after changing this are affected, so if changing it is
+     * recommended to set it before calling `start()`.
+     */
+    std::chrono::milliseconds CONN_HEARTBEAT_TIMEOUT = 30s;
+
     /// Allows you to set options on the internal zmq context object.  For advanced use only.
     int set_zmq_context_option(int option, int value);
 
