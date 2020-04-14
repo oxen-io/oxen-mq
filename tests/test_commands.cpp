@@ -125,7 +125,7 @@ TEST_CASE("outgoing auth level", "[commands][auth]") {
     client.send(admin_c, "public.reflect", "admin.hi");
     client.send(basic_c, "public.reflect", "basic.hi");
 
-    wait_for([&] { return public_hi == 2; });
+    wait_for([&] { return basic_hi == 2; });
     {
         auto lock = catch_lock();
         REQUIRE( admin_hi == 3 );
@@ -322,7 +322,7 @@ TEST_CASE("send failure callbacks", "[commands][queue_full]") {
     }
     {
         auto lock = catch_lock();
-        REQUIRE( i <= 4 ); // should be not too slow
+        REQUIRE( i < 20 ); // should be not too slow
         // We have two buffers here: 1000 on the receiver, and 1000 on the client, which means we
         // should be able to get 2000 out before we hit HWM.  We should only have been sent 501 so
         // far (the "HELLO" handshake + 500 "y.y" messages).
@@ -347,14 +347,14 @@ TEST_CASE("send failure callbacks", "[commands][queue_full]") {
         }
     }
 
-    for (i = 0; i < 20; i++) {
+    for (i = 0; i < 100; i++) {
         if (send_attempts.load() >= expected_attempts)
             break;
         std::this_thread::sleep_for(10ms);
     }
     {
         auto lock = catch_lock();
-        REQUIRE( i < 20 );
+        REQUIRE( i < 100 );
         REQUIRE( send_attempts.load() == expected_attempts );
         REQUIRE( send_failures.load() > 0 );
     }

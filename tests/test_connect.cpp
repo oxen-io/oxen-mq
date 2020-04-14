@@ -69,7 +69,7 @@ TEST_CASE("self-connection SN optimization", "[connect][self]") {
             return AuthLevel::none;
     });
     sn.add_category("a", Access{AuthLevel::none});
-    bool invoked = false;
+    std::atomic<bool> invoked{false};
     sn.add_command("a", "b", [&](const Message& m) {
             invoked = true;
             auto lock = catch_lock();
@@ -82,7 +82,7 @@ TEST_CASE("self-connection SN optimization", "[connect][self]") {
 
     sn.start();
     sn.send(pubkey, "a.b", "my data");
-    reply_sleep();
+    wait_for_conn(invoked);
     {
         auto lock = catch_lock();
         REQUIRE(invoked);
