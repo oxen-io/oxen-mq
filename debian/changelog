@@ -1,3 +1,9 @@
+lokimq (1.1.0-2~ubuntu2004) focal; urgency=medium
+
+  * Fix pre-1.1.0 UNKNOWNCOMMAND detection
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Tue, 14 Apr 2020 23:58:10 -0300
+
 lokimq (1.1.0-1~ubuntu2004) focal; urgency=medium
 
   * drop 0001-slower-connection-tests.patch
