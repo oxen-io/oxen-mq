@@ -183,7 +183,7 @@ std::pair<zmq::socket_t *, std::string> LokiMQ::proxy_connect_sn(bt_dict_consume
 
     // Alphabetical order
     if (data.skip_until("hint"))
-        hint = data.consume_string();
+        hint = data.consume_string_view();
     if (data.skip_until("incoming"))
         incoming_only = data.consume_integer<bool>();
     if (data.skip_until("keep_alive"))
@@ -194,7 +194,7 @@ std::pair<zmq::socket_t *, std::string> LokiMQ::proxy_connect_sn(bt_dict_consume
         outgoing_only = data.consume_integer<bool>();
     if (!data.skip_until("pubkey"))
         throw std::runtime_error("Internal error: Invalid proxy_connect_sn command; pubkey missing");
-    remote_pk = data.consume_string();
+    remote_pk = data.consume_string_view();
 
     return proxy_connect_sn(remote_pk, hint, optional, incoming_only, outgoing_only, keep_alive);
 }
