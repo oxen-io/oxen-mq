@@ -35,18 +35,26 @@ void LokiMQ::rebuild_pollitems() {
     pollitems_stale = false;
 }
 
-void LokiMQ::setup_outgoing_socket(zmq::socket_t& socket, string_view remote_pubkey) {
-    if (!remote_pubkey.empty()) {
-        socket.setsockopt(ZMQ_CURVE_SERVERKEY, remote_pubkey.data(), remote_pubkey.size());
-        socket.setsockopt(ZMQ_CURVE_PUBLICKEY, pubkey.data(), pubkey.size());
-        socket.setsockopt(ZMQ_CURVE_SECRETKEY, privkey.data(), privkey.size());
-    }
+void LokiMQ::setup_external_socket(zmq::socket_t& socket) {
+    socket.setsockopt(ZMQ_RECONNECT_IVL, (int) RECONNECT_INTERVAL.count());
+    socket.setsockopt(ZMQ_RECONNECT_IVL_MAX, (int) RECONNECT_INTERVAL_MAX.count());
     socket.setsockopt(ZMQ_HANDSHAKE_IVL, (int) HANDSHAKE_TIME.count());
     socket.setsockopt<int64_t>(ZMQ_MAXMSGSIZE, MAX_MSG_SIZE);
     if (CONN_HEARTBEAT > 0s) {
         socket.setsockopt(ZMQ_HEARTBEAT_IVL, (int) CONN_HEARTBEAT.count());
         if (CONN_HEARTBEAT_TIMEOUT > 0s)
             socket.setsockopt(ZMQ_HEARTBEAT_TIMEOUT, (int) CONN_HEARTBEAT_TIMEOUT.count());
+    }
+}
+
+void LokiMQ::setup_outgoing_socket(zmq::socket_t& socket, string_view remote_pubkey) {
+
+    setup_external_socket(socket);
+
+    if (!remote_pubkey.empty()) {
+        socket.setsockopt(ZMQ_CURVE_SERVERKEY, remote_pubkey.data(), remote_pubkey.size());
+        socket.setsockopt(ZMQ_CURVE_PUBLICKEY, pubkey.data(), pubkey.size());
+        socket.setsockopt(ZMQ_CURVE_SECRETKEY, privkey.data(), privkey.size());
     }
 
     if (PUBKEY_BASED_ROUTING_ID) {
@@ -183,7 +191,7 @@ std::pair<zmq::socket_t *, std::string> LokiMQ::proxy_connect_sn(bt_dict_consume
 
     // Alphabetical order
     if (data.skip_until("hint"))
-        hint = data.consume_string();
+        hint = data.consume_string_view();
     if (data.skip_until("incoming"))
         incoming_only = data.consume_integer<bool>();
     if (data.skip_until("keep_alive"))
@@ -194,7 +202,7 @@ std::pair<zmq::socket_t *, std::string> LokiMQ::proxy_connect_sn(bt_dict_consume
         outgoing_only = data.consume_integer<bool>();
     if (!data.skip_until("pubkey"))
         throw std::runtime_error("Internal error: Invalid proxy_connect_sn command; pubkey missing");
-    remote_pk = data.consume_string();
+    remote_pk = data.consume_string_view();
 
     return proxy_connect_sn(remote_pk, hint, optional, incoming_only, outgoing_only, keep_alive);
 }
@@ -238,14 +246,16 @@ void LokiMQ::proxy_expire_idle_peers() {
     for (auto it = peers.begin(); it != peers.end(); ) {
         auto &info = it->second;
         if (info.outgoing()) {
-            auto idle = info.last_activity - std::chrono::steady_clock::now();
-            if (idle <= info.idle_expiry) {
+            auto idle = std::chrono::steady_clock::now() - info.last_activity;
+            if (idle > info.idle_expiry) {
+                LMQ_LOG(debug, "Closing outgoing connection to ", it->first, ": idle timeout reached");
+                ++it; // The below is going to delete our current element
+                proxy_close_connection(info.conn_index, CLOSE_LINGER);
+            } else {
+                LMQ_LOG(trace, "Not closing ", it->first, ": ", idle.count(), "ms <= ", info.idle_expiry.count(), "ms");
                 ++it;
                 continue;
             }
-            LMQ_LOG(debug, "Closing outgoing connection to ", it->first, ": idle timeout reached");
-            ++it; // The below is going to delete our current element
-            proxy_close_connection(info.conn_index, CLOSE_LINGER);
         } else {
             ++it;
         }
