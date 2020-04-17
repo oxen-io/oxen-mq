@@ -237,6 +237,12 @@ void LokiMQ::start() {
 
     LMQ_LOG(info, "Initializing LokiMQ ", bind.empty() ? "remote-only" : "listener", " with pubkey ", to_hex(pubkey));
 
+    int zmq_socket_limit = context.getctxopt(ZMQ_SOCKET_LIMIT);
+    if (MAX_SOCKETS > 1 && MAX_SOCKETS <= zmq_socket_limit)
+        context.setctxopt(ZMQ_MAX_SOCKETS, MAX_SOCKETS);
+    else
+        LMQ_LOG(error, "Not applying LokiMQ::MAX_SOCKETS setting: ", MAX_SOCKETS, " must be in [1, ", zmq_socket_limit, "]");
+
     // We bind `command` here so that the `get_control_socket()` below is always connecting to a
     // bound socket, but we do nothing else here: the proxy thread is responsible for everything
     // except binding it.
