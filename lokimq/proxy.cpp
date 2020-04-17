@@ -326,19 +326,13 @@ void LokiMQ::proxy_loop() {
         zmq::socket_t listener{context, zmq::socket_type::router};
 
         std::string auth_domain = bt_serialize(i);
+        setup_external_socket(listener);
         listener.setsockopt(ZMQ_ZAP_DOMAIN, auth_domain.c_str(), auth_domain.size());
         if (b.curve) {
             listener.setsockopt<int>(ZMQ_CURVE_SERVER, 1);
             listener.setsockopt(ZMQ_CURVE_PUBLICKEY, pubkey.data(), pubkey.size());
             listener.setsockopt(ZMQ_CURVE_SECRETKEY, privkey.data(), privkey.size());
         }
-        listener.setsockopt(ZMQ_HANDSHAKE_IVL, (int) HANDSHAKE_TIME.count());
-        if (CONN_HEARTBEAT > 0s) {
-            listener.setsockopt(ZMQ_HEARTBEAT_IVL, (int) CONN_HEARTBEAT.count());
-            if (CONN_HEARTBEAT_TIMEOUT > 0s)
-                listener.setsockopt(ZMQ_HEARTBEAT_TIMEOUT, (int) CONN_HEARTBEAT_TIMEOUT.count());
-        }
-        listener.setsockopt<int64_t>(ZMQ_MAXMSGSIZE, MAX_MSG_SIZE);
         listener.setsockopt<int>(ZMQ_ROUTER_HANDOVER, 1);
         listener.setsockopt<int>(ZMQ_ROUTER_MANDATORY, 1);
 
@@ -560,18 +554,17 @@ bool LokiMQ::proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>
     else if (is_error_response(cmd)) {
         // These messages (FORBIDDEN, UNKNOWNCOMMAND, etc.) are sent in response to us trying to
         // invoke something that doesn't exist or we don't have permission to access.  These have
-        // two forms (the latter is only sent by remotes running 1.0.6+).
+        // two forms (the latter is only sent by remotes running 1.1.0+).
         // - ["XXX", "whatever.command"]
         // - ["XXX", "REPLY", replytag]
         // (ignoring the routing prefix on incoming commands).
         // For the former, we log; for the latter we trigger the reply callback with a failure
 
-        if (parts.size() == (2 + incoming) && is_error_response(view(parts[1 + incoming]))) {
-            // Something like ["UNKNOWNCOMMAND", "FORBIDDEN_SN"] which can happen because the remote
-            // is running an older version that didn't understand the FORBIDDEN_SN (or whatever)
-            // error reply that we sent them. We just ignore it because anything else could trigger
-            // an infinite cycle.
-            LMQ_LOG(debug, "Received [", cmd, ",", view(parts[1 + incoming]), "]; remote is probably an older lokimq. Ignoring.");
+        if (parts.size() == (1 + incoming) && cmd == "UNKNOWNCOMMAND") {
+            // pre-1.1.0 sent just a plain UNKNOWNCOMMAND (without the actual command); this was not
+            // useful, but also this response is *expected* for things 1.0.5 didn't understand, like
+            // FORBIDDEN_SN: so log it only at debug level and move on.
+            LMQ_LOG(debug, "Received plain UNKNOWNCOMMAND; remote is probably an older lokimq. Ignoring.");
             return true;
         }
 
