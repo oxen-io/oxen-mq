@@ -1,3 +1,13 @@
+lokimq (1.1.1~pre-1~deb10) buster; urgency=medium
+
+  * Fix storing reference to temporary
+  * Fix broken idle expiry timeout
+  * Use slower and exponential backoff in reconnection
+  * Increase ZMQ socket limit
+  * Bump version to 1.1.1
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Fri, 17 Apr 2020 16:22:52 -0300
+
 lokimq (1.1.0-2~deb10) buster; urgency=medium
 
   * Fix pre-1.1.0 UNKNOWNCOMMAND detection
