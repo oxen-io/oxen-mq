@@ -196,6 +196,23 @@ public:
      * disconnected. -1 means no limit. */
     int64_t MAX_MSG_SIZE = 1 * 1024 * 1024;
 
+    /** Maximum open sockets, passed to the ZMQ context during start().  The default here is 10k,
+     * designed to be enough to be more than enough to allow a full-mesh SN layer connection if
+     * necessary for the forseeable future. */
+    int MAX_SOCKETS = 10000;
+
+    /** Minimum reconnect interval: when a connection fails or dies, wait this long before
+     * attempting to reconnect.  (ZMQ may randomize the value somewhat to avoid reconnection
+     * storms).  See RECONNECT_INTERVAL_MAX as well.  The LokiMQ default is 250ms.
+     */
+    std::chrono::milliseconds RECONNECT_INTERVAL = 250ms;
+
+    /** Maximum reconnect interval.  When this is set to a value larger than RECONNECT_INTERVAL then
+     * ZMQ's reconnection logic uses an exponential backoff: each reconnection attempts waits twice
+     * as long as the previous attempt, up to this maximum.  The LokiMQ default is 5 seconds.
+     */
+    std::chrono::milliseconds RECONNECT_INTERVAL_MAX = 5s;
+
     /** How long (in ms) to linger sockets when closing them; this is the maximum time zmq spends
      * trying to sending pending messages before dropping them and closing the underlying socket
      * after the high-level zmq socket is closed. */
@@ -431,10 +448,8 @@ private:
     /// gets called after all works have done so.
     void proxy_quit();
 
-    // Sets the various properties for a listening socket prior to binding.  If curve is true then
-    // the socket is set up using the keys and incoming connections must already know the pubkey to
-    // establish a connection; otherwise the connection is plaintext without authentication.
-    void setup_listening_socket(zmq::socket_t& socket, bool curve);
+    // Common setup code for setting up an external (incoming or outgoing) socket.
+    void setup_external_socket(zmq::socket_t& socket);
 
     // Sets the various properties on an outgoing socket prior to connection.  If remote_pubkey is
     // provided then the connection will be curve25519 encrypted and authenticate; otherwise it will
