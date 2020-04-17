@@ -238,14 +238,16 @@ void LokiMQ::proxy_expire_idle_peers() {
     for (auto it = peers.begin(); it != peers.end(); ) {
         auto &info = it->second;
         if (info.outgoing()) {
-            auto idle = info.last_activity - std::chrono::steady_clock::now();
-            if (idle <= info.idle_expiry) {
+            auto idle = std::chrono::steady_clock::now() - info.last_activity;
+            if (idle > info.idle_expiry) {
+                LMQ_LOG(debug, "Closing outgoing connection to ", it->first, ": idle timeout reached");
+                ++it; // The below is going to delete our current element
+                proxy_close_connection(info.conn_index, CLOSE_LINGER);
+            } else {
+                LMQ_LOG(trace, "Not closing ", it->first, ": ", idle.count(), "ms <= ", info.idle_expiry.count(), "ms");
                 ++it;
                 continue;
             }
-            LMQ_LOG(debug, "Closing outgoing connection to ", it->first, ": idle timeout reached");
-            ++it; // The below is going to delete our current element
-            proxy_close_connection(info.conn_index, CLOSE_LINGER);
         } else {
             ++it;
         }
