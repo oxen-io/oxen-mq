@@ -196,6 +196,11 @@ public:
      * disconnected. -1 means no limit. */
     int64_t MAX_MSG_SIZE = 1 * 1024 * 1024;
 
+    /** Maximum open sockets, passed to the ZMQ context during start().  The default here is 10k,
+     * designed to be enough to be more than enough to allow a full-mesh SN layer connection if
+     * necessary for the forseeable future. */
+    int MAX_SOCKETS = 10000;
+
     /** Minimum reconnect interval: when a connection fails or dies, wait this long before
      * attempting to reconnect.  (ZMQ may randomize the value somewhat to avoid reconnection
      * storms).  See RECONNECT_INTERVAL_MAX as well.  The LokiMQ default is 250ms.
