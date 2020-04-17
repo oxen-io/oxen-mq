@@ -35,18 +35,26 @@ void LokiMQ::rebuild_pollitems() {
     pollitems_stale = false;
 }
 
-void LokiMQ::setup_outgoing_socket(zmq::socket_t& socket, string_view remote_pubkey) {
-    if (!remote_pubkey.empty()) {
-        socket.setsockopt(ZMQ_CURVE_SERVERKEY, remote_pubkey.data(), remote_pubkey.size());
-        socket.setsockopt(ZMQ_CURVE_PUBLICKEY, pubkey.data(), pubkey.size());
-        socket.setsockopt(ZMQ_CURVE_SECRETKEY, privkey.data(), privkey.size());
-    }
+void LokiMQ::setup_external_socket(zmq::socket_t& socket) {
+    socket.setsockopt(ZMQ_RECONNECT_IVL, (int) RECONNECT_INTERVAL.count());
+    socket.setsockopt(ZMQ_RECONNECT_IVL_MAX, (int) RECONNECT_INTERVAL_MAX.count());
     socket.setsockopt(ZMQ_HANDSHAKE_IVL, (int) HANDSHAKE_TIME.count());
     socket.setsockopt<int64_t>(ZMQ_MAXMSGSIZE, MAX_MSG_SIZE);
     if (CONN_HEARTBEAT > 0s) {
         socket.setsockopt(ZMQ_HEARTBEAT_IVL, (int) CONN_HEARTBEAT.count());
         if (CONN_HEARTBEAT_TIMEOUT > 0s)
             socket.setsockopt(ZMQ_HEARTBEAT_TIMEOUT, (int) CONN_HEARTBEAT_TIMEOUT.count());
+    }
+}
+
+void LokiMQ::setup_outgoing_socket(zmq::socket_t& socket, string_view remote_pubkey) {
+
+    setup_external_socket(socket);
+
+    if (!remote_pubkey.empty()) {
+        socket.setsockopt(ZMQ_CURVE_SERVERKEY, remote_pubkey.data(), remote_pubkey.size());
+        socket.setsockopt(ZMQ_CURVE_PUBLICKEY, pubkey.data(), pubkey.size());
+        socket.setsockopt(ZMQ_CURVE_SECRETKEY, privkey.data(), privkey.size());
     }
 
     if (PUBKEY_BASED_ROUTING_ID) {

@@ -326,19 +326,13 @@ void LokiMQ::proxy_loop() {
         zmq::socket_t listener{context, zmq::socket_type::router};
 
         std::string auth_domain = bt_serialize(i);
+        setup_external_socket(listener);
         listener.setsockopt(ZMQ_ZAP_DOMAIN, auth_domain.c_str(), auth_domain.size());
         if (b.curve) {
             listener.setsockopt<int>(ZMQ_CURVE_SERVER, 1);
             listener.setsockopt(ZMQ_CURVE_PUBLICKEY, pubkey.data(), pubkey.size());
             listener.setsockopt(ZMQ_CURVE_SECRETKEY, privkey.data(), privkey.size());
         }
-        listener.setsockopt(ZMQ_HANDSHAKE_IVL, (int) HANDSHAKE_TIME.count());
-        if (CONN_HEARTBEAT > 0s) {
-            listener.setsockopt(ZMQ_HEARTBEAT_IVL, (int) CONN_HEARTBEAT.count());
-            if (CONN_HEARTBEAT_TIMEOUT > 0s)
-                listener.setsockopt(ZMQ_HEARTBEAT_TIMEOUT, (int) CONN_HEARTBEAT_TIMEOUT.count());
-        }
-        listener.setsockopt<int64_t>(ZMQ_MAXMSGSIZE, MAX_MSG_SIZE);
         listener.setsockopt<int>(ZMQ_ROUTER_HANDOVER, 1);
         listener.setsockopt<int>(ZMQ_ROUTER_MANDATORY, 1);
 
