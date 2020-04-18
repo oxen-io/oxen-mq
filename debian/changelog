@@ -1,5 +1,13 @@
+lokimq (1.1.1~pre2-1~ubuntu1804) bionic; urgency=medium
+
+  * Drop idle connections regularly
+  * Reduce heartbeat frequency to 15s
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Sat, 18 Apr 2020 03:01:36 -0300
+
 lokimq (1.1.1~pre-1~ubuntu1804) bionic; urgency=medium
 
+  * removed UNKNOWNCOMMAND patch (applied upstream)
   * Fix storing reference to temporary
   * Fix broken idle expiry timeout
   * Use slower and exponential backoff in reconnection
