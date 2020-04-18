@@ -248,11 +248,14 @@ void LokiMQ::proxy_expire_idle_peers() {
         if (info.outgoing()) {
             auto idle = std::chrono::steady_clock::now() - info.last_activity;
             if (idle > info.idle_expiry) {
-                LMQ_LOG(debug, "Closing outgoing connection to ", it->first, ": idle timeout reached");
+                LMQ_LOG(debug, "Closing outgoing connection to ", it->first, ": idle time (",
+                        std::chrono::duration_cast<std::chrono::milliseconds>(idle).count(), "ms) reached connection timeout (",
+                        info.idle_expiry.count(), "ms)");
                 ++it; // The below is going to delete our current element
                 proxy_close_connection(info.conn_index, CLOSE_LINGER);
             } else {
-                LMQ_LOG(trace, "Not closing ", it->first, ": ", idle.count(), "ms <= ", info.idle_expiry.count(), "ms");
+                LMQ_LOG(trace, "Not closing ", it->first, ": ", std::chrono::duration_cast<std::chrono::milliseconds>(idle).count(),
+                        "ms <= ", info.idle_expiry.count(), "ms");
                 ++it;
                 continue;
             }
@@ -265,13 +268,9 @@ void LokiMQ::proxy_expire_idle_peers() {
 void LokiMQ::proxy_conn_cleanup() {
     LMQ_TRACE("starting proxy connections cleanup");
 
-    // Drop idle connections (if we haven't done it in a while) but *only* if we have some idle
-    // general workers: if we don't have any idle workers then we may still have incoming messages which
-    // we haven't processed yet and those messages might end up resetting the last activity time.
-    if (static_cast<int>(workers.size()) < general_workers) {
-        LMQ_TRACE("closing idle connections");
-        proxy_expire_idle_peers();
-    }
+    // Drop idle connections (if we haven't done it in a while)
+    LMQ_TRACE("closing idle connections");
+    proxy_expire_idle_peers();
 
     auto now = std::chrono::steady_clock::now();
 
