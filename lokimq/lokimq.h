@@ -232,7 +232,7 @@ public:
      * Only new connections created after changing this are affected, so if changing it is
      * recommended to set it before calling `start()`.
      */
-    std::chrono::milliseconds CONN_HEARTBEAT = 3s;
+    std::chrono::milliseconds CONN_HEARTBEAT = 15s;
 
     /** When CONN_HEARTBEAT is enabled, this sets how long we wait for a reply on a socket before
      * considering the socket to have died and closing it.
