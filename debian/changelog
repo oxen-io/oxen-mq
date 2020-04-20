@@ -1,4 +1,4 @@
-lokimq (1.1.1~pre2-1~ubuntu2004) focal; urgency=medium
+lokimq (1.1.1-1~ubuntu2004) focal; urgency=medium
 
   * Drop idle connections regularly
   * Reduce heartbeat frequency to 15s
