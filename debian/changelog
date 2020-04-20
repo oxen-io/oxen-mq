@@ -1,4 +1,4 @@
-lokimq (1.1.1~pre2-1~ubuntu1804) bionic; urgency=medium
+lokimq (1.1.1-1~ubuntu1804) bionic; urgency=medium
 
   * Drop idle connections regularly
   * Reduce heartbeat frequency to 15s
