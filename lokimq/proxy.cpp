@@ -436,7 +436,7 @@ void LokiMQ::proxy_loop() {
         for (int i = 0; i < num_sockets; i++)
             queue_index.push(i);
 
-        for (parts.clear(); !queue_index.empty() && static_cast<int>(workers.size()) < max_workers; parts.clear()) {
+        for (parts.clear(); !queue_index.empty(); parts.clear()) {
             size_t i = queue_index.front();
             queue_index.pop();
             auto& sock = connections[i];
