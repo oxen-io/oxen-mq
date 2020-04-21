@@ -9,11 +9,11 @@ void LokiMQ::worker_thread(unsigned int index) {
     std::string worker_id = "w" + std::to_string(index);
 
 #if defined(__linux__) || defined(__sun) || defined(__MINGW32__)
-    pthread_setname_np(pthread_self(), worker_id.c_str());
+    pthread_setname_np(pthread_self(), ("lmq-" + worker_id).c_str());
 #elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
-    pthread_set_name_np(pthread_self(), worker_id.c_str());
+    pthread_set_name_np(pthread_self(), ("lmq-" + worker_id).c_str());
 #elif defined(__MACH__)
-    pthread_setname_np(worker_id.c_str());
+    pthread_setname_np(("lmq-" + worker_id).c_str());
 #endif
 
     zmq::socket_t sock{context, zmq::socket_type::dealer};
