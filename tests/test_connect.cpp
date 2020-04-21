@@ -288,3 +288,44 @@ TEST_CASE("SN auth checks", "[sandwich][auth]") {
         REQUIRE( data == dvec{{"FORBIDDEN_SN"}} );
     }
 }
+
+TEST_CASE("SN single worker test", "[connect][worker]") {
+    // Tests a failure case that could trigger when all workers are allocated (here we make that
+    // simpler by just having one worker).
+    std::string listen = "tcp://127.0.0.1:4455";
+    LokiMQ server{
+        "", "",
+        false, // service node
+        [](auto) { return ""; },
+        get_logger("S» "),
+        LogLevel::trace
+    };
+    server.set_general_threads(1);
+    server.set_batch_threads(0);
+    server.set_reply_threads(0);
+    server.listen_plain(listen);
+    server.add_category("c", Access{AuthLevel::none})
+        .add_request_command("x", [&](Message& m) { m.send_reply(); })
+        ;
+    server.start();
+
+    LokiMQ client{get_logger("B» "), LogLevel::trace};
+    client.start();
+    auto conn = client.connect_remote(listen, [](auto) {}, [](auto, auto) {});
+
+    std::atomic<int> got{0};
+    std::atomic<int> success{0};
+    client.request(conn, "c.x", [&](auto success_, auto) { if (success_) ++success; ++got; });
+    wait_for([&] { return got.load() >= 1; });
+    {
+        auto lock = catch_lock();
+        REQUIRE( success == 1 );
+    }
+    client.request(conn, "c.x", [&](auto success_, auto) { if (success_) ++success; ++got; });
+    wait_for([&] { return got.load() >= 2; });
+    {
+        auto lock = catch_lock();
+        REQUIRE( success == 2 );
+    }
+
+}
