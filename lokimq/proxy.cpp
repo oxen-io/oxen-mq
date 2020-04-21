@@ -292,6 +292,14 @@ void LokiMQ::proxy_control_message(std::vector<zmq::message_t>& parts) {
 
 void LokiMQ::proxy_loop() {
 
+#if defined(__linux__) || defined(__sun) || defined(__MINGW32__)
+    pthread_setname_np(pthread_self(), "lmq-proxy");
+#elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
+    pthread_set_name_np(pthread_self(), "lmq-proxy");
+#elif defined(__MACH__)
+    pthread_setname_np("lmq-proxy");
+#endif
+
     zap_auth.setsockopt<int>(ZMQ_LINGER, 0);
     zap_auth.bind(ZMQ_ADDR_ZAP);
 
@@ -428,7 +436,7 @@ void LokiMQ::proxy_loop() {
         for (int i = 0; i < num_sockets; i++)
             queue_index.push(i);
 
-        for (parts.clear(); !queue_index.empty() && static_cast<int>(workers.size()) < max_workers; parts.clear()) {
+        for (parts.clear(); !queue_index.empty(); parts.clear()) {
             size_t i = queue_index.front();
             queue_index.pop();
             auto& sock = connections[i];
