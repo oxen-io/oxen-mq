@@ -1,3 +1,12 @@
+lokimq (1.1.2-1~ubuntu2004) focal; urgency=medium
+
+  * Set thread names on proxy/workers
+  * Fix proxy thread stall when workers fill up
+  * Change worker thread names: "w2" -> "lmq-w2"
+  * Bump version to 1.1.2
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Tue, 21 Apr 2020 17:15:35 -0300
+
 lokimq (1.1.1-1~ubuntu2004) focal; urgency=medium
 
   * Drop idle connections regularly
