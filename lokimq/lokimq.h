@@ -586,11 +586,12 @@ private:
         std::vector<zmq::message_t> data_parts;
         const std::pair<CommandCallback, bool>* callback;
         ConnectionID conn;
+        Access access;
 
         pending_command(category& cat, std::string command, std::vector<zmq::message_t> data_parts,
-                const std::pair<CommandCallback, bool>* callback, ConnectionID conn)
+                const std::pair<CommandCallback, bool>* callback, ConnectionID conn, Access access)
             : cat{cat}, command{std::move(command)}, data_parts{std::move(data_parts)},
-            callback{callback}, conn{std::move(conn)} {}
+            callback{callback}, conn{std::move(conn)}, access{std::move(access)} {}
     };
     std::list<pending_command> pending_commands;
 
@@ -610,6 +611,7 @@ private:
         category *cat;
         std::string command;
         ConnectionID conn; // The connection (or SN pubkey) to reply on/to.
+        Access access; // The access level of the invoker (actual level, can be higher than the command's requirement)
         std::string conn_route; // if non-empty this is the reply routing prefix (for incoming connections)
         std::vector<zmq::message_t> data_parts;
 
@@ -627,7 +629,7 @@ private:
         std::string worker_routing_id; // "w123" where 123 == worker_id
 
         /// Loads the run info with an incoming command
-        run_info& load(category* cat, std::string command, ConnectionID conn,
+        run_info& load(category* cat, std::string command, ConnectionID conn, Access access,
                 std::vector<zmq::message_t> data_parts, const std::pair<CommandCallback, bool>* callback);
 
         /// Loads the run info with a stored pending command

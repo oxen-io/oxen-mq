@@ -341,20 +341,21 @@ void LokiMQ::set_general_threads(int threads) {
     general_workers = threads;
 }
 
-LokiMQ::run_info& LokiMQ::run_info::load(category* cat_, std::string command_, ConnectionID conn_,
+LokiMQ::run_info& LokiMQ::run_info::load(category* cat_, std::string command_, ConnectionID conn_, Access access_,
                 std::vector<zmq::message_t> data_parts_, const std::pair<CommandCallback, bool>* callback_) {
     is_batch_job = false;
     is_reply_job = false;
     cat = cat_;
     command = std::move(command_);
     conn = std::move(conn_);
+    access = std::move(access_);
     data_parts = std::move(data_parts_);
     callback = callback_;
     return *this;
 }
 
 LokiMQ::run_info& LokiMQ::run_info::load(pending_command&& pending) {
-    return load(&pending.cat, std::move(pending.command), std::move(pending.conn),
+    return load(&pending.cat, std::move(pending.command), std::move(pending.conn), std::move(pending.access),
             std::move(pending.data_parts), pending.callback);
 }
 
