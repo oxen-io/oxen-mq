@@ -199,7 +199,7 @@ LokiMQ::LokiMQ(
         sn_lookup{std::move(lookup)}, log_lvl{level}, logger{std::move(logger)}
 {
 
-    LMQ_TRACE("Constructing listening LokiMQ, id=", object_id, ", this=", this);
+    LMQ_TRACE("Constructing LokiMQ, id=", object_id, ", this=", this);
 
     if (pubkey.empty() != privkey.empty()) {
         throw std::invalid_argument("LokiMQ construction failed: one (and only one) of pubkey/privkey is empty. Both must be specified, or both empty to generate a key.");

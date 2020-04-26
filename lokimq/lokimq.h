@@ -326,11 +326,13 @@ private:
     /// SN pubkey string.
     std::unordered_multimap<ConnectionID, peer_info> peers;
 
-    /// Maps connection indices (which can change) to ConnectionIDs (which are permanent).
+    /// Maps connection indices (which can change) to ConnectionID values (which are permanent).
+    /// This is primarily for outgoing sockets, but incoming sockets are here too (with empty-route
+    /// (and thus unroutable) ConnectionIDs).
     std::vector<ConnectionID> conn_index_to_id;
 
     /// Maps listening socket ConnectionIDs to connection index values (these don't have peers
-    /// entries)
+    /// entries).  The keys here have empty routes (and thus aren't actually routable).
     std::unordered_map<ConnectionID, size_t> incoming_conn_index;
 
     /// The next ConnectionID value we should use (for non-SN connections).
