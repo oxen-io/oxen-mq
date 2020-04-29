@@ -46,6 +46,16 @@ if(TARGET libzmq)
 elseif(BUILD_SHARED_LIBS)
     include(FindPkgConfig)
     pkg_check_modules(libzmq libzmq>=4.3 IMPORTED_TARGET)
+    # Debian sid includes a -isystem in the mit-krb package that, starting with pkg-config 0.29.2,
+    # breaks cmake's pkgconfig module because it stupidly thinks "-isystem" is a path, so if we find
+    # -isystem in the include dirs then hack it out.
+    get_property(zmq_inc TARGET PkgConfig::libzmq PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+    list(FIND zmq_inc "-isystem" broken_isystem)
+    if(NOT broken_isystem EQUAL -1)
+      list(REMOVE_AT zmq_inc ${broken_isystem})
+      set_property(TARGET PkgConfig::libzmq PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${zmq_inc})
+    endif()
+
     if(libzmq_FOUND)
         target_link_libraries(lokimq PUBLIC PkgConfig::libzmq)
     else()
