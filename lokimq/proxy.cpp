@@ -115,7 +115,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
             send_to = sock_route.first;
             conn_id.route = std::move(sock_route.second);
         } else if (!conn_id.route.empty()) { // incoming non-SN connection
-            auto it = incoming_conn_index.find(conn_id);
+            auto it = incoming_conn_index.find(conn_id.unrouted());
             if (it == incoming_conn_index.end()) {
                 LMQ_LOG(warn, "Unable to send to ", conn_id, ": incoming listening socket not found");
                 break;
