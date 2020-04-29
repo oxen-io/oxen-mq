@@ -21,7 +21,7 @@ void LokiMQ::worker_thread(unsigned int index) {
     LMQ_LOG(debug, "New worker thread ", worker_id, " started");
     sock.connect(SN_ADDR_WORKERS);
 
-    Message message{*this, 0};
+    Message message{*this, 0, AuthLevel::none, ""s};
     std::vector<zmq::message_t> parts;
     run_info& run = workers[index]; // This contains our first job, and will be updated later with subsequent jobs
 
@@ -37,9 +37,11 @@ void LokiMQ::worker_thread(unsigned int index) {
                 }
             } else {
                 message.conn = run.conn;
+                message.access = run.access;
+                message.remote = std::move(run.remote);
                 message.data.clear();
 
-                LMQ_TRACE("Got incoming command from ", message.conn, message.conn.route.empty() ? "(outgoing)" : "(incoming)");
+                LMQ_TRACE("Got incoming command from ", message.remote, "/", message.conn, message.conn.route.empty() ? " (outgoing)" : " (incoming)");
 
                 if (run.callback->second /*is_request*/) {
                     message.reply_tag = {run.data_parts[0].data<char>(), run.data_parts[0].size()};
@@ -254,6 +256,7 @@ void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
         return;
 
     auto& category = *cat_call.first;
+    Access access{peer->auth_level, peer->service_node, local_service_node};
 
     if (category.active_threads >= category.reserved_threads && active_workers() >= general_workers) {
         // No free reserved or general spots, try to queue it for later
@@ -265,7 +268,8 @@ void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
 
         LMQ_LOG(debug, "No available free workers, queuing ", command, " for later");
         ConnectionID conn{peer->service_node ? ConnectionID::SN_ID : conn_index_to_id[conn_index].id, peer->pubkey, std::move(tmp_peer.route)};
-        pending_commands.emplace_back(category, std::move(command), std::move(data_parts), cat_call.second, std::move(conn));
+        pending_commands.emplace_back(category, std::move(command), std::move(data_parts), cat_call.second,
+                std::move(conn), std::move(access), peer_address(parts[command_part_index]));
         category.queued++;
         return;
     }
@@ -281,7 +285,8 @@ void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
         c.route = std::move(tmp_peer.route);
         if (outgoing || peer->service_node)
             tmp_peer.route.clear();
-        run.load(&category, std::move(command), std::move(c), std::move(data_parts), cat_call.second);
+        run.load(&category, std::move(command), std::move(c), std::move(access), peer_address(parts[command_part_index]),
+                std::move(data_parts), cat_call.second);
     }
 
     if (outgoing)

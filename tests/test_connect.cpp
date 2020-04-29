@@ -128,6 +128,62 @@ TEST_CASE("plain-text connections", "[plaintext][connect]") {
     }
 }
 
+TEST_CASE("unique connection IDs", "[connect][id]") {
+    std::string listen = "tcp://127.0.0.1:4455";
+    LokiMQ server{get_logger("S» "), LogLevel::trace};
+
+    ConnectionID first, second;
+    server.add_category("x", Access{AuthLevel::none})
+        .add_request_command("x", [&](Message& m) { first = m.conn; m.send_reply("hi"); })
+        .add_request_command("y", [&](Message& m) { second = m.conn; m.send_reply("hi"); })
+        ;
+
+    server.listen_plain(listen);
+
+    server.start();
+
+    LokiMQ client1{get_logger("C1» "), LogLevel::trace};
+    LokiMQ client2{get_logger("C2» "), LogLevel::trace};
+    client1.start();
+    client2.start();
+
+    std::atomic<bool> good1{false}, good2{false};
+    auto r1 = client1.connect_remote(listen,
+            [&](auto conn) { good1 = true; },
+            [&](auto conn, string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); }
+            );
+    auto r2 = client2.connect_remote(listen,
+            [&](auto conn) { good2 = true; },
+            [&](auto conn, string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); }
+            );
+
+    wait_for_conn(good1);
+    wait_for_conn(good2);
+    {
+        auto lock = catch_lock();
+        REQUIRE( good1 );
+        REQUIRE( good2 );
+        REQUIRE( first == second );
+        REQUIRE_FALSE( first );
+        REQUIRE_FALSE( second );
+    }
+
+    good1 = false;
+    good2 = false;
+    client1.request(r1, "x.x", [&](auto success_, auto parts_) { good1 = true; });
+    client2.request(r2, "x.y", [&](auto success_, auto parts_) { good2 = true; });
+    reply_sleep();
+
+    {
+        auto lock = catch_lock();
+        REQUIRE( good1 );
+        REQUIRE( good2 );
+        REQUIRE_FALSE( first == second );
+        REQUIRE_FALSE( std::hash<ConnectionID>{}(first) == std::hash<ConnectionID>{}(second) );
+    }
+}
+
+
 TEST_CASE("SN disconnections", "[connect][disconnect]") {
     std::vector<std::unique_ptr<LokiMQ>> lmq;
     std::vector<std::string> pubkey, privkey;

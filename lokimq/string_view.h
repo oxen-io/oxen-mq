@@ -305,6 +305,6 @@ using ustring_view = simple_string_view<unsigned char>;
 // implementation in pre-C++17.
 namespace lokimq {
 inline namespace literals {
-    inline string_view operator""_sv(const char* str, size_t len) { return {str, len}; }
+    inline constexpr string_view operator""_sv(const char* str, size_t len) { return {str, len}; }
 }
 }
