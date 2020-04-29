@@ -136,7 +136,8 @@ public:
     /// Callback type invoked to determine whether the given new incoming connection is allowed to
     /// connect to us and to set its authentication level.
     ///
-    /// @param ip - the ip address of the incoming connection
+    /// @param address - the address of the incoming connection.  For TCP connections this is an IP
+    /// address; for UDP connections it's a string such as "localhost:UID:GID:PID".
     /// @param pubkey - the x25519 pubkey of the connecting client (32 byte string).  Note that this
     /// will only be non-empty for incoming connections on `listen_curve` sockets; `listen_plain`
     /// sockets do not have a pubkey.
@@ -145,7 +146,7 @@ public:
     ///
     /// @returns an `AuthLevel` enum value indicating the default auth level for the incoming
     /// connection, or AuthLevel::denied if the connection should be refused.
-    using AllowFunc = std::function<AuthLevel(string_view ip, string_view pubkey, bool service_node)>;
+    using AllowFunc = std::function<AuthLevel(string_view address, string_view pubkey, bool service_node)>;
 
     /// Callback that is invoked when we need to send a "strong" message to a SN that we aren't
     /// already connected to and need to establish a connection.  This callback returns the ZMQ
@@ -325,11 +326,13 @@ private:
     /// SN pubkey string.
     std::unordered_multimap<ConnectionID, peer_info> peers;
 
-    /// Maps connection indices (which can change) to ConnectionIDs (which are permanent).
+    /// Maps connection indices (which can change) to ConnectionID values (which are permanent).
+    /// This is primarily for outgoing sockets, but incoming sockets are here too (with empty-route
+    /// (and thus unroutable) ConnectionIDs).
     std::vector<ConnectionID> conn_index_to_id;
 
     /// Maps listening socket ConnectionIDs to connection index values (these don't have peers
-    /// entries)
+    /// entries).  The keys here have empty routes (and thus aren't actually routable).
     std::unordered_map<ConnectionID, size_t> incoming_conn_index;
 
     /// The next ConnectionID value we should use (for non-SN connections).
@@ -586,11 +589,13 @@ private:
         std::vector<zmq::message_t> data_parts;
         const std::pair<CommandCallback, bool>* callback;
         ConnectionID conn;
+        Access access;
+        std::string remote;
 
         pending_command(category& cat, std::string command, std::vector<zmq::message_t> data_parts,
-                const std::pair<CommandCallback, bool>* callback, ConnectionID conn)
+                const std::pair<CommandCallback, bool>* callback, ConnectionID conn, Access access, std::string remote)
             : cat{cat}, command{std::move(command)}, data_parts{std::move(data_parts)},
-            callback{callback}, conn{std::move(conn)} {}
+            callback{callback}, conn{std::move(conn)}, access{std::move(access)}, remote{std::move(remote)} {}
     };
     std::list<pending_command> pending_commands;
 
@@ -610,6 +615,8 @@ private:
         category *cat;
         std::string command;
         ConnectionID conn; // The connection (or SN pubkey) to reply on/to.
+        Access access; // The access level of the invoker (actual level, can be higher than the command's requirement)
+        std::string remote; // The remote address from which we received the request.
         std::string conn_route; // if non-empty this is the reply routing prefix (for incoming connections)
         std::vector<zmq::message_t> data_parts;
 
@@ -627,7 +634,7 @@ private:
         std::string worker_routing_id; // "w123" where 123 == worker_id
 
         /// Loads the run info with an incoming command
-        run_info& load(category* cat, std::string command, ConnectionID conn,
+        run_info& load(category* cat, std::string command, ConnectionID conn, Access access, std::string remote,
                 std::vector<zmq::message_t> data_parts, const std::pair<CommandCallback, bool>* callback);
 
         /// Loads the run info with a stored pending command

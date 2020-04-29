@@ -19,16 +19,16 @@ std::ostream& operator<<(std::ostream& os, AuthLevel a);
 /// The access level for a command category
 struct Access {
     /// Minimum access level required
-    AuthLevel auth = AuthLevel::none;
+    AuthLevel auth;
     /// If true only remote SNs may call the category commands
-    bool remote_sn = false;
+    bool remote_sn;
     /// If true the category requires that the local node is a SN
-    bool local_sn = false;
+    bool local_sn;
 
     /// Constructor.  Intentionally allows implicit conversion from an AuthLevel so that an
     /// AuthLevel can be passed anywhere an Access is required (the resulting Access will have both
     /// remote and local sn set to false).
-    Access(AuthLevel auth, bool remote_sn = false, bool local_sn = false)
+    Access(AuthLevel auth = AuthLevel::none, bool remote_sn = false, bool local_sn = false)
         : auth{auth}, remote_sn{remote_sn}, local_sn{local_sn} {}
 };
 
