@@ -1,3 +1,13 @@
+lokimq (1.1.3-1~ubuntu2004) focal; urgency=medium
+
+  * Bump version (not released yet)
+  * Provide caller Access in Message
+  * Fix ""_sv literal being non-constexpr
+  * Add remote address into Message object
+  * Fix incoming ConnectionIDs not being storable
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Tue, 28 Apr 2020 21:40:22 -0300
+
 lokimq (1.1.2-1~ubuntu2004) focal; urgency=medium
 
   * Set thread names on proxy/workers
