@@ -199,7 +199,7 @@ LokiMQ::LokiMQ(
         sn_lookup{std::move(lookup)}, log_lvl{level}, logger{std::move(logger)}
 {
 
-    LMQ_TRACE("Constructing listening LokiMQ, id=", object_id, ", this=", this);
+    LMQ_TRACE("Constructing LokiMQ, id=", object_id, ", this=", this);
 
     if (pubkey.empty() != privkey.empty()) {
         throw std::invalid_argument("LokiMQ construction failed: one (and only one) of pubkey/privkey is empty. Both must be specified, or both empty to generate a key.");
@@ -341,21 +341,23 @@ void LokiMQ::set_general_threads(int threads) {
     general_workers = threads;
 }
 
-LokiMQ::run_info& LokiMQ::run_info::load(category* cat_, std::string command_, ConnectionID conn_,
+LokiMQ::run_info& LokiMQ::run_info::load(category* cat_, std::string command_, ConnectionID conn_, Access access_, std::string remote_,
                 std::vector<zmq::message_t> data_parts_, const std::pair<CommandCallback, bool>* callback_) {
     is_batch_job = false;
     is_reply_job = false;
     cat = cat_;
     command = std::move(command_);
     conn = std::move(conn_);
+    access = std::move(access_);
+    remote = std::move(remote_);
     data_parts = std::move(data_parts_);
     callback = callback_;
     return *this;
 }
 
 LokiMQ::run_info& LokiMQ::run_info::load(pending_command&& pending) {
-    return load(&pending.cat, std::move(pending.command), std::move(pending.conn),
-            std::move(pending.data_parts), pending.callback);
+    return load(&pending.cat, std::move(pending.command), std::move(pending.conn), std::move(pending.access),
+            std::move(pending.remote), std::move(pending.data_parts), pending.callback);
 }
 
 LokiMQ::run_info& LokiMQ::run_info::load(batch_job&& bj, bool reply_job) {
