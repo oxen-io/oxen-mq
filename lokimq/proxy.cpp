@@ -97,7 +97,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
     // multiple times, if we're sending to a SN, because it's possible that we have multiple
     // connections open to that SN (e.g. one out + one in) so if one fails we can clean up that
     // connection and try the next one.
-    bool retry = true, sent = false, warned = false;
+    bool retry = true, sent = false, nowarn = false;
     std::unique_ptr<zmq::error_t> send_error;
     while (retry) {
         retry = false;
@@ -105,6 +105,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
         if (conn_id.sn()) {
             auto sock_route = proxy_connect_sn(conn_id.pk, hint, optional, incoming, outgoing, keep_alive);
             if (!sock_route.first) {
+                nowarn = true;
                 if (optional)
                     LMQ_LOG(debug, "Not sending: send is optional and no connection to ",
                             to_hex(conn_id.pk), " is currently established");
@@ -163,7 +164,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
             }
             if (!retry) {
                 LMQ_LOG(warn, "Unable to send message to ", conn_id, ": ", e.what());
-                warned = true;
+                nowarn = true;
                 if (callback_nosend) {
                     job([callback = std::move(callback_nosend), error = e] { callback(&error); });
                     callback_nosend = nullptr;
@@ -186,7 +187,7 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
             job([callback = std::move(callback_nosend)] { callback(nullptr); });
         else if (callback_noqueue)
             job(std::move(callback_noqueue));
-        else if (!warned)
+        else if (!nowarn)
             LMQ_LOG(warn, "Unable to send message to ", conn_id, ": sending would block");
     }
 }
