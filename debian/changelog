@@ -1,3 +1,12 @@
+lokimq (1.1.4-1~ubuntu1804) bionic; urgency=medium
+
+  * Silence spurious warning on optional send failure
+  * Add bt_u64 wrapper for forcing a uint64_t on the wire
+  * Add checking for a negative int in bt_*_consumer
+  * 1.1.4
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Thu, 30 Apr 2020 15:16:25 -0300
+
 lokimq (1.1.3-1~ubuntu1804) bionic; urgency=medium
 
   * Bump version (not released yet)
