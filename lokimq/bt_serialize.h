@@ -578,6 +578,8 @@ public:
     bool is_string() const { return data.front() >= '0' && data.front() <= '9'; }
     /// Returns true if the next element looks like an encoded integer
     bool is_integer() const { return data.front() == 'i'; }
+    /// Returns true if the next element looks like an encoded negative integer
+    bool is_negative_integer() const { return is_integer() && data.size() >= 2 && data[1] == '-'; }
     /// Returns true if the next element looks like an encoded list
     bool is_list() const { return data.front() == 'l'; }
     /// Returns true if the next element looks like an encoded dict
@@ -691,6 +693,8 @@ public:
     bool is_string() { return consume_key() && data.front() >= '0' && data.front() <= '9'; }
     /// Returns true if the next element looks like an encoded integer
     bool is_integer() { return consume_key() && data.front() == 'i'; }
+    /// Returns true if the next element looks like an encoded negative integer
+    bool is_negative_integer() { return is_integer() && data.size() >= 2 && data[1] == '-'; }
     /// Returns true if the next element looks like an encoded list
     bool is_list() { return consume_key() && data.front() == 'l'; }
     /// Returns true if the next element looks like an encoded dict
