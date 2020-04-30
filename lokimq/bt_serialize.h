@@ -83,11 +83,18 @@ class bt_deserialize_invalid_type : public bt_deserialize_invalid {
 class bt_list;
 class bt_dict;
 
+/// Special type wrapper for storing a uint64_t value that may need to be larger than an int64_t.
+/// You *can* shove a uint64_t directly into a bt_value, but it will end up on the wire as its
+/// 2s-complement int64_t value; using this wrapper instead allows you to force a 64-bit positive
+/// integer onto the wire.
+struct bt_u64 { uint64_t val; explicit bt_u64(uint64_t val) : val{val} {} };
+
 /// Recursive generic type that can fully represent everything valid for a BT serialization.
 using bt_value = mapbox::util::variant<
     std::string,
     string_view,
     int64_t,
+    bt_u64,
     mapbox::util::recursive_wrapper<bt_list>,
     mapbox::util::recursive_wrapper<bt_dict>
 >;
@@ -180,6 +187,11 @@ struct bt_deserialize<T, std::enable_if_t<std::is_integral<T>::value>> {
 
 extern template struct bt_deserialize<int64_t>;
 extern template struct bt_deserialize<uint64_t>;
+
+template<>
+struct bt_serialize<bt_u64> { void operator()(std::ostream& os, bt_u64 val) { bt_serialize<uint64_t>{}(os, val.val); } };
+template<>
+struct bt_deserialize<bt_u64> { void operator()(string_view& s, bt_u64& val) { bt_deserialize<uint64_t>{}(s, val.val); } };
 
 template <>
 struct bt_serialize<string_view> {
@@ -566,6 +578,8 @@ public:
     bool is_string() const { return data.front() >= '0' && data.front() <= '9'; }
     /// Returns true if the next element looks like an encoded integer
     bool is_integer() const { return data.front() == 'i'; }
+    /// Returns true if the next element looks like an encoded negative integer
+    bool is_negative_integer() const { return is_integer() && data.size() >= 2 && data[1] == '-'; }
     /// Returns true if the next element looks like an encoded list
     bool is_list() const { return data.front() == 'l'; }
     /// Returns true if the next element looks like an encoded dict
@@ -679,6 +693,8 @@ public:
     bool is_string() { return consume_key() && data.front() >= '0' && data.front() <= '9'; }
     /// Returns true if the next element looks like an encoded integer
     bool is_integer() { return consume_key() && data.front() == 'i'; }
+    /// Returns true if the next element looks like an encoded negative integer
+    bool is_negative_integer() { return is_integer() && data.size() >= 2 && data[1] == '-'; }
     /// Returns true if the next element looks like an encoded list
     bool is_list() { return consume_key() && data.front() == 'l'; }
     /// Returns true if the next element looks like an encoded dict
