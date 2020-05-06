@@ -246,6 +246,13 @@ public:
     /// Allows you to set options on the internal zmq context object.  For advanced use only.
     int set_zmq_context_option(int option, int value);
 
+    /** The umask to apply when constructing sockets (which affects any new ipc:// listening sockets
+     * that get created).  Does nothing if set to -1 (the default), and does nothing on Windows.
+     * Note that the umask is applied temporarily during `start()`, so may affect other threads that
+     * create files/directories at the same time as the start() call.
+     */
+    int STARTUP_UMASK = -1;
+
 private:
 
     /// The lookup function that tells us where to connect to a peer, or empty if not found.

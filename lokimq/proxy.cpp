@@ -2,6 +2,12 @@
 #include "lokimq-internal.h"
 #include "hex.h"
 
+#ifndef _WIN32
+extern "C" {
+#include <sys/stat.h>
+}
+#endif
+
 namespace lokimq {
 
 void LokiMQ::proxy_quit() {
@@ -330,6 +336,12 @@ void LokiMQ::proxy_loop() {
     if (!workers.empty())
         throw std::logic_error("Internal error: proxy thread started with active worker threads");
 
+#ifndef _WIN32
+    int saved_umask = -1;
+    if (STARTUP_UMASK >= 0)
+        saved_umask = umask(STARTUP_UMASK);
+#endif
+
     for (size_t i = 0; i < bind.size(); i++) {
         auto& b = bind[i].second;
         zmq::socket_t listener{context, zmq::socket_type::router};
@@ -354,6 +366,12 @@ void LokiMQ::proxy_loop() {
         incoming_conn_index[conn_id] = connections.size() - 1;
         b.index = connections.size() - 1;
     }
+
+#ifndef _WIN32
+    if (saved_umask != -1)
+        umask(saved_umask);
+#endif
+
     pollitems_stale = true;
 
     // Also add an internal connection to self so that calling code can avoid needing to
