@@ -1,13 +1,20 @@
 #include "lokimq/hex.h"
-#include <iostream>
 #include "lokimq/base32z.h"
+#include "lokimq/base64.h"
 #include "common.h"
 
 using namespace std::literals;
 
 TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
     REQUIRE( lokimq::to_hex("\xff\x42\x12\x34") == "ff421234"s );
+    std::vector<uint8_t> chars{{1, 10, 100, 254}};
+    std::array<uint8_t, 8> out;
+    std::array<uint8_t, 8> expected{{'0', '1', '0', 'a', '6', '4', 'f', 'e'}};
+    lokimq::to_hex(chars.begin(), chars.end(), out.begin());
+    REQUIRE( out == expected );
+
     REQUIRE( lokimq::from_hex("12345678ffEDbca9") == "\x12\x34\x56\x78\xff\xed\xbc\xa9"s );
+
     REQUIRE( lokimq::is_hex("1234567890abcdefABCDEF1234567890abcdefABCDEF") );
     REQUIRE_FALSE( lokimq::is_hex("1234567890abcdefABCDEF1234567890aGcdefABCDEF") );
     REQUIRE_FALSE( lokimq::is_hex("1234567890abcdefABCDEF1234567890agcdefABCDEF") );
@@ -49,4 +56,73 @@ TEST_CASE("base32z encoding/decoding", "[encoding][decoding][base32z]") {
     REQUIRE( lokimq::from_base32z("ybndrf4") == "\x00\x44\x32\x17"s );
     // This one won't round-trip to the same value since it has ignored garbage bytes at the end
     REQUIRE( lokimq::to_base32z(lokimq::from_base32z("ybndrf4"s)) == "ybndrfa" );
+}
+
+TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
+    // 00000000 00000000 00000000 -> 000000 000000 000000 000000
+    REQUIRE( lokimq::to_base64("\0\0\0"s) == "AAAA" );
+    // 00000001 00000002 00000003 -> 000000 010000 000200 000003
+    REQUIRE( lokimq::to_base64("\x01\x02\x03"s) == "AQID" );
+    REQUIRE( lokimq::to_base64("\0\0\0\0"s) == "AAAAAA==" );
+    // 00000000 00000000 00000000  11111111 ->
+    // 000000 000000 000000 000000 111111 110000 (pad) (pad)
+    REQUIRE( lokimq::to_base64("a")   == "YQ==" );
+    REQUIRE( lokimq::to_base64("ab")  == "YWI=" );
+    REQUIRE( lokimq::to_base64("abc") == "YWJj" );
+    REQUIRE( lokimq::to_base64("abcd")   == "YWJjZA==" );
+    REQUIRE( lokimq::to_base64("abcde")  == "YWJjZGU=" );
+    REQUIRE( lokimq::to_base64("abcdef") == "YWJjZGVm" );
+
+    REQUIRE( lokimq::to_base64("\0\0\0\xff"s) == "AAAA/w==" );
+    REQUIRE( lokimq::to_base64("\0\0\0\xff\xff"s) == "AAAA//8=" );
+    REQUIRE( lokimq::to_base64("\0\0\0\xff\xff\xff"s) == "AAAA////" );
+    REQUIRE( lokimq::to_base64(
+            "Man is distinguished, not only by his reason, but by this singular passion from other "
+            "animals, which is a lust of the mind, that by a perseverance of delight in the "
+            "continued and indefatigable generation of knowledge, exceeds the short vehemence of "
+            "any carnal pleasure.")
+            ==
+            "TWFuIGlzIGRpc3Rpbmd1aXNoZWQsIG5vdCBvbmx5IGJ5IGhpcyByZWFzb24sIGJ1dCBieSB0aGlz"
+            "IHNpbmd1bGFyIHBhc3Npb24gZnJvbSBvdGhlciBhbmltYWxzLCB3aGljaCBpcyBhIGx1c3Qgb2Yg"
+            "dGhlIG1pbmQsIHRoYXQgYnkgYSBwZXJzZXZlcmFuY2Ugb2YgZGVsaWdodCBpbiB0aGUgY29udGlu"
+            "dWVkIGFuZCBpbmRlZmF0aWdhYmxlIGdlbmVyYXRpb24gb2Yga25vd2xlZGdlLCBleGNlZWRzIHRo"
+            "ZSBzaG9ydCB2ZWhlbWVuY2Ugb2YgYW55IGNhcm5hbCBwbGVhc3VyZS4=" );
+
+    REQUIRE( lokimq::from_base64("A+/A") == "\x03\xef\xc0" );
+    REQUIRE( lokimq::from_base64("YWJj") == "abc" );
+    REQUIRE( lokimq::from_base64("YWJjZA==") == "abcd" );
+    REQUIRE( lokimq::from_base64("YWJjZA") == "abcd" );
+    REQUIRE( lokimq::from_base64("YWJjZB") == "abcd" ); // ignore superfluous bits
+    REQUIRE( lokimq::from_base64("YWJjZB") == "abcd" ); // ignore superfluous bits
+    REQUIRE( lokimq::from_base64("YWJj+") == "abc" ); // ignore superfluous bits
+    REQUIRE( lokimq::from_base64("YWJjZGU=") == "abcde" );
+    REQUIRE( lokimq::from_base64("YWJjZGU") == "abcde" );
+    REQUIRE( lokimq::from_base64("YWJjZGVm") == "abcdef" );
+
+    REQUIRE( lokimq::is_base64("YWJjZGVm") );
+    REQUIRE( lokimq::is_base64("YWJjZGU") );
+    REQUIRE( lokimq::is_base64("YWJjZGU=") );
+    REQUIRE( lokimq::is_base64("YWJjZA==") );
+    REQUIRE( lokimq::is_base64("YWJjZA") );
+    REQUIRE( lokimq::is_base64("YWJjZB") ); // not really valid, but we explicitly accept it
+
+    REQUIRE_FALSE( lokimq::is_base64("YWJjZ=") ); // invalid padding (padding can only be 4th or 3rd+4th of a 4-char block)
+    REQUIRE_FALSE( lokimq::is_base64("YWJj=") );
+    REQUIRE_FALSE( lokimq::is_base64("YWJj=A") );
+    REQUIRE_FALSE( lokimq::is_base64("YWJjA===") );
+    REQUIRE_FALSE( lokimq::is_base64("YWJ[") );
+    REQUIRE_FALSE( lokimq::is_base64("YWJ.") );
+    REQUIRE_FALSE( lokimq::is_base64("_YWJ") );
+
+    REQUIRE( lokimq::from_base64(
+            "TWFuIGlzIGRpc3Rpbmd1aXNoZWQsIG5vdCBvbmx5IGJ5IGhpcyByZWFzb24sIGJ1dCBieSB0aGlz"
+            "IHNpbmd1bGFyIHBhc3Npb24gZnJvbSBvdGhlciBhbmltYWxzLCB3aGljaCBpcyBhIGx1c3Qgb2Yg"
+            "dGhlIG1pbmQsIHRoYXQgYnkgYSBwZXJzZXZlcmFuY2Ugb2YgZGVsaWdodCBpbiB0aGUgY29udGlu"
+            "dWVkIGFuZCBpbmRlZmF0aWdhYmxlIGdlbmVyYXRpb24gb2Yga25vd2xlZGdlLCBleGNlZWRzIHRo"
+            "ZSBzaG9ydCB2ZWhlbWVuY2Ugb2YgYW55IGNhcm5hbCBwbGVhc3VyZS4=" )
+            ==
+            "Man is distinguished, not only by his reason, but by this singular passion from other "
+            "animals, which is a lust of the mind, that by a perseverance of delight in the "
+            "continued and indefatigable generation of knowledge, exceeds the short vehemence of "
+            "any carnal pleasure.");
 }
