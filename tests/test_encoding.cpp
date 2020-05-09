@@ -5,6 +5,11 @@
 
 using namespace std::literals;
 
+const std::string pk = "\xf1\x6b\xa5\x59\x10\x39\xf0\x89\xb4\x2a\x83\x41\x75\x09\x30\x94\x07\x4d\x0d\x93\x7a\x79\xe5\x3e\x5c\xe7\x30\xf9\x46\xe1\x4b\x88";
+const std::string pk_hex = "f16ba5591039f089b42a834175093094074d0d937a79e53e5ce730f946e14b88";
+const std::string pk_b32z = "6fi4kseo88aeupbkopyzknjo1odw4dcuxjh6kx1hhhax1tzbjqry";
+const std::string pk_b64 = "8WulWRA58Im0KoNBdQkwlAdNDZN6eeU+XOcw+UbhS4g=";
+
 TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
     REQUIRE( lokimq::to_hex("\xff\x42\x12\x34") == "ff421234"s );
     std::vector<uint8_t> chars{{1, 10, 100, 254}};
@@ -19,6 +24,9 @@ TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
     REQUIRE_FALSE( lokimq::is_hex("1234567890abcdefABCDEF1234567890aGcdefABCDEF") );
     REQUIRE_FALSE( lokimq::is_hex("1234567890abcdefABCDEF1234567890agcdefABCDEF") );
     REQUIRE_FALSE( lokimq::is_hex("\x11\xff") );
+
+    REQUIRE( lokimq::from_hex(pk_hex) == pk );
+    REQUIRE( lokimq::to_hex(pk) == pk_hex );
 }
 
 TEST_CASE("base32z encoding/decoding", "[encoding][decoding][base32z]") {
@@ -56,6 +64,9 @@ TEST_CASE("base32z encoding/decoding", "[encoding][decoding][base32z]") {
     REQUIRE( lokimq::from_base32z("ybndrf4") == "\x00\x44\x32\x17"s );
     // This one won't round-trip to the same value since it has ignored garbage bytes at the end
     REQUIRE( lokimq::to_base32z(lokimq::from_base32z("ybndrf4"s)) == "ybndrfa" );
+
+    REQUIRE( lokimq::to_base32z(pk) == pk_b32z );
+    REQUIRE( lokimq::from_base32z(pk_b32z) == pk );
 }
 
 TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
@@ -125,4 +136,7 @@ TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
             "animals, which is a lust of the mind, that by a perseverance of delight in the "
             "continued and indefatigable generation of knowledge, exceeds the short vehemence of "
             "any carnal pleasure.");
+
+    REQUIRE( lokimq::to_base64(pk) == pk_b64 );
+    REQUIRE( lokimq::from_base64(pk_b64) == pk );
 }

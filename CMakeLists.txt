@@ -22,6 +22,7 @@ configure_file(lokimq/version.h.in lokimq/version.h @ONLY)
 configure_file(liblokimq.pc.in liblokimq.pc @ONLY)
 
 add_library(lokimq
+    lokimq/address.cpp
     lokimq/auth.cpp
     lokimq/bt_serialize.cpp
     lokimq/connections.cpp
