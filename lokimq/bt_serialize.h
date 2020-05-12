@@ -40,6 +40,7 @@
 #include <sstream>
 #include <string_view>
 #include "mapbox/variant.hpp"
+#include <variant>
 
 
 namespace lokimq {
@@ -109,14 +110,6 @@ class bt_list : public std::list<bt_value> {
 class bt_dict : public std::unordered_map<std::string, bt_value> {
     using std::unordered_map<std::string, bt_value>::unordered_map;
 };
-
-#ifdef __cpp_lib_void_t
-using std::void_t;
-#else
-/// C++17 void_t backport
-template <typename... Ts> struct void_t_impl { using type = void; };
-template <typename... Ts> using void_t = typename void_t_impl<Ts...>::type;
-#endif
 
 namespace detail {
 
@@ -230,7 +223,7 @@ template <typename T, typename = void> struct is_bt_input_dict_container : std::
 template <typename T>
 struct is_bt_input_dict_container<T, std::enable_if_t<
     std::is_same<std::string, std::remove_cv_t<typename T::value_type::first_type>>::value,
-    void_t<typename T::const_iterator /* is const iterable */,
+    std::void_t<typename T::const_iterator /* is const iterable */,
            typename T::value_type::second_type /* has a second type */>>>
 : std::true_type {};
 
@@ -238,7 +231,7 @@ struct is_bt_input_dict_container<T, std::enable_if_t<
 template <typename T, typename = void> struct is_bt_insertable : std::false_type {};
 template <typename T>
 struct is_bt_insertable<T,
-    void_t<decltype(std::declval<T>().insert(std::declval<T>().end(), std::declval<typename T::value_type>()))>>
+    std::void_t<decltype(std::declval<T>().insert(std::declval<T>().end(), std::declval<typename T::value_type>()))>>
 : std::true_type {};
 
 /// Determines whether the given type looks like a compatible map (i.e. has std::string keys) that
@@ -248,7 +241,7 @@ template <typename T>
 struct is_bt_output_dict_container<T, std::enable_if_t<
     std::is_same<std::string, std::remove_cv_t<typename T::key_type>>::value &&
     is_bt_insertable<T>::value,
-    void_t<typename T::value_type::second_type /* has a second type */>>>
+    std::void_t<typename T::value_type::second_type /* has a second type */>>>
 : std::true_type {};
 
 
@@ -307,7 +300,7 @@ template <typename T>
 struct is_bt_input_list_container<T, std::enable_if_t<
     !std::is_same<T, std::string>::value &&
     !is_bt_input_dict_container<T>::value,
-    void_t<typename T::const_iterator, typename T::value_type>>>
+    std::void_t<typename T::const_iterator, typename T::value_type>>>
 : std::true_type {};
 
 template <typename T, typename = void> struct is_bt_output_list_container : std::false_type {};
@@ -426,7 +419,6 @@ struct bt_deserialize<mapbox::util::variant<Ts...>> {
 };
 
 
-#ifdef __cpp_lib_variant
 /// C++17 std::variant support
 template <typename... Ts>
 struct bt_serialize<std::variant<Ts...>> {
@@ -441,7 +433,6 @@ struct bt_deserialize<std::variant<Ts...>> {
         bt_deserialize_try_variant<Ts...>(s, val);
     }
 };
-#endif
 
 template <typename T>
 struct bt_stream_serializer {

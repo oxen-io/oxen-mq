@@ -1318,11 +1318,7 @@ template <typename... T>
 bt_dict build_send(ConnectionID to, std::string_view cmd, T&&... opts) {
     bt_dict control_data;
     bt_list parts{{cmd}};
-#ifdef __cpp_fold_expressions
     (detail::apply_send_option(parts, control_data, std::forward<T>(opts)),...);
-#else
-    (void) std::initializer_list<int>{(detail::apply_send_option(parts, control_data, std::forward<T>(opts)), 0)...};
-#endif
 
     if (to.sn())
         control_data["conn_pubkey"] = std::move(to.pk);
@@ -1388,11 +1384,7 @@ void LokiMQ::log_(LogLevel lvl, const char* file, int line, const T&... stuff) {
         return;
 
     std::ostringstream os;
-#ifdef __cpp_fold_expressions
     (os << ... << stuff);
-#else
-    (void) std::initializer_list<int>{(os << stuff, 0)...};
-#endif
     logger(lvl, trim_log_filename(file).data(), line, os.str());
 }
 
