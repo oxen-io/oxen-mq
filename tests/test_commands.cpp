@@ -303,10 +303,11 @@ TEST_CASE("send failure callbacks", "[commands][queue_full]") {
     // Handshake: we send HI, they reply HELLO.
     client.send(zmq::message_t{"HI", 2}, zmq::send_flags::none);
     zmq::message_t hello;
-    client.recv(hello);
+    auto recvd = client.recv(hello);
     std::string_view hello_sv{hello.data<char>(), hello.size()};
     {
         auto lock = catch_lock();
+        REQUIRE( recvd );
         REQUIRE( hello_sv == "HELLO" );
         REQUIRE_FALSE( hello.more() );
     }
