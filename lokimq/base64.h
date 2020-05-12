@@ -171,7 +171,7 @@ template <typename InputIt, typename OutputIt>
 void from_base64(InputIt begin, InputIt end, OutputIt out) {
     using Char = decltype(*begin);
     static_assert(sizeof(Char) == 1, "from_base64 requires chars/bytes");
-    uint_fast16_t curr;
+    uint_fast16_t curr = 0;
     int bits = 0; // number of bits we've loaded into val; we always keep this < 8.
     while (begin != end) {
         Char c = *begin++;
