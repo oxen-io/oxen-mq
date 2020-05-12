@@ -38,7 +38,7 @@ namespace detail {
 
 // Sends a control messages between proxy and threads or between proxy and workers consisting of a
 // single command codes with an optional data part (the data frame is omitted if empty).
-void send_control(zmq::socket_t& sock, string_view cmd, std::string data) {
+void send_control(zmq::socket_t& sock, std::string_view cmd, std::string data) {
     auto c = create_message(std::move(cmd));
     if (data.empty()) {
         sock.send(c, zmq::send_flags::none);
@@ -53,7 +53,7 @@ void send_control(zmq::socket_t& sock, string_view cmd, std::string data) {
 std::pair<std::string, AuthLevel> extract_metadata(zmq::message_t& msg) {
     auto result = std::make_pair(""s, AuthLevel::none);
     try {
-        string_view pubkey_hex{msg.gets("User-Id")};
+        std::string_view pubkey_hex{msg.gets("User-Id")};
         if (pubkey_hex.size() != 64)
             throw std::logic_error("bad user-id");
         assert(is_hex(pubkey_hex.begin(), pubkey_hex.end()));

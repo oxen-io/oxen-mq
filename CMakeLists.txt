@@ -5,8 +5,8 @@ project(liblokimq CXX)
 include(GNUInstallDirs)
 
 set(LOKIMQ_VERSION_MAJOR 1)
-set(LOKIMQ_VERSION_MINOR 1)
-set(LOKIMQ_VERSION_PATCH 5)
+set(LOKIMQ_VERSION_MINOR 2)
+set(LOKIMQ_VERSION_PATCH 0)
 set(LOKIMQ_VERSION "${LOKIMQ_VERSION_MAJOR}.${LOKIMQ_VERSION_MINOR}.${LOKIMQ_VERSION_PATCH}")
 message(STATUS "lokimq v${LOKIMQ_VERSION}")
 
@@ -83,7 +83,7 @@ target_include_directories(lokimq
 
 target_compile_options(lokimq PRIVATE -Wall -Wextra -Werror)
 set_target_properties(lokimq PROPERTIES
-    CXX_STANDARD 14
+    CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
     POSITION_INDEPENDENT_CODE ON

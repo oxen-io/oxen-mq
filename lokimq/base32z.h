@@ -27,7 +27,7 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
-#include "string_view.h"
+#include <string_view>
 #include <array>
 #include <iterator>
 #include <cassert>
@@ -101,19 +101,14 @@ void to_base32z(InputIt begin, InputIt end, OutputIt out) {
 }
 
 /// Creates a base32z string from an iterable, std::string-like object
-inline std::string to_base32z(string_view s) {
+template <typename CharT>
+std::string to_base32z(std::basic_string_view<CharT> s) {
     std::string base32z;
     base32z.reserve((s.size()*8 + 4) / 5); // == bytes*8/5, rounded up.
     to_base32z(s.begin(), s.end(), std::back_inserter(base32z));
     return base32z;
 }
-
-inline std::string to_base32z(ustring_view s) {
-    std::string base32z;
-    base32z.reserve((s.size()*8 + 4) / 5);
-    to_base32z(s.begin(), s.end(), std::back_inserter(base32z));
-    return base32z;
-}
+inline std::string to_base32z(std::string_view s) { return to_base32z<>(s); }
 
 /// Returns true if all elements in the range are base32z characters
 template <typename It>
@@ -128,8 +123,9 @@ constexpr bool is_base32z(It begin, It end) {
 }
 
 /// Returns true if all elements in the string-like value are base32z characters
-constexpr bool is_base32z(string_view s) { return is_base32z(s.begin(), s.end()); }
-constexpr bool is_base32z(ustring_view s) { return is_base32z(s.begin(), s.end()); }
+template <typename CharT>
+constexpr bool is_base32z(std::basic_string_view<CharT> s) { return is_base32z(s.begin(), s.end()); }
+constexpr bool is_base32z(std::string_view s) { return is_base32z<>(s); }
 
 /// Converts a sequence of base32z digits to bytes.  Undefined behaviour if any characters are not
 /// valid base32z alphabet characters.  It is permitted for the input and output ranges to overlap
@@ -184,18 +180,13 @@ void from_base32z(InputIt begin, InputIt end, OutputIt out) {
 
 /// Converts base32z digits from a std::string-like object into a std::string of bytes.  Undefined
 /// behaviour if any characters are not valid (case-insensitive) base32z characters.
-inline std::string from_base32z(string_view s) {
+template <typename CharT>
+std::string from_base32z(std::basic_string_view<CharT> s) {
     std::string bytes;
     bytes.reserve((s.size()*5 + 7) / 8); // == chars*5/8, rounded up.
     from_base32z(s.begin(), s.end(), std::back_inserter(bytes));
     return bytes;
 }
-
-inline std::string from_base32z(ustring_view s) {
-    std::string bytes;
-    bytes.reserve((s.size()*5 + 7) / 8);
-    from_base32z(s.begin(), s.end(), std::back_inserter(bytes));
-    return bytes;
-}
+inline std::string from_base32z(std::string_view s) { return from_base32z<>(s); }
 
 }

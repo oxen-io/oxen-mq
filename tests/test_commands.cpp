@@ -43,7 +43,7 @@ TEST_CASE("basic commands", "[commands]") {
 
     auto c = client.connect_remote(listen,
             [&](auto conn) { pubkey = conn.pubkey(); success = true; got = true; },
-            [&](auto conn, string_view) { failed = true; got = true; },
+            [&](auto conn, std::string_view) { failed = true; got = true; },
             server.get_pubkey());
 
     wait_for_conn(got);
@@ -304,7 +304,7 @@ TEST_CASE("send failure callbacks", "[commands][queue_full]") {
     client.send(zmq::message_t{"HI", 2}, zmq::send_flags::none);
     zmq::message_t hello;
     client.recv(hello);
-    string_view hello_sv{hello.data<char>(), hello.size()};
+    std::string_view hello_sv{hello.data<char>(), hello.size()};
     {
         auto lock = catch_lock();
         REQUIRE( hello_sv == "HELLO" );

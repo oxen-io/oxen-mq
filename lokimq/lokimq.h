@@ -29,6 +29,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <list>
 #include <queue>
 #include <unordered_map>
@@ -43,7 +44,6 @@
 #include <cassert>
 #include "zmq.hpp"
 #include "bt_serialize.h"
-#include "string_view.h"
 #include "connections.h"
 #include "message.h"
 #include "auth.h"
@@ -146,12 +146,12 @@ public:
     ///
     /// @returns an `AuthLevel` enum value indicating the default auth level for the incoming
     /// connection, or AuthLevel::denied if the connection should be refused.
-    using AllowFunc = std::function<AuthLevel(string_view address, string_view pubkey, bool service_node)>;
+    using AllowFunc = std::function<AuthLevel(std::string_view address, std::string_view pubkey, bool service_node)>;
 
     /// Callback that is invoked when we need to send a "strong" message to a SN that we aren't
     /// already connected to and need to establish a connection.  This callback returns the ZMQ
     /// connection string we should use which is typically a string such as `tcp://1.2.3.4:5678`.
-    using SNRemoteAddress = std::function<std::string(string_view pubkey)>;
+    using SNRemoteAddress = std::function<std::string(std::string_view pubkey)>;
 
     /// The callback type for registered commands.
     using CommandCallback = std::function<void(Message& message)>;
@@ -169,7 +169,7 @@ public:
     /// Callback for the success case of connect_remote()
     using ConnectSuccess = std::function<void(ConnectionID)>;
     /// Callback for the failure case of connect_remote()
-    using ConnectFailure = std::function<void(ConnectionID, string_view)>;
+    using ConnectFailure = std::function<void(ConnectionID, std::string_view)>;
 
     /// Explicitly non-copyable, non-movable because most things here aren't copyable, and a few
     /// things aren't movable, either.  If you need to pass the LokiMQ instance around, wrap it
@@ -465,7 +465,7 @@ private:
     // provided then the connection will be curve25519 encrypted and authenticate; otherwise it will
     // be unencrypted and unauthenticated.  Note that the remote end must be in the same mode (i.e.
     // either accepting curve connections, or not accepting curve).
-    void setup_outgoing_socket(zmq::socket_t& socket, string_view remote_pubkey = {});
+    void setup_outgoing_socket(zmq::socket_t& socket, std::string_view remote_pubkey = {});
 
     /// Common connection implementation used by proxy_connect/proxy_send.  Returns the socket and,
     /// if a routing prefix is needed, the required prefix (or an empty string if not needed).  For
@@ -481,7 +481,7 @@ private:
     /// @param keep_alive the keep alive for the connection, if we establish a new outgoing
     /// connection.  If we already have an outgoing connection then its keep-alive gets increased to
     /// this if currently less than this.
-    std::pair<zmq::socket_t*, std::string> proxy_connect_sn(string_view pubkey, string_view connect_hint,
+    std::pair<zmq::socket_t*, std::string> proxy_connect_sn(std::string_view pubkey, std::string_view connect_hint,
             bool optional, bool incoming_only, bool outgoing_only, std::chrono::milliseconds keep_alive);
 
     /// CONNECT_SN command telling us to connect to a new pubkey.  Returns the socket (which could
@@ -582,7 +582,7 @@ private:
     pubkey_set active_service_nodes;
 
     /// Resets or updates the stored set of active SN pubkeys
-    void proxy_set_active_sns(string_view data);
+    void proxy_set_active_sns(std::string_view data);
     void proxy_set_active_sns(pubkey_set pubkeys);
     void proxy_update_active_sns(bt_list_consumer data);
     void proxy_update_active_sns(pubkey_set added, pubkey_set removed);
@@ -902,7 +902,7 @@ public:
      * *don't* need to worry about this (and can just discard it): you can always simply pass the
      * pubkey as a string wherever a ConnectionID is called.
      */
-    ConnectionID connect_sn(string_view pubkey, std::chrono::milliseconds keep_alive = 5min, string_view hint = {});
+    ConnectionID connect_sn(std::string_view pubkey, std::chrono::milliseconds keep_alive = 5min, std::string_view hint = {});
 
     /**
      * Establish a connection to the given remote with callbacks invoked on a successful or failed
@@ -934,8 +934,8 @@ public:
      * @param returns ConnectionID that uniquely identifies the connection to this remote node.  In
      * order to talk to it you will need the returned value (or a copy of it).
      */
-    ConnectionID connect_remote(string_view remote, ConnectSuccess on_connect, ConnectFailure on_failure,
-            string_view pubkey = {},
+    ConnectionID connect_remote(std::string_view remote, ConnectSuccess on_connect, ConnectFailure on_failure,
+            std::string_view pubkey = {},
             AuthLevel auth_level = AuthLevel::none,
             std::chrono::milliseconds timeout = REMOTE_CONNECT_TIMEOUT);
 
@@ -994,7 +994,7 @@ public:
      * connection hint may be used rather than performing a connection address lookup on the pubkey.
      */
     template <typename... T>
-    void send(ConnectionID to, string_view cmd, const T&... opts);
+    void send(ConnectionID to, std::string_view cmd, const T&... opts);
 
     /** Send a command configured as a "REQUEST" command to a service node: the data parts will be
      * prefixed with a random identifier.  The remote is expected to reply with a ["REPLY",
@@ -1026,7 +1026,7 @@ public:
      *   not running as a service node.
      */
     template <typename... T>
-    void request(ConnectionID to, string_view cmd, ReplyCallback callback, const T&... opts);
+    void request(ConnectionID to, std::string_view cmd, ReplyCallback callback, const T&... opts);
 
     /// The key pair this LokiMQ was created with; if empty keys were given during construction then
     /// this returns the generated keys.
@@ -1257,10 +1257,10 @@ template <typename T> T deserialize_object(uintptr_t ptrval) {
 
 // Sends a control message to the given socket consisting of the command plus optional dict
 // data (only sent if the data is non-empty).
-void send_control(zmq::socket_t& sock, string_view cmd, std::string data = {});
+void send_control(zmq::socket_t& sock, std::string_view cmd, std::string data = {});
 
 /// Base case: takes a string-like value and appends it to the message parts
-inline void apply_send_option(bt_list& parts, bt_dict&, string_view arg) {
+inline void apply_send_option(bt_list& parts, bt_dict&, std::string_view arg) {
     parts.emplace_back(arg);
 }
 
@@ -1315,7 +1315,7 @@ inline void apply_send_option(bt_list&, bt_dict& control_data, send_option::queu
 std::pair<std::string, AuthLevel> extract_metadata(zmq::message_t& msg);
 
 template <typename... T>
-bt_dict build_send(ConnectionID to, string_view cmd, T&&... opts) {
+bt_dict build_send(ConnectionID to, std::string_view cmd, T&&... opts) {
     bt_dict control_data;
     bt_list parts{{cmd}};
 #ifdef __cpp_fold_expressions
@@ -1339,7 +1339,7 @@ bt_dict build_send(ConnectionID to, string_view cmd, T&&... opts) {
 
 
 template <typename... T>
-void LokiMQ::send(ConnectionID to, string_view cmd, const T&... opts) {
+void LokiMQ::send(ConnectionID to, std::string_view cmd, const T&... opts) {
     detail::send_control(get_control_socket(), "SEND",
             bt_serialize(detail::build_send(std::move(to), cmd, opts...)));
 }
@@ -1347,17 +1347,17 @@ void LokiMQ::send(ConnectionID to, string_view cmd, const T&... opts) {
 std::string make_random_string(size_t size);
 
 template <typename... T>
-void LokiMQ::request(ConnectionID to, string_view cmd, ReplyCallback callback, const T &...opts) {
+void LokiMQ::request(ConnectionID to, std::string_view cmd, ReplyCallback callback, const T &...opts) {
     const auto reply_tag = make_random_string(15); // 15 random bytes is lots and should keep us in most stl implementations' small string optimization
     bt_dict control_data = detail::build_send(std::move(to), cmd, reply_tag, opts...);
     control_data["request"] = true;
     control_data["request_callback"] = detail::serialize_object(std::move(callback));
-    control_data["request_tag"] = string_view{reply_tag};
+    control_data["request_tag"] = std::string_view{reply_tag};
     detail::send_control(get_control_socket(), "SEND", bt_serialize(std::move(control_data)));
 }
 
 template <typename... Args>
-void Message::send_back(string_view command, Args&&... args) {
+void Message::send_back(std::string_view command, Args&&... args) {
     lokimq.send(conn, command, send_option::optional{!conn.sn()}, std::forward<Args>(args)...);
 }
 
@@ -1368,14 +1368,14 @@ void Message::send_reply(Args&&... args) {
 }
 
 template <typename Callback, typename... Args>
-void Message::send_request(string_view cmd, Callback&& callback, Args&&... args) {
+void Message::send_request(std::string_view cmd, Callback&& callback, Args&&... args) {
     lokimq.request(conn, cmd, std::forward<Callback>(callback),
             send_option::optional{!conn.sn()}, std::forward<Args>(args)...);
 }
 
 // When log messages are invoked we strip out anything before this in the filename:
-constexpr string_view LOG_PREFIX{"lokimq/", 7};
-inline string_view trim_log_filename(string_view local_file) {
+constexpr std::string_view LOG_PREFIX{"lokimq/", 7};
+inline std::string_view trim_log_filename(std::string_view local_file) {
     auto chop = local_file.rfind(LOG_PREFIX);
     if (chop != local_file.npos)
         local_file.remove_prefix(chop);

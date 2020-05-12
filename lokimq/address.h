@@ -28,7 +28,7 @@
 
 #pragma once
 #include <string>
-#include "string_view.h"
+#include <string_view>
 
 namespace lokimq {
 
@@ -116,7 +116,7 @@ struct address {
      *
      * Throw std::invalid_argument if the given address is not parseable.
      */
-    address(string_view addr);
+    address(std::string_view addr);
 
     /// Constructs and builds the ZMQ connection address from the stored connection details.  This
     /// does not contain any of the curve-related details; those must be specified separately when

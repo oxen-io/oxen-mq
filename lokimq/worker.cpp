@@ -126,7 +126,7 @@ void LokiMQ::proxy_worker_message(std::vector<zmq::message_t>& parts) {
     auto route = view(parts[0]), cmd = view(parts[1]);
     LMQ_TRACE("worker message from ", route);
     assert(route.size() >= 2 && route[0] == 'w' && route[1] >= '0' && route[1] <= '9');
-    string_view worker_id_str{&route[1], route.size()-1}; // Chop off the leading "w"
+    std::string_view worker_id_str{&route[1], route.size()-1}; // Chop off the leading "w"
     unsigned int worker_id = detail::extract_unsigned(worker_id_str);
     if (!worker_id_str.empty() /* didn't consume everything */ || worker_id >= workers.size()) {
         LMQ_LOG(error, "Worker id '", route, "' is invalid, unable to process worker command");

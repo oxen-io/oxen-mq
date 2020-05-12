@@ -47,7 +47,7 @@ void LokiMQ::setup_external_socket(zmq::socket_t& socket) {
     }
 }
 
-void LokiMQ::setup_outgoing_socket(zmq::socket_t& socket, string_view remote_pubkey) {
+void LokiMQ::setup_outgoing_socket(zmq::socket_t& socket, std::string_view remote_pubkey) {
 
     setup_external_socket(socket);
 
@@ -67,7 +67,7 @@ void LokiMQ::setup_outgoing_socket(zmq::socket_t& socket, string_view remote_pub
     // else let ZMQ pick a random one
 }
 
-ConnectionID LokiMQ::connect_sn(string_view pubkey, std::chrono::milliseconds keep_alive, string_view hint) {
+ConnectionID LokiMQ::connect_sn(std::string_view pubkey, std::chrono::milliseconds keep_alive, std::string_view hint) {
     if (!proxy_thread.joinable())
         throw std::logic_error("Cannot call connect_sn() before calling `start()`");
 
@@ -76,8 +76,8 @@ ConnectionID LokiMQ::connect_sn(string_view pubkey, std::chrono::milliseconds ke
     return pubkey;
 }
 
-ConnectionID LokiMQ::connect_remote(string_view remote, ConnectSuccess on_connect, ConnectFailure on_failure,
-        string_view pubkey, AuthLevel auth_level, std::chrono::milliseconds timeout) {
+ConnectionID LokiMQ::connect_remote(std::string_view remote, ConnectSuccess on_connect, ConnectFailure on_failure,
+        std::string_view pubkey, AuthLevel auth_level, std::chrono::milliseconds timeout) {
     if (!proxy_thread.joinable())
         throw std::logic_error("Cannot call connect_remote() before calling `start()`");
 
@@ -109,7 +109,7 @@ void LokiMQ::disconnect(ConnectionID id, std::chrono::milliseconds linger) {
 }
 
 std::pair<zmq::socket_t *, std::string>
-LokiMQ::proxy_connect_sn(string_view remote, string_view connect_hint, bool optional, bool incoming_only, bool outgoing_only, std::chrono::milliseconds keep_alive) {
+LokiMQ::proxy_connect_sn(std::string_view remote, std::string_view connect_hint, bool optional, bool incoming_only, bool outgoing_only, std::chrono::milliseconds keep_alive) {
     ConnectionID remote_cid{remote};
     auto its = peers.equal_range(remote_cid);
     peer_info* peer = nullptr;
@@ -185,7 +185,7 @@ LokiMQ::proxy_connect_sn(string_view remote, string_view connect_hint, bool opti
 }
 
 std::pair<zmq::socket_t *, std::string> LokiMQ::proxy_connect_sn(bt_dict_consumer data) {
-    string_view hint, remote_pk;
+    std::string_view hint, remote_pk;
     std::chrono::milliseconds keep_alive;
     bool optional = false, incoming_only = false, outgoing_only = false;
 

@@ -27,7 +27,7 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
-#include "string_view.h"
+#include <string_view>
 #include <array>
 #include <iterator>
 #include <cassert>
@@ -117,19 +117,14 @@ void to_base64(InputIt begin, InputIt end, OutputIt out) {
 }
 
 /// Creates a base64 string from an iterable, std::string-like object
-inline std::string to_base64(string_view s) {
+template <typename CharT>
+std::string to_base64(std::basic_string_view<CharT> s) {
     std::string base64;
     base64.reserve((s.size() + 2) / 3 * 4);
     to_base64(s.begin(), s.end(), std::back_inserter(base64));
     return base64;
 }
-
-inline std::string to_base64(ustring_view s) {
-    std::string base64;
-    base64.reserve((s.size() + 2) / 3 * 4);
-    to_base64(s.begin(), s.end(), std::back_inserter(base64));
-    return base64;
-}
+inline std::string to_base64(std::string_view s) { return to_base64<>(s); }
 
 /// Returns true if the range is a base64 encoded value; we allow (but do not require) '=' padding,
 /// but only at the end, only 1 or 2, and only if it pads out the total to a multiple of 4.
@@ -157,8 +152,9 @@ constexpr bool is_base64(It begin, It end) {
 }
 
 /// Returns true if the string-like value is a base64 encoded value
-constexpr bool is_base64(string_view s) { return is_base64(s.begin(), s.end()); }
-constexpr bool is_base64(ustring_view s) { return is_base64(s.begin(), s.end()); }
+template <typename CharT>
+constexpr bool is_base64(std::basic_string_view<CharT> s) { return is_base64(s.begin(), s.end()); }
+constexpr bool is_base64(std::string_view s) { return is_base64(s.begin(), s.end()); }
 
 /// Converts a sequence of base64 digits to bytes.  Undefined behaviour if any characters are not
 /// valid base64 alphabet characters.  It is permitted for the input and output ranges to overlap as
@@ -200,18 +196,13 @@ void from_base64(InputIt begin, InputIt end, OutputIt out) {
 
 /// Converts base64 digits from a std::string-like object into a std::string of bytes.  Undefined
 /// behaviour if any characters are not valid base64 characters.
-inline std::string from_base64(string_view s) {
+template <typename CharT>
+std::string from_base64(std::basic_string_view<CharT> s) {
     std::string bytes;
     bytes.reserve(s.size()*6 / 8);
     from_base64(s.begin(), s.end(), std::back_inserter(bytes));
     return bytes;
 }
-
-inline std::string from_base64(ustring_view s) {
-    std::string bytes;
-    bytes.reserve(s.size()*6 / 8);
-    from_base64(s.begin(), s.end(), std::back_inserter(bytes));
-    return bytes;
-}
+inline std::string from_base64(std::string_view s) { return from_base64<>(s); }
 
 }

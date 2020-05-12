@@ -35,7 +35,7 @@ void LokiMQ::proxy_quit() {
 
 void LokiMQ::proxy_send(bt_dict_consumer data) {
     // NB: bt_dict_consumer goes in alphabetical order
-    string_view hint;
+    std::string_view hint;
     std::chrono::milliseconds keep_alive{DEFAULT_SEND_KEEP_ALIVE};
     std::chrono::milliseconds request_timeout{DEFAULT_REQUEST_TIMEOUT};
     bool optional = false;
@@ -488,7 +488,7 @@ void LokiMQ::proxy_loop() {
     }
 }
 
-static bool is_error_response(string_view cmd) {
+static bool is_error_response(std::string_view cmd) {
     return cmd == "FORBIDDEN" || cmd == "FORBIDDEN_SN" || cmd == "NOT_A_SERVICE_NODE" || cmd == "UNKNOWNCOMMAND" || cmd == "NO_REPLY_TAG";
 }
 
@@ -498,7 +498,7 @@ bool LokiMQ::proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>
     // Doubling as a bool and an offset:
     size_t incoming = connections[conn_index].getsockopt<int>(ZMQ_TYPE) == ZMQ_ROUTER;
 
-    string_view route, cmd;
+    std::string_view route, cmd;
     if (parts.size() < 1 + incoming) {
         LMQ_LOG(warn, "Received empty message; ignoring");
         return true;
@@ -608,7 +608,7 @@ bool LokiMQ::proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>
                 LMQ_LOG(warn, "Received REPLY with unknown or already handled reply tag (", to_hex(reply_tag), "); ignoring");
             }
         } else {
-            LMQ_LOG(warn, "Received ", cmd, ':', (parts.size() > 1 + incoming ? view(parts[1 + incoming]) : "(unknown command)"_sv),
+            LMQ_LOG(warn, "Received ", cmd, ':', (parts.size() > 1 + incoming ? view(parts[1 + incoming]) : "(unknown command)"sv),
                         " from ", peer_address(parts.back()));
         }
         return true;

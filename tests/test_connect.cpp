@@ -29,7 +29,7 @@ TEST_CASE("connections with curve authentication", "[curve][connect]") {
     bool success = false;
     auto server_conn = client.connect_remote(listen,
             [&](auto conn) { success = true; got = true; },
-            [&](auto conn, string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); got = true; },
+            [&](auto conn, std::string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); got = true; },
             pubkey);
 
     wait_for_conn(got);
@@ -108,7 +108,7 @@ TEST_CASE("plain-text connections", "[plaintext][connect]") {
     bool success = false;
     auto c = client.connect_remote(listen,
             [&](auto conn) { success = true; got = true; },
-            [&](auto conn, string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); got = true; }
+            [&](auto conn, std::string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); got = true; }
             );
 
     wait_for_conn(got);
@@ -150,11 +150,11 @@ TEST_CASE("unique connection IDs", "[connect][id]") {
     std::atomic<bool> good1{false}, good2{false};
     auto r1 = client1.connect_remote(listen,
             [&](auto conn) { good1 = true; },
-            [&](auto conn, string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); }
+            [&](auto conn, std::string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); }
             );
     auto r2 = client2.connect_remote(listen,
             [&](auto conn) { good2 = true; },
-            [&](auto conn, string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); }
+            [&](auto conn, std::string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); }
             );
 
     wait_for_conn(good1);
