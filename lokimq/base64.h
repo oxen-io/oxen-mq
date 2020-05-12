@@ -77,7 +77,7 @@ static_assert(b64_lut.from_b64('/') == 63 && b64_lut.from_b64('7') == 59 && b64_
 /// Converts bytes into a base64 encoded character sequence.
 template <typename InputIt, typename OutputIt>
 void to_base64(InputIt begin, InputIt end, OutputIt out) {
-    static_assert(sizeof(*begin) == 1, "to_base64 requires chars/bytes");
+    static_assert(sizeof(decltype(*begin)) == 1, "to_base64 requires chars/bytes");
     int bits = 0; // Tracks the number of unconsumed bits held in r, will always be in {0, 2, 4}
     std::uint_fast16_t r = 0;
     while (begin != end) {
@@ -130,21 +130,21 @@ inline std::string to_base64(std::string_view s) { return to_base64<>(s); }
 /// but only at the end, only 1 or 2, and only if it pads out the total to a multiple of 4.
 template <typename It>
 constexpr bool is_base64(It begin, It end) {
-    static_assert(sizeof(*begin) == 1, "is_base64 requires chars/bytes");
+    static_assert(sizeof(decltype(*begin)) == 1, "is_base64 requires chars/bytes");
     using std::distance;
     using std::prev;
 
     // Allow 1 or 2 padding chars *if* they pad it to a multiple of 4.
     if (begin != end && distance(begin, end) % 4 == 0) {
         auto last = prev(end);
-        if (*last == '=')
+        if (static_cast<unsigned char>(*last) == '=')
             end = last--;
-        if (*last == '=')
+        if (static_cast<unsigned char>(*last) == '=')
             end = last;
     }
 
     for (; begin != end; ++begin) {
-        auto c = *begin;
+        auto c = static_cast<unsigned char>(*begin);
         if (detail::b64_lut.from_b64(c) == 0 && c != 'A')
             return false;
     }
@@ -169,12 +169,11 @@ constexpr bool is_base64(std::string_view s) { return is_base64(s.begin(), s.end
 /// the last 4 bits of the last character are essentially considered padding.
 template <typename InputIt, typename OutputIt>
 void from_base64(InputIt begin, InputIt end, OutputIt out) {
-    using Char = decltype(*begin);
-    static_assert(sizeof(Char) == 1, "from_base64 requires chars/bytes");
+    static_assert(sizeof(decltype(*begin)) == 1, "from_base64 requires chars/bytes");
     uint_fast16_t curr = 0;
     int bits = 0; // number of bits we've loaded into val; we always keep this < 8.
     while (begin != end) {
-        Char c = *begin++;
+        auto c = static_cast<unsigned char>(*begin++);
 
         // padding; don't bother checking if we're at the end because is_base64 is a precondition
         // and we're allowed UB if it isn't satisfied.
@@ -185,7 +184,7 @@ void from_base64(InputIt begin, InputIt end, OutputIt out) {
             bits = 6;
         else {
             bits -= 2; // Added 6, removing 8
-            *out++ = static_cast<Char>(curr >> bits);
+            *out++ = static_cast<uint8_t>(curr >> bits);
             curr &= (1 << bits) - 1;
         }
     }

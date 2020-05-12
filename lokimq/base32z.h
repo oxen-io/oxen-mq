@@ -75,7 +75,7 @@ static_assert(b32z_lut.from_b32z('w') == 20 && b32z_lut.from_b32z('T') == 17 && 
 /// Converts bytes into a base32z encoded character sequence.
 template <typename InputIt, typename OutputIt>
 void to_base32z(InputIt begin, InputIt end, OutputIt out) {
-    static_assert(sizeof(*begin) == 1, "to_base32z requires chars/bytes");
+    static_assert(sizeof(decltype(*begin)) == 1, "to_base32z requires chars/bytes");
     int bits = 0; // Tracks the number of unconsumed bits held in r, will always be in [0, 4]
     std::uint_fast16_t r = 0;
     while (begin != end) {
@@ -113,9 +113,9 @@ inline std::string to_base32z(std::string_view s) { return to_base32z<>(s); }
 /// Returns true if all elements in the range are base32z characters
 template <typename It>
 constexpr bool is_base32z(It begin, It end) {
-    static_assert(sizeof(*begin) == 1, "is_base32z requires chars/bytes");
+    static_assert(sizeof(decltype(*begin)) == 1, "is_base32z requires chars/bytes");
     for (; begin != end; ++begin) {
-        auto c = *begin;
+        auto c = static_cast<unsigned char>(*begin);
         if (detail::b32z_lut.from_b32z(c) == 0 && !(c == 'y' || c == 'Y'))
             return false;
     }
@@ -140,15 +140,14 @@ constexpr bool is_base32z(std::string_view s) { return is_base32z<>(s); }
 /// are): which means "yy", "yb", "yyy", "yy9", "yd", etc. all decode to the same 1-byte value "\0".
 template <typename InputIt, typename OutputIt>
 void from_base32z(InputIt begin, InputIt end, OutputIt out) {
-    using Char = decltype(*begin);
-    static_assert(sizeof(Char) == 1, "from_base32z requires chars/bytes");
+    static_assert(sizeof(decltype(*begin)) == 1, "from_base32z requires chars/bytes");
     uint_fast16_t curr = 0;
     int bits = 0; // number of bits we've loaded into val; we always keep this < 8.
     while (begin != end) {
-        curr = curr << 5 | detail::b32z_lut.from_b32z(*begin++);
+        curr = curr << 5 | detail::b32z_lut.from_b32z(static_cast<unsigned char>(*begin++));
         if (bits >= 3) {
             bits -= 3; // Added 5, removing 8
-            *out++ = static_cast<Char>(curr >> bits);
+            *out++ = static_cast<uint8_t>(curr >> bits);
             curr &= (1 << bits) - 1;
         } else {
             bits += 5;

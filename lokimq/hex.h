@@ -63,10 +63,10 @@ static_assert(hex_lut.from_hex('a') == 10 && hex_lut.from_hex('F') == 15 && hex_
 /// Creates hex digits from a character sequence.
 template <typename InputIt, typename OutputIt>
 void to_hex(InputIt begin, InputIt end, OutputIt out) {
-    static_assert(sizeof(*begin) == 1, "to_hex requires chars/bytes");
+    static_assert(sizeof(decltype(*begin)) == 1, "to_hex requires chars/bytes");
     for (; begin != end; ++begin) {
-        auto c = *begin;
-        *out++ = detail::hex_lut.to_hex((c & 0xf0) >> 4);
+        uint8_t c = static_cast<uint8_t>(*begin);
+        *out++ = detail::hex_lut.to_hex(c >> 4);
         *out++ = detail::hex_lut.to_hex(c & 0x0f);
     }
 }
@@ -84,9 +84,9 @@ inline std::string to_hex(std::string_view s) { return to_hex<>(s); }
 /// Returns true if all elements in the range are hex characters
 template <typename It>
 constexpr bool is_hex(It begin, It end) {
-    static_assert(sizeof(*begin) == 1, "is_hex requires chars/bytes");
+    static_assert(sizeof(decltype(*begin)) == 1, "is_hex requires chars/bytes");
     for (; begin != end; ++begin) {
-        if (detail::hex_lut.from_hex(*begin) == 0 && *begin != '0')
+        if (detail::hex_lut.from_hex(static_cast<unsigned char>(*begin)) == 0 && static_cast<unsigned char>(*begin) != '0')
             return false;
     }
     return true;
@@ -115,7 +115,7 @@ void from_hex(InputIt begin, InputIt end, OutputIt out) {
     while (begin != end) {
         auto a = *begin++;
         auto b = *begin++;
-        *out++ = from_hex_pair(a, b);
+        *out++ = from_hex_pair(static_cast<unsigned char>(a), static_cast<unsigned char>(b));
     }
 }
 

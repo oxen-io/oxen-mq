@@ -27,6 +27,17 @@ TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
 
     REQUIRE( lokimq::from_hex(pk_hex) == pk );
     REQUIRE( lokimq::to_hex(pk) == pk_hex );
+
+    std::vector<std::byte> bytes{{std::byte{0xff}, std::byte{0x42}, std::byte{0x12}, std::byte{0x34}}};
+    std::basic_string_view<std::byte> b{bytes.data(), bytes.size()};
+    REQUIRE( lokimq::to_hex(b) == "ff421234"s );
+
+    bytes.resize(8);
+    bytes[0] = std::byte{'f'}; bytes[1] = std::byte{'f'}; bytes[2] = std::byte{'4'}; bytes[3] = std::byte{'2'};
+    bytes[4] = std::byte{'1'}; bytes[5] = std::byte{'2'}; bytes[6] = std::byte{'3'}; bytes[7] = std::byte{'4'};
+    std::basic_string_view<std::byte> hex_bytes{bytes.data(), bytes.size()};
+    REQUIRE( lokimq::is_hex(hex_bytes) );
+    REQUIRE( lokimq::from_hex(hex_bytes) == "\xff\x42\x12\x34" );
 }
 
 TEST_CASE("base32z encoding/decoding", "[encoding][decoding][base32z]") {
@@ -67,6 +78,16 @@ TEST_CASE("base32z encoding/decoding", "[encoding][decoding][base32z]") {
 
     REQUIRE( lokimq::to_base32z(pk) == pk_b32z );
     REQUIRE( lokimq::from_base32z(pk_b32z) == pk );
+
+    std::vector<std::byte> bytes{{std::byte{0}, std::byte{255}}};
+    std::basic_string_view<std::byte> b{bytes.data(), bytes.size()};
+    REQUIRE( lokimq::to_base32z(b) == "yd9o" );
+
+    bytes.resize(4);
+    bytes[0] = std::byte{'y'}; bytes[1] = std::byte{'d'}; bytes[2] = std::byte{'9'}; bytes[3] = std::byte{'o'};
+    std::basic_string_view<std::byte> b32_bytes{bytes.data(), bytes.size()};
+    REQUIRE( lokimq::is_base32z(b32_bytes) );
+    REQUIRE( lokimq::from_base32z(b32_bytes) == "\x00\xff"sv );
 }
 
 TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
@@ -139,4 +160,14 @@ TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
 
     REQUIRE( lokimq::to_base64(pk) == pk_b64 );
     REQUIRE( lokimq::from_base64(pk_b64) == pk );
+
+    std::vector<std::byte> bytes{{std::byte{0}, std::byte{255}}};
+    std::basic_string_view<std::byte> b{bytes.data(), bytes.size()};
+    REQUIRE( lokimq::to_base64(b) == "AP8=" );
+
+    bytes.resize(4);
+    bytes[0] = std::byte{'/'}; bytes[1] = std::byte{'w'}; bytes[2] = std::byte{'A'}; bytes[3] = std::byte{'='};
+    std::basic_string_view<std::byte> b64_bytes{bytes.data(), bytes.size()};
+    REQUIRE( lokimq::is_base64(b64_bytes) );
+    REQUIRE( lokimq::from_base64(b64_bytes) == "\xff\x00"sv );
 }
