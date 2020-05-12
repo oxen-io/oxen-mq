@@ -174,7 +174,7 @@ zmq::socket_t& LokiMQ::get_control_socket() {
         return *last.second;
     }
 
-    std::lock_guard<std::mutex> lock{control_sockets_mutex};
+    std::lock_guard lock{control_sockets_mutex};
     if (proxy_shutting_down)
         throw std::runtime_error("Unable to obtain LokiMQ control socket: proxy thread is shutting down");
     auto control = std::make_shared<zmq::socket_t>(context, zmq::socket_type::dealer);
