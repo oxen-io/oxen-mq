@@ -116,14 +116,19 @@ void to_base64(InputIt begin, InputIt end, OutputIt out) {
     }
 }
 
-/// Creates a base64 string from an iterable, std::string-like object
-template <typename CharT>
-std::string to_base64(std::basic_string_view<CharT> s) {
+/// Creates and returns a base64 string from an iterator pair of a character sequence
+template <typename It>
+std::string to_base64(It begin, It end) {
     std::string base64;
-    base64.reserve((s.size() + 2) / 3 * 4);
-    to_base64(s.begin(), s.end(), std::back_inserter(base64));
+    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>)
+        base64.reserve((std::distance(begin, end) + 2) / 3 * 4); // bytes*4/3, rounded up to the next multiple of 4
+    to_base64(begin, end, std::back_inserter(base64));
     return base64;
 }
+
+/// Creates a base64 string from an iterable, std::string-like object
+template <typename CharT>
+std::string to_base64(std::basic_string_view<CharT> s) { return to_base64(s.begin(), s.end()); }
 inline std::string to_base64(std::string_view s) { return to_base64<>(s); }
 
 /// Returns true if the range is a base64 encoded value; we allow (but do not require) '=' padding,
@@ -193,15 +198,21 @@ void from_base64(InputIt begin, InputIt end, OutputIt out) {
     // character here instead of 5).
 }
 
+/// Converts base64 digits from a iterator pair of characters into a std::string of bytes.
+/// Undefined behaviour if any characters are not valid base64 characters.
+template <typename It>
+std::string from_base64(It begin, It end) {
+    std::string bytes;
+    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>)
+        bytes.reserve(std::distance(begin, end)*6 / 8); // each digit carries 6 bits; this may overallocate by 1-2 bytes due to padding
+    from_base64(begin, end, std::back_inserter(bytes));
+    return bytes;
+}
+
 /// Converts base64 digits from a std::string-like object into a std::string of bytes.  Undefined
 /// behaviour if any characters are not valid base64 characters.
 template <typename CharT>
-std::string from_base64(std::basic_string_view<CharT> s) {
-    std::string bytes;
-    bytes.reserve(s.size()*6 / 8);
-    from_base64(s.begin(), s.end(), std::back_inserter(bytes));
-    return bytes;
-}
+std::string from_base64(std::basic_string_view<CharT> s) { return from_base64(s.begin(), s.end()); }
 inline std::string from_base64(std::string_view s) { return from_base64<>(s); }
 
 }

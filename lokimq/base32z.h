@@ -100,14 +100,19 @@ void to_base32z(InputIt begin, InputIt end, OutputIt out) {
         *out++ = detail::b32z_lut.to_b32z(r << (5 - bits));
 }
 
-/// Creates a base32z string from an iterable, std::string-like object
-template <typename CharT>
-std::string to_base32z(std::basic_string_view<CharT> s) {
+/// Creates a base32z string from an iterator pair of a byte sequence.
+template <typename It>
+std::string to_base32z(It begin, It end) {
     std::string base32z;
-    base32z.reserve((s.size()*8 + 4) / 5); // == bytes*8/5, rounded up.
-    to_base32z(s.begin(), s.end(), std::back_inserter(base32z));
+    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>)
+        base32z.reserve((std::distance(begin, end)*8 + 4) / 5); // == bytes*8/5, rounded up.
+    to_base32z(begin, end, std::back_inserter(base32z));
     return base32z;
 }
+
+/// Creates a base32z string from an iterable, std::string-like object
+template <typename CharT>
+std::string to_base32z(std::basic_string_view<CharT> s) { return to_base32z(s.begin(), s.end()); }
 inline std::string to_base32z(std::string_view s) { return to_base32z<>(s); }
 
 /// Returns true if all elements in the range are base32z characters
@@ -177,15 +182,21 @@ void from_base32z(InputIt begin, InputIt end, OutputIt out) {
     // character you added isn't there by not doing anything here.
 }
 
+/// Convert a base32z sequence into a std::string of bytes.  Undefined behaviour if any characters
+/// are not valid (case-insensitive) base32z characters.
+template <typename It>
+std::string from_base32z(It begin, It end) {
+    std::string bytes;
+    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>)
+        bytes.reserve((std::distance(begin, end)*5 + 7) / 8); // == chars*5/8, rounded up.
+    from_base32z(begin, end, std::back_inserter(bytes));
+    return bytes;
+}
+
 /// Converts base32z digits from a std::string-like object into a std::string of bytes.  Undefined
 /// behaviour if any characters are not valid (case-insensitive) base32z characters.
 template <typename CharT>
-std::string from_base32z(std::basic_string_view<CharT> s) {
-    std::string bytes;
-    bytes.reserve((s.size()*5 + 7) / 8); // == chars*5/8, rounded up.
-    from_base32z(s.begin(), s.end(), std::back_inserter(bytes));
-    return bytes;
-}
+std::string from_base32z(std::basic_string_view<CharT> s) { return from_base32z(s.begin(), s.end()); }
 inline std::string from_base32z(std::string_view s) { return from_base32z<>(s); }
 
 }

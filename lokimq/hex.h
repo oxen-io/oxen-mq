@@ -71,14 +71,19 @@ void to_hex(InputIt begin, InputIt end, OutputIt out) {
     }
 }
 
-/// Creates a hex string from an iterable, std::string-like object
-template <typename CharT>
-std::string to_hex(std::basic_string_view<CharT> s) {
+/// Creates a string of hex digits from a character sequence iterator pair
+template <typename It>
+std::string to_hex(It begin, It end) {
     std::string hex;
-    hex.reserve(s.size() * 2);
-    to_hex(s.begin(), s.end(), std::back_inserter(hex));
+    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>)
+        hex.reserve(2 * std::distance(begin, end));
+    to_hex(begin, end, std::back_inserter(hex));
     return hex;
 }
+
+/// Creates a hex string from an iterable, std::string-like object
+template <typename CharT>
+std::string to_hex(std::basic_string_view<CharT> s) { return to_hex(s.begin(), s.end()); }
 inline std::string to_hex(std::string_view s) { return to_hex<>(s); }
 
 /// Returns true if all elements in the range are hex characters
@@ -119,15 +124,21 @@ void from_hex(InputIt begin, InputIt end, OutputIt out) {
     }
 }
 
+/// Converts a sequence of hex digits to a string of bytes and returns it.  Undefined behaviour if
+/// the input sequence is not an even-length sequence of [0-9a-fA-F] characters.
+template <typename It>
+std::string from_hex(It begin, It end) {
+    std::string bytes;
+    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>)
+        bytes.reserve(std::distance(begin, end) / 2);
+    from_hex(begin, end, std::back_inserter(bytes));
+    return bytes;
+}
+
 /// Converts hex digits from a std::string-like object into a std::string of bytes.  Undefined
 /// behaviour if any characters are not in [0-9a-fA-F] or if the input sequence length is not even.
 template <typename CharT>
-std::string from_hex(std::basic_string_view<CharT> s) {
-    std::string bytes;
-    bytes.reserve(s.size() / 2);
-    from_hex(s.begin(), s.end(), std::back_inserter(bytes));
-    return bytes;
-}
+std::string from_hex(std::basic_string_view<CharT> s) { return from_hex(s.begin(), s.end()); }
 inline std::string from_hex(std::string_view s) { return from_hex<>(s); }
 
 }

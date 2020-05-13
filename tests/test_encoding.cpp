@@ -18,6 +18,8 @@ TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
     lokimq::to_hex(chars.begin(), chars.end(), out.begin());
     REQUIRE( out == expected );
 
+    REQUIRE( lokimq::to_hex(chars.begin(), chars.end()) == "010a64fe" );
+
     REQUIRE( lokimq::from_hex("12345678ffEDbca9") == "\x12\x34\x56\x78\xff\xed\xbc\xa9"s );
 
     REQUIRE( lokimq::is_hex("1234567890abcdefABCDEF1234567890abcdefABCDEF") );
@@ -27,6 +29,8 @@ TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
 
     REQUIRE( lokimq::from_hex(pk_hex) == pk );
     REQUIRE( lokimq::to_hex(pk) == pk_hex );
+
+    REQUIRE( lokimq::from_hex(pk_hex.begin(), pk_hex.end()) == pk );
 
     std::vector<std::byte> bytes{{std::byte{0xff}, std::byte{0x42}, std::byte{0x12}, std::byte{0x34}}};
     std::basic_string_view<std::byte> b{bytes.data(), bytes.size()};
@@ -77,7 +81,15 @@ TEST_CASE("base32z encoding/decoding", "[encoding][decoding][base32z]") {
     REQUIRE( lokimq::to_base32z(lokimq::from_base32z("ybndrf4"s)) == "ybndrfa" );
 
     REQUIRE( lokimq::to_base32z(pk) == pk_b32z );
+    REQUIRE( lokimq::to_base32z(pk.begin(), pk.end()) == pk_b32z );
     REQUIRE( lokimq::from_base32z(pk_b32z) == pk );
+    REQUIRE( lokimq::from_base32z(pk_b32z.begin(), pk_b32z.end()) == pk );
+
+    std::string pk_b32z_again, pk_again;
+    lokimq::to_base32z(pk.begin(), pk.end(), std::back_inserter(pk_b32z_again));
+    lokimq::from_base32z(pk_b32z.begin(), pk_b32z.end(), std::back_inserter(pk_again));
+    REQUIRE( pk_b32z_again == pk_b32z );
+    REQUIRE( pk_again == pk );
 
     std::vector<std::byte> bytes{{std::byte{0}, std::byte{255}}};
     std::basic_string_view<std::byte> b{bytes.data(), bytes.size()};
@@ -159,7 +171,15 @@ TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
             "any carnal pleasure.");
 
     REQUIRE( lokimq::to_base64(pk) == pk_b64 );
+    REQUIRE( lokimq::to_base64(pk.begin(), pk.end()) == pk_b64 );
     REQUIRE( lokimq::from_base64(pk_b64) == pk );
+    REQUIRE( lokimq::from_base64(pk_b64.begin(), pk_b64.end()) == pk );
+
+    std::string pk_b64_again, pk_again;
+    lokimq::to_base64(pk.begin(), pk.end(), std::back_inserter(pk_b64_again));
+    lokimq::from_base64(pk_b64.begin(), pk_b64.end(), std::back_inserter(pk_again));
+    REQUIRE( pk_b64_again == pk_b64 );
+    REQUIRE( pk_again == pk );
 
     std::vector<std::byte> bytes{{std::byte{0}, std::byte{255}}};
     std::basic_string_view<std::byte> b{bytes.data(), bytes.size()};
