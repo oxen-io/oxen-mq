@@ -123,6 +123,7 @@ The connection ID generally has two possible values:
   places to get one, such as from the `Message` object passed to a command: see the following
   section).
 
+    ```C++
     // Send to a service node, establishing a connection if necessary:
     std::string my_sn = ...; // 32-byte pubkey of a known SN
     lmq.send(my_sn, "sn.explode", "{ \"seconds\": 30 }");
@@ -137,6 +138,7 @@ The connection ID generally has two possible values:
         else
             std::cout << "Timeout fetching height!";
     });
+    ```
 
 ## Command invocation
 
