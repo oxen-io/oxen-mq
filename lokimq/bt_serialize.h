@@ -26,22 +26,18 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <iostream>
-
 #pragma once
 
 #include <vector>
-#include <list>
-#include <unordered_map>
 #include <algorithm>
 #include <functional>
 #include <cstring>
 #include <ostream>
 #include <sstream>
 #include <string_view>
-#include "mapbox/variant.hpp"
 #include <variant>
 
+#include "bt_value.h"
 
 namespace lokimq {
 
@@ -55,16 +51,17 @@ using namespace std::literals;
  *
  * On the C++ side, on input we allow strings, integral types, STL-like containers of these types,
  * and STL-like containers of pairs with a string first value and any of these types as second
- * value.  We also accept std::variants (if compiled with std::variant support, i.e. in C++17 mode)
- * that contain any of these, and mapbox::util::variants (the internal type used for its recursive
- * support).
+ * value.  We also accept std::variants of these.
  *
  * One minor deviation from BEP-0003 is that we don't support serializing values that don't fit in a
  * 64-bit integer (BEP-0003 specifies arbitrary precision integers).
  *
- * On deserialization we can either deserialize into a mapbox::util::variant that supports everything, or
- * we can fill a container of your given type (though this fails if the container isn't compatible
- * with the deserialized data).
+ * On deserialization we can either deserialize into a special bt_value type supports everything
+ * (with arbitrary nesting), or we can fill a container of your given type (though this fails if the
+ * container isn't compatible with the deserialized data).
+ *
+ * There is also a stream deserialization that allows you to deserialize without needing heap
+ * allocations (as long as you know the precise data structure layout).
  */
 
 /// Exception throw if deserialization fails
@@ -81,36 +78,6 @@ class bt_deserialize_invalid_type : public bt_deserialize_invalid {
     using bt_deserialize_invalid::bt_deserialize_invalid;
 };
 
-class bt_list;
-class bt_dict;
-
-/// Special type wrapper for storing a uint64_t value that may need to be larger than an int64_t.
-/// You *can* shove a uint64_t directly into a bt_value, but it will end up on the wire as its
-/// 2s-complement int64_t value; using this wrapper instead allows you to force a 64-bit positive
-/// integer onto the wire.
-struct bt_u64 { uint64_t val; explicit bt_u64(uint64_t val) : val{val} {} };
-
-/// Recursive generic type that can fully represent everything valid for a BT serialization.
-using bt_value = mapbox::util::variant<
-    std::string,
-    std::string_view,
-    int64_t,
-    bt_u64,
-    mapbox::util::recursive_wrapper<bt_list>,
-    mapbox::util::recursive_wrapper<bt_dict>
->;
-
-/// Very thin wrapper around a std::list<bt_value> that holds a list of generic values (though *any*
-/// compatible data type can be used).
-class bt_list : public std::list<bt_value> {
-    using std::list<bt_value>::list;
-};
-/// Very thin wrapper around a std::unordered_map<bt_value> that holds a list of string -> generic
-/// value pairs (though *any* compatible data type can be used).
-class bt_dict : public std::unordered_map<std::string, bt_value> {
-    using std::unordered_map<std::string, bt_value>::unordered_map;
-};
-
 namespace detail {
 
 /// Reads digits into an unsigned 64-bit int.
@@ -121,10 +88,10 @@ inline uint64_t extract_unsigned(std::string_view&& s) { return extract_unsigned
 
 // Fallback base case; we only get here if none of the partial specializations below work
 template <typename T, typename SFINAE = void>
-struct bt_serialize { static_assert(!std::is_same<T, T>::value, "Cannot serialize T: unsupported type for bt serialization"); };
+struct bt_serialize { static_assert(!std::is_same_v<T, T>, "Cannot serialize T: unsupported type for bt serialization"); };
 
 template <typename T, typename SFINAE = void>
-struct bt_deserialize { static_assert(!std::is_same<T, T>::value, "Cannot deserialize T: unsupported type for bt deserialization"); };
+struct bt_deserialize { static_assert(!std::is_same_v<T, T>, "Cannot deserialize T: unsupported type for bt deserialization"); };
 
 /// Checks that we aren't at the end of a string view and throws if we are.
 inline void bt_need_more(const std::string_view &s) {
@@ -132,61 +99,54 @@ inline void bt_need_more(const std::string_view &s) {
         throw bt_deserialize_invalid{"Unexpected end of string while deserializing"};
 }
 
-union maybe_signed_int64_t { int64_t i64; uint64_t u64; };
-
 /// Deserializes a signed or unsigned 64-bit integer from a string.  Sets the second bool to true
-/// iff the value is int64_t because a negative value was read.  Throws an exception if the read
-/// value doesn't fit in a int64_t (if negative) or a uint64_t (if positive).  Removes consumed
-/// characters from the string_view.
-std::pair<maybe_signed_int64_t, bool> bt_deserialize_integer(std::string_view& s);
+/// iff the value read was negative, false if positive; in either case the unsigned value is return
+/// in .first.  Throws an exception if the read value doesn't fit in a int64_t (if negative) or a
+/// uint64_t (if positive).  Removes consumed characters from the string_view.
+std::pair<uint64_t, bool> bt_deserialize_integer(std::string_view& s);
 
 /// Integer specializations
 template <typename T>
-struct bt_serialize<T, std::enable_if_t<std::is_integral<T>::value>> {
+struct bt_serialize<T, std::enable_if_t<std::is_integral_v<T>>> {
     static_assert(sizeof(T) <= sizeof(uint64_t), "Serialization of integers larger than uint64_t is not supported");
     void operator()(std::ostream &os, const T &val) {
         // Cast 1-byte types to a larger type to avoid iostream interpreting them as single characters
-        using output_type = std::conditional_t<(sizeof(T) > 1), T, std::conditional_t<std::is_signed<T>::value, int, unsigned>>;
+        using output_type = std::conditional_t<(sizeof(T) > 1), T, std::conditional_t<std::is_signed_v<T>, int, unsigned>>;
         os << 'i' << static_cast<output_type>(val) << 'e';
     }
 };
 
 template <typename T>
-struct bt_deserialize<T, std::enable_if_t<std::is_integral<T>::value>> {
+struct bt_deserialize<T, std::enable_if_t<std::is_integral_v<T>>> {
     void operator()(std::string_view& s, T &val) {
         constexpr uint64_t umax = static_cast<uint64_t>(std::numeric_limits<T>::max());
-        constexpr int64_t smin = static_cast<int64_t>(std::numeric_limits<T>::min()),
-                          smax = static_cast<int64_t>(std::numeric_limits<T>::max());
+        constexpr int64_t smin = static_cast<int64_t>(std::numeric_limits<T>::min());
 
-        auto read = bt_deserialize_integer(s);
-        if (std::is_signed<T>::value) {
-            if (!read.second) { // read a positive value
-                if (read.first.u64 > umax)
-                    throw bt_deserialize_invalid("Integer deserialization failed: found too-large value " + std::to_string(read.first.u64) + " > " + std::to_string(umax));
-                val = static_cast<T>(read.first.u64);
+        auto [magnitude, negative] = bt_deserialize_integer(s);
+
+        if (std::is_signed_v<T>) {
+            if (!negative) {
+                if (magnitude > umax)
+                    throw bt_deserialize_invalid("Integer deserialization failed: found too-large value " + std::to_string(magnitude) + " > " + std::to_string(umax));
+                val = static_cast<T>(magnitude);
             } else {
-                bool oob = read.first.i64 < smin || read.first.i64 > smax;
-                if (sizeof(T) < sizeof(int64_t) && oob)
-                    throw bt_deserialize_invalid("Integer deserialization failed: found out-of-range value " + std::to_string(read.first.i64) + " not in [" + std::to_string(smin) + "," + std::to_string(smax) + "]");
-                val = static_cast<T>(read.first.i64);
+                auto sval = -static_cast<int64_t>(magnitude);
+                if (!std::is_same_v<T, int64_t> && sval < smin)
+                    throw bt_deserialize_invalid("Integer deserialization failed: found too-low value " + std::to_string(sval) + " < " + std::to_string(smin));
+                val = static_cast<T>(sval);
             }
         } else {
-            if (read.second)
-                throw bt_deserialize_invalid("Integer deserialization failed: found negative value " + std::to_string(read.first.i64) + " but type is unsigned");
-            if (sizeof(T) < sizeof(uint64_t) && read.first.u64 > umax)
-                throw bt_deserialize_invalid("Integer deserialization failed: found too-large value " + std::to_string(read.first.u64) + " > " + std::to_string(umax));
-            val = static_cast<T>(read.first.u64);
+            if (negative)
+                throw bt_deserialize_invalid("Integer deserialization failed: found negative value -" + std::to_string(magnitude) + " but type is unsigned");
+            if (!std::is_same_v<T, uint64_t> && magnitude > umax)
+                throw bt_deserialize_invalid("Integer deserialization failed: found too-large value " + std::to_string(magnitude) + " > " + std::to_string(umax));
+            val = static_cast<T>(magnitude);
         }
     }
 };
 
 extern template struct bt_deserialize<int64_t>;
 extern template struct bt_deserialize<uint64_t>;
-
-template<>
-struct bt_serialize<bt_u64> { void operator()(std::ostream& os, bt_u64 val) { bt_serialize<uint64_t>{}(os, val.val); } };
-template<>
-struct bt_deserialize<bt_u64> { void operator()(std::string_view& s, bt_u64& val) { bt_deserialize<uint64_t>{}(s, val.val); } };
 
 template <>
 struct bt_serialize<std::string_view> {
@@ -219,37 +179,47 @@ struct bt_serialize<char[N]> {
 
 /// Partial dict validity; we don't check the second type for serializability, that will be handled
 /// via the base case static_assert if invalid.
-template <typename T, typename = void> struct is_bt_input_dict_container : std::false_type {};
+template <typename T, typename = void> struct is_bt_input_dict_container_impl : std::false_type {};
 template <typename T>
-struct is_bt_input_dict_container<T, std::enable_if_t<
-    std::is_same<std::string, std::remove_cv_t<typename T::value_type::first_type>>::value,
+struct is_bt_input_dict_container_impl<T, std::enable_if_t<
+    std::is_same_v<std::string, std::remove_cv_t<typename T::value_type::first_type>> ||
+    std::is_same_v<std::string_view, std::remove_cv_t<typename T::value_type::first_type>>,
     std::void_t<typename T::const_iterator /* is const iterable */,
            typename T::value_type::second_type /* has a second type */>>>
 : std::true_type {};
 
 /// Determines whether the type looks like something we can insert into (using `v.insert(v.end(), x)`)
-template <typename T, typename = void> struct is_bt_insertable : std::false_type {};
+template <typename T, typename = void> struct is_bt_insertable_impl : std::false_type {};
 template <typename T>
-struct is_bt_insertable<T,
+struct is_bt_insertable_impl<T,
     std::void_t<decltype(std::declval<T>().insert(std::declval<T>().end(), std::declval<typename T::value_type>()))>>
 : std::true_type {};
+template <typename T>
+constexpr bool is_bt_insertable = is_bt_insertable_impl<T>::value;
 
 /// Determines whether the given type looks like a compatible map (i.e. has std::string keys) that
 /// we can insert into.
-template <typename T, typename = void> struct is_bt_output_dict_container : std::false_type {};
+template <typename T, typename = void> struct is_bt_output_dict_container_impl : std::false_type {};
 template <typename T>
-struct is_bt_output_dict_container<T, std::enable_if_t<
-    std::is_same<std::string, std::remove_cv_t<typename T::key_type>>::value &&
-    is_bt_insertable<T>::value,
+struct is_bt_output_dict_container_impl<T, std::enable_if_t<
+    std::is_same_v<std::string, std::remove_cv_t<typename T::value_type::first_type>> && is_bt_insertable<T>,
     std::void_t<typename T::value_type::second_type /* has a second type */>>>
 : std::true_type {};
 
+template <typename T>
+constexpr bool is_bt_output_dict_container = is_bt_output_dict_container_impl<T>::value;
+template <typename T>
+constexpr bool is_bt_input_dict_container = is_bt_output_dict_container_impl<T>::value;
+
+// Sanity checks:
+static_assert(is_bt_input_dict_container<bt_dict>);
+static_assert(is_bt_output_dict_container<bt_dict>);
 
 /// Specialization for a dict-like container (such as an unordered_map).  We accept anything for a
 /// dict that is const iterable over something that looks like a pair with std::string for first
 /// value type.  The value (i.e. second element of the pair) also must be serializable.
 template <typename T>
-struct bt_serialize<T, std::enable_if_t<is_bt_input_dict_container<T>::value>> {
+struct bt_serialize<T, std::enable_if_t<is_bt_input_dict_container<T>>> {
     using second_type = typename T::value_type::second_type;
     using ref_pair = std::reference_wrapper<const typename T::value_type>;
     void operator()(std::ostream &os, const T &dict) {
@@ -268,7 +238,7 @@ struct bt_serialize<T, std::enable_if_t<is_bt_input_dict_container<T>::value>> {
 };
 
 template <typename T>
-struct bt_deserialize<T, std::enable_if_t<is_bt_output_dict_container<T>::value>> {
+struct bt_deserialize<T, std::enable_if_t<is_bt_output_dict_container<T>>> {
     using second_type = typename T::value_type::second_type;
     void operator()(std::string_view& s, T& dict) {
         // Smallest dict is 2 bytes "de", for an empty dict.
@@ -295,26 +265,31 @@ struct bt_deserialize<T, std::enable_if_t<is_bt_output_dict_container<T>::value>
 
 /// Accept anything that looks iterable; value serialization validity isn't checked here (it fails
 /// via the base case static assert).
-template <typename T, typename = void> struct is_bt_input_list_container : std::false_type {};
+template <typename T, typename = void> struct is_bt_input_list_container_impl : std::false_type {};
 template <typename T>
-struct is_bt_input_list_container<T, std::enable_if_t<
-    !std::is_same<T, std::string>::value &&
-    !is_bt_input_dict_container<T>::value,
+struct is_bt_input_list_container_impl<T, std::enable_if_t<
+    !std::is_same_v<T, std::string> && !std::is_same_v<T, std::string_view> && !is_bt_input_dict_container<T>,
     std::void_t<typename T::const_iterator, typename T::value_type>>>
 : std::true_type {};
 
-template <typename T, typename = void> struct is_bt_output_list_container : std::false_type {};
+template <typename T, typename = void> struct is_bt_output_list_container_impl : std::false_type {};
 template <typename T>
-struct is_bt_output_list_container<T, std::enable_if_t<
-    !std::is_same<T, std::string>::value &&
-    !is_bt_output_dict_container<T>::value &&
-    is_bt_insertable<T>::value>>
+struct is_bt_output_list_container_impl<T, std::enable_if_t<
+    !std::is_same_v<T, std::string> && !is_bt_output_dict_container<T> && is_bt_insertable<T>>>
 : std::true_type {};
 
+template <typename T>
+constexpr bool is_bt_output_list_container = is_bt_output_list_container_impl<T>::value;
+template <typename T>
+constexpr bool is_bt_input_list_container = is_bt_input_list_container_impl<T>::value;
+
+// Sanity checks:
+static_assert(is_bt_input_list_container<bt_list>);
+static_assert(is_bt_output_list_container<bt_list>);
 
 /// List specialization
 template <typename T>
-struct bt_serialize<T, std::enable_if_t<is_bt_input_list_container<T>::value>> {
+struct bt_serialize<T, std::enable_if_t<is_bt_input_list_container<T>>> {
     void operator()(std::ostream& os, const T& list) {
         os << 'l';
         for (const auto &v : list)
@@ -323,7 +298,7 @@ struct bt_serialize<T, std::enable_if_t<is_bt_input_list_container<T>::value>> {
     }
 };
 template <typename T>
-struct bt_deserialize<T, std::enable_if_t<is_bt_output_list_container<T>::value>> {
+struct bt_deserialize<T, std::enable_if_t<is_bt_output_list_container<T>>> {
     using value_type = typename T::value_type;
     void operator()(std::string_view& s, T& list) {
         // Smallest list is 2 bytes "le", for an empty list.
@@ -355,9 +330,8 @@ public:
 };
 
 template <typename T>
-using is_bt_deserializable = std::integral_constant<bool,
-    std::is_same<T, std::string>::value || std::is_integral<T>::value ||
-    is_bt_output_dict_container<T>::value || is_bt_output_list_container<T>::value>;
+constexpr bool is_bt_deserializable = std::is_same_v<T, std::string> || std::is_integral_v<T> ||
+    is_bt_output_dict_container<T> || is_bt_output_list_container<T>;
 
 // General template and base case; this base will only actually be invoked when Ts... is empty,
 // which means we reached the end without finding any variant type capable of holding the value.
@@ -375,12 +349,12 @@ void bt_deserialize_try_variant(std::string_view& s, Variant& variant) {
 
 
 template <typename Variant, typename T, typename... Ts>
-struct bt_deserialize_try_variant_impl<std::enable_if_t<is_bt_deserializable<T>::value>, Variant, T, Ts...> {
+struct bt_deserialize_try_variant_impl<std::enable_if_t<is_bt_deserializable<T>>, Variant, T, Ts...> {
     void operator()(std::string_view& s, Variant& variant) {
-        if (    is_bt_output_list_container<T>::value ? s[0] == 'l' :
-                is_bt_output_dict_container<T>::value ? s[0] == 'd' :
-                std::is_integral<T>::value            ? s[0] == 'i' :
-                std::is_same<T, std::string>::value   ? s[0] >= '0' && s[0] <= '9' :
+        if (    is_bt_output_list_container<T> ? s[0] == 'l' :
+                is_bt_output_dict_container<T> ? s[0] == 'd' :
+                std::is_integral_v<T>          ? s[0] == 'i' :
+                std::is_same_v<T, std::string> ? s[0] >= '0' && s[0] <= '9' :
                 false) {
             T val;
             bt_deserialize<T>{}(s, val);
@@ -392,46 +366,35 @@ struct bt_deserialize_try_variant_impl<std::enable_if_t<is_bt_deserializable<T>:
 };
 
 template <typename Variant, typename T, typename... Ts>
-struct bt_deserialize_try_variant_impl<std::enable_if_t<!is_bt_deserializable<T>::value>, Variant, T, Ts...> {
+struct bt_deserialize_try_variant_impl<std::enable_if_t<!is_bt_deserializable<T>>, Variant, T, Ts...> {
     void operator()(std::string_view& s, Variant& variant) {
         // Unsupported deserialization type, skip it
         bt_deserialize_try_variant<Ts...>(s, variant);
     }
 };
 
-template <>
-struct bt_deserialize<bt_value, void> {
-    void operator()(std::string_view& s, bt_value& val);
-};
-
+// Serialization of a variant; all variant types must be bt-serializable.
 template <typename... Ts>
-struct bt_serialize<mapbox::util::variant<Ts...>> {
-    void operator()(std::ostream& os, const mapbox::util::variant<Ts...>& val) {
-        mapbox::util::apply_visitor(bt_serialize_visitor{os}, val);
-    }
-};
-
-template <typename... Ts>
-struct bt_deserialize<mapbox::util::variant<Ts...>> {
-    void operator()(std::string_view& s, mapbox::util::variant<Ts...>& val) {
-        bt_deserialize_try_variant<Ts...>(s, val);
-    }
-};
-
-
-/// C++17 std::variant support
-template <typename... Ts>
-struct bt_serialize<std::variant<Ts...>> {
+struct bt_serialize<std::variant<Ts...>, std::void_t<bt_serialize<Ts>...>> {
     void operator()(std::ostream &os, const std::variant<Ts...>& val) {
-        mapbox::util::apply_visitor(bt_serialize_visitor{os}, val);
+        std::visit(bt_serialize_visitor{os}, val);
     }
 };
 
+// Deserialization to a variant; at least one variant type must be bt-deserializble.
 template <typename... Ts>
-struct bt_deserialize<std::variant<Ts...>> {
+struct bt_deserialize<std::variant<Ts...>, std::enable_if_t<(is_bt_deserializable<Ts> || ...)>> {
     void operator()(std::string_view& s, std::variant<Ts...>& val) {
         bt_deserialize_try_variant<Ts...>(s, val);
     }
+};
+
+template <>
+struct bt_serialize<bt_value> : bt_serialize<bt_variant> {};
+
+template <>
+struct bt_deserialize<bt_value> {
+    void operator()(std::string_view& s, bt_value& val);
 };
 
 template <typename T>
@@ -493,7 +456,7 @@ std::string bt_serialize(const T &val) { return bt_serializer(val); }
 ///     int value;
 ///     bt_deserialize(encoded, value); // Sets value to 42
 ///
-template <typename T, std::enable_if_t<!std::is_const<T>::value, int> = 0>
+template <typename T, std::enable_if_t<!std::is_const_v<T>, int> = 0>
 void bt_deserialize(std::string_view s, T& val) {
     return detail::bt_deserialize<T>{}(s, val);
 }
@@ -511,8 +474,8 @@ T bt_deserialize(std::string_view s) {
     return val;
 }
 
-/// Deserializes the given value into a generic `bt_value` type (mapbox::util::variant) which is capable
-/// of holding all possible BT-encoded values (including recursion).
+/// Deserializes the given value into a generic `bt_value` type (wrapped std::variant) which is
+/// capable of holding all possible BT-encoded values (including recursion).
 ///
 /// Example:
 ///
@@ -525,28 +488,30 @@ inline bt_value bt_get(std::string_view s) {
     return bt_deserialize<bt_value>(s);
 }
 
-/// Helper functions to extract a value of some integral type from a bt_value which contains an
-/// integer.  Does range checking, throwing std::overflow_error if the stored value is outside the
-/// range of the target type.
+/// Helper functions to extract a value of some integral type from a bt_value which contains either
+/// a int64_t or uint64_t.  Does range checking, throwing std::overflow_error if the stored value is
+/// outside the range of the target type.
 ///
 /// Example:
 ///
 ///     std::string encoded = "i123456789e";
 ///     auto val = bt_get(encoded);
 ///     auto v = get_int<uint32_t>(val); // throws if the decoded value doesn't fit in a uint32_t
-template <typename IntType, std::enable_if_t<std::is_integral<IntType>::value, int> = 0>
+template <typename IntType, std::enable_if_t<std::is_integral_v<IntType>, int> = 0>
 IntType get_int(const bt_value &v) {
-    // It's highly unlikely that this code ever runs on a non-2s-complement architecture, but check
-    // at compile time if converting to a uint64_t (because while int64_t -> uint64_t is
-    // well-defined, uint64_t -> int64_t only does the right thing under 2's complement).
-    static_assert(!std::is_unsigned<IntType>::value || sizeof(IntType) != sizeof(int64_t) || -1 == ~0,
-            "Non 2s-complement architecture not supported!");
-    int64_t value = mapbox::util::get<int64_t>(v);
-    if (sizeof(IntType) < sizeof(int64_t)) {
+    if (std::holds_alternative<uint64_t>(v)) {
+        uint64_t value = std::get<uint64_t>(v);
+        if constexpr (!std::is_same_v<IntType, uint64_t>)
+            if (value > static_cast<uint64_t>(std::numeric_limits<IntType>::max()))
+                throw std::overflow_error("Unable to extract integer value: stored value is too large for the requested type");
+        return static_cast<IntType>(value);
+    }
+
+    int64_t value = std::get<int64_t>(v);
+    if constexpr (!std::is_same_v<IntType, int64_t>)
         if (value > static_cast<int64_t>(std::numeric_limits<IntType>::max())
                 || value < static_cast<int64_t>(std::numeric_limits<IntType>::min()))
             throw std::overflow_error("Unable to extract integer value: stored value is outside the range of the requested type");
-    }
     return static_cast<IntType>(value);
 }
 

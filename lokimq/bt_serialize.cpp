@@ -72,30 +72,26 @@ static_assert(std::numeric_limits<int64_t>::min() + std::numeric_limits<int64_t>
         static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) + uint64_t{1} == (uint64_t{1} << 63),
         "Non 2s-complement architecture not supported!");
 
-std::pair<maybe_signed_int64_t, bool> bt_deserialize_integer(std::string_view& s) {
+std::pair<uint64_t, bool> bt_deserialize_integer(std::string_view& s) {
     // Smallest possible encoded integer is 3 chars: "i0e"
     if (s.size() < 3) throw bt_deserialize_invalid("Deserialization failed: end of string found where integer expected");
     if (s[0] != 'i') throw bt_deserialize_invalid_type("Deserialization failed: expected 'i', found '"s + s[0] + '\'');
     s.remove_prefix(1);
-    std::pair<maybe_signed_int64_t, bool> result;
+    std::pair<uint64_t, bool> result;
     if (s[0] == '-') {
         result.second = true;
         s.remove_prefix(1);
     }
 
-    uint64_t uval = extract_unsigned(s);
+    result.first = extract_unsigned(s);
     if (s.empty())
         throw bt_deserialize_invalid("Integer deserialization failed: encountered end of string before integer was finished");
     if (s[0] != 'e')
         throw bt_deserialize_invalid("Integer deserialization failed: expected digit or 'e', found '"s + s[0] + '\'');
     s.remove_prefix(1);
-    if (result.second) { // negative
-        if (uval > (uint64_t{1} << 63))
-            throw bt_deserialize_invalid("Deserialization of integer failed: negative integer value is too large for a 64-bit signed int");
-        result.first.i64 = -uval;
-    } else {
-        result.first.u64 = uval;
-    }
+    if (result.second /*negative*/ && result.first > (uint64_t{1} << 63))
+        throw bt_deserialize_invalid("Deserialization of integer failed: negative integer value is too large for a 64-bit signed int");
+
     return result;
 }
 
@@ -119,8 +115,9 @@ void bt_deserialize<bt_value, void>::operator()(std::string_view& s, bt_value& v
             break;
         }
         case 'i': {
-            auto read = bt_deserialize_integer(s);
-            val = read.first.i64; // We only store an i64, but can get a u64 out of it via get<uint64_t>(val)
+            auto [magnitude, negative] = bt_deserialize_integer(s);
+            if (negative) val = -static_cast<int64_t>(magnitude);
+            else val = magnitude;
             break;
         }
         case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9': {

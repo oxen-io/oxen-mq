@@ -78,7 +78,6 @@ target_include_directories(lokimq
         $<INSTALL_INTERFACE:>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cppzmq>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/mapbox-variant/include>
 )
 
 target_compile_options(lokimq PRIVATE -Wall -Wextra -Werror)
@@ -149,17 +148,6 @@ install(
           ${CMAKE_CURRENT_BINARY_DIR}/lokimq/version.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq
 )
-option(LOKIMQ_INSTALL_MAPBOX_VARIANT "Install mapbox-variant headers with lokimq/ headers" ON)
-if(LOKIMQ_INSTALL_MAPBOX_VARIANT)
-  install(
-    FILES mapbox-variant/include/mapbox/variant.hpp
-          mapbox-variant/include/mapbox/variant_cast.hpp
-          mapbox-variant/include/mapbox/variant_io.hpp
-          mapbox-variant/include/mapbox/variant_visitor.hpp
-          mapbox-variant/include/mapbox/recursive_wrapper.hpp
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq/mapbox
-  )
-endif()
 
 option(LOKIMQ_INSTALL_CPPZMQ "Install cppzmq header with lokimq/ headers" ON)
 if(LOKIMQ_INSTALL_CPPZMQ)

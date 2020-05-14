@@ -1,10 +1,10 @@
 #pragma once
 #include "auth.h"
+#include "bt_value.h"
 #include <string_view>
 
 namespace lokimq {
 
-class bt_dict;
 struct ConnectionID;
 
 namespace detail {

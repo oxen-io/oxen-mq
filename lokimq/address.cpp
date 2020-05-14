@@ -3,6 +3,7 @@
 #include "base32z.h"
 #include "base64.h"
 #include <tuple>
+#include <limits>
 
 namespace lokimq {
 

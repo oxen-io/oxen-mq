@@ -59,7 +59,7 @@ void LokiMQ::worker_thread(unsigned int index) {
         catch (const bt_deserialize_invalid& e) {
             LMQ_LOG(warn, worker_id, " deserialization failed: ", e.what(), "; ignoring request");
         }
-        catch (const mapbox::util::bad_variant_access& e) {
+        catch (const std::bad_variant_access& e) {
             LMQ_LOG(warn, worker_id, " deserialization failed: found unexpected serialized type (", e.what(), "); ignoring request");
         }
         catch (const std::out_of_range& e) {
