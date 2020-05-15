@@ -201,6 +201,9 @@ LokiMQ::LokiMQ(
 
     LMQ_TRACE("Constructing LokiMQ, id=", object_id, ", this=", this);
 
+    if (sodium_init() == -1)
+        throw std::runtime_error{"libsodium initialization failed"};
+
     if (pubkey.empty() != privkey.empty()) {
         throw std::invalid_argument("LokiMQ construction failed: one (and only one) of pubkey/privkey is empty. Both must be specified, or both empty to generate a key.");
     } else if (pubkey.empty()) {
