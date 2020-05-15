@@ -107,9 +107,9 @@ TEST_CASE("outgoing auth level", "[commands][auth]") {
 
     client.PUBKEY_BASED_ROUTING_ID = false; // establishing multiple connections below, so we need unique routing ids
 
-    auto public_c = client.connect_remote(listen, [](...) {}, [](...) {}, server.get_pubkey());
-    auto basic_c = client.connect_remote(listen, [](...) {}, [](...) {}, server.get_pubkey(), AuthLevel::basic);
-    auto admin_c = client.connect_remote(listen, [](...) {}, [](...) {}, server.get_pubkey(), AuthLevel::admin);
+    auto public_c = client.connect_remote(listen, [](auto&&...) {}, [](auto&&...) {}, server.get_pubkey());
+    auto basic_c = client.connect_remote(listen, [](auto&&...) {}, [](auto&&...) {}, server.get_pubkey(), AuthLevel::basic);
+    auto admin_c = client.connect_remote(listen, [](auto&&...) {}, [](auto&&...) {}, server.get_pubkey(), AuthLevel::admin);
 
     client.send(public_c, "public.reflect", "public.hi");
     wait_for([&] { return public_hi == 1; });
@@ -193,8 +193,8 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
 
     server.start();
 
-    auto connect_success = [&](...) { auto l = catch_lock(); REQUIRE(true); };
-    auto connect_failure = [&](...) { auto l = catch_lock(); REQUIRE(false); };
+    auto connect_success = [&](auto&&...) { auto l = catch_lock(); REQUIRE(true); };
+    auto connect_failure = [&](auto&&...) { auto l = catch_lock(); REQUIRE(false); };
 
 
     std::set<std::string> backdoor_details;
