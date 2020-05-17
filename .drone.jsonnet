@@ -1,4 +1,4 @@
-local debian_pipeline(name, image, arch='amd64', deps='g++ libsodium-dev libzmq3-dev', cmake_extra='', extra_cmds=[], allow_fail=false) = {
+local debian_pipeline(name, image, arch='amd64', deps='g++ libsodium-dev libzmq3-dev', cmake_extra='', build_type='Release', extra_cmds=[], allow_fail=false) = {
     kind: 'pipeline',
     type: 'docker',
     name: name,
@@ -16,7 +16,7 @@ local debian_pipeline(name, image, arch='amd64', deps='g++ libsodium-dev libzmq3
                 'git submodule update --init --recursive',
                 'mkdir build',
                 'cd build',
-                'cmake .. -G Ninja -DCMAKE_CXX_FLAGS=-fdiagnostics-color=always -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ' + cmake_extra,
+                'cmake .. -G Ninja -DCMAKE_CXX_FLAGS=-fdiagnostics-color=always -DCMAKE_BUILD_TYPE='+build_type+' -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ' + cmake_extra,
                 'ninja -v',
                 './tests/tests --use-colour yes'
             ] + extra_cmds,
@@ -29,6 +29,7 @@ local debian_pipeline(name, image, arch='amd64', deps='g++ libsodium-dev libzmq3
     debian_pipeline("Ubuntu bionic (amd64)", "ubuntu:bionic", deps='libsodium-dev g++-8',
                     cmake_extra='-DCMAKE_C_COMPILER=gcc-8 -DCMAKE_CXX_COMPILER=g++-8'),
     debian_pipeline("Debian sid (amd64)", "debian:sid"),
+    debian_pipeline("Debian sid/Debug (amd64)", "debian:sid", build_type='Debug'),
     debian_pipeline("Debian sid/clang-10 (amd64)", "debian:sid", deps='clang-10 lld-10 libsodium-dev libzmq3-dev',
                     cmake_extra='-DCMAKE_C_COMPILER=clang-10 -DCMAKE_CXX_COMPILER=clang++-10 ' + std.join(' ', [
                         '-DCMAKE_'+type+'_LINKER_FLAGS=-fuse-ld=lld-10' for type in ['EXE','MODULE','SHARED','STATIC']])),
