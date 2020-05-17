@@ -3,6 +3,7 @@ local debian_pipeline(name, image, arch='amd64', deps='g++ libsodium-dev libzmq3
     type: 'docker',
     name: name,
     platform: { arch: arch },
+    environment: { CLICOLOR_FORCE: '1' }, // Lets color through ninja (1.9+)
     steps: [
         {
             name: 'build',
