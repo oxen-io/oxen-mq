@@ -4,6 +4,7 @@
 #include "base64.h"
 #include <tuple>
 #include <limits>
+#include <iostream>
 
 namespace lokimq {
 
@@ -327,5 +328,7 @@ address address::ipc_curve(std::string path, std::string pubkey) {
     a.pubkey = std::move(pubkey);
     return a;
 }
+
+std::ostream& operator<<(std::ostream& o, const address& a) { return o << a.full_address(); }
 
 }

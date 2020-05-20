@@ -183,6 +183,6 @@ struct address {
 };
 
 // Outputs address.full_address() when sent to an ostream.
-std::ostream& operator<<(std::ostream& o, const address& a) { return o << a.full_address(); }
+std::ostream& operator<<(std::ostream& o, const address& a);
 
 }
