@@ -40,4 +40,24 @@ local debian_pipeline(name, image, arch='amd64', deps='g++ libsodium-dev libzmq3
                     cmake_extra='-DCMAKE_C_COMPILER=gcc-8 -DCMAKE_CXX_COMPILER=g++-8'),
     debian_pipeline("Debian sid (ARM64)", "debian:sid", arch="arm64"),
     debian_pipeline("Debian buster (armhf)", "arm32v7/debian:buster", arch="arm64"),
+    {
+        kind: 'pipeline',
+        type: 'exec',
+        name: 'macOS (Catalina w/macports)',
+        platform: { os: 'darwin', arch: 'amd64' },
+        environment: { CLICOLOR_FORCE: '1' }, // Lets color through ninja (1.9+)
+        steps: [
+            {
+                name: 'build',
+                commands: [
+                    'git submodule update --init --recursive',
+                    'mkdir build',
+                    'cd build',
+                    'cmake .. -G Ninja -DCMAKE_CXX_FLAGS=-fcolor-diagnostics -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER_LAUNCHER=ccache',
+                    'ninja -v',
+                    './tests/tests --use-colour yes'
+                ],
+            }
+        ]
+    },
 ]
