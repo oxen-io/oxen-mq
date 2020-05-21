@@ -1,6 +1,6 @@
 # LokiMQ - zeromq-based message passing for Loki projects
 
-This C++14 library contains an abstraction layer around ZeroMQ to support integration with Loki
+This C++17 library contains an abstraction layer around ZeroMQ to support integration with Loki
 authentication, RPC, and message passing.  It is designed to be usable as the underlying
 communication mechanism of SN-to-SN communication ("quorumnet"), the RPC interface used by wallets
 and local daemon commands, communication channels between lokid and auxiliary services (storage
