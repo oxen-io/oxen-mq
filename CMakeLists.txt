@@ -126,6 +126,15 @@ endif()
 
 add_library(lokimq::lokimq ALIAS lokimq)
 
+find_package(pybind11)
+if(pybind11_FOUND)
+  message(STATUS "pybind11 v${pybind11_VERSION}")
+  add_subdirectory(pybind)
+else()
+  message(STATUS "did not find pybind11, not building python module")
+endif()
+
+
 export(
     TARGETS lokimq
     NAMESPACE lokimq::
