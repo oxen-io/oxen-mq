@@ -104,7 +104,6 @@ void LokiMQ::proxy_send(bt_dict_consumer data) {
     // connections open to that SN (e.g. one out + one in) so if one fails we can clean up that
     // connection and try the next one.
     bool retry = true, sent = false, nowarn = false;
-    std::unique_ptr<zmq::error_t> send_error;
     while (retry) {
         retry = false;
         zmq::socket_t *send_to;
