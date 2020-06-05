@@ -185,8 +185,8 @@ public:
     /// invocation of the jobs.
     ///
     /// \param job the callback
-    /// \param thread an optional TaggedThread on which this job must run
-    void add_job(std::function<R()> job, const TaggedThread* thread = nullptr) { 
+    /// \param thread an optional TaggedThreadID indicating a thread in which this job must run
+    void add_job(std::function<R()> job, std::optional<TaggedThreadID> thread = std::nullopt) {
         check_not_started();
         if (thread && thread->_id == -1)
             // There are some special case internal jobs where we allow this, but they use the
@@ -208,7 +208,7 @@ public:
     /// block for any reason.  This is only intended for the case where the completion job is so
     /// trivial that it will take less time than simply queuing the job to be executed by another
     /// thread.
-    void completion(CompletionFunc comp, const TaggedThread* thread = nullptr) {
+    void completion(CompletionFunc comp, std::optional<TaggedThreadID> thread = std::nullopt) {
         check_not_started();
         if (complete)
             throw std::logic_error("Completion function can only be set once");
