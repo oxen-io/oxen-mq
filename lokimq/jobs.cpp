@@ -146,10 +146,7 @@ TaggedThreadID LokiMQ::add_tagged_thread(std::string name, std::function<void()>
     run.worker_routing_id = "t" + std::to_string(run.worker_id);
     LMQ_TRACE("Created new tagged thread ", name, " with routing id ", run.worker_routing_id);
 
-    run.worker_thread = std::thread{[this, id=run.worker_id, name, init=std::move(init), start=std::move(start)] {
-        if (init) init();
-        return worker_thread(id, name, std::move(start));
-    }};
+    run.worker_thread = std::thread{&LokiMQ::worker_thread, this, run.worker_id, name, std::move(start)};
 
     return TaggedThreadID{static_cast<int>(run.worker_id)};
 }

@@ -5,6 +5,41 @@
 
 namespace lokimq {
 
+namespace {
+
+// Waits for a specific command or "QUIT" on the given socket.  Returns true if the command was
+// received.  If "QUIT" was received, replies with "QUITTING" on the socket and closes it, then
+// returns false.
+[[gnu::always_inline]] inline
+bool worker_wait_for(LokiMQ& lmq, zmq::socket_t& sock, std::vector<zmq::message_t>& parts, const std::string_view worker_id, const std::string_view expect) {
+    while (true) {
+        lmq.log(LogLevel::debug, __FILE__, __LINE__, "worker ", worker_id, " waiting for ", expect);
+        parts.clear();
+        recv_message_parts(sock, parts);
+        if (parts.size() != 1) {
+            lmq.log(LogLevel::error, __FILE__, __LINE__, "Internal error: worker ", worker_id, " received invalid ", parts.size(), "-part control msg");
+            continue;
+        }
+        auto command = view(parts[0]);
+        if (command == expect) {
+#ifndef NDEBUG
+            lmq.log(LogLevel::trace, __FILE__, __LINE__, "Worker ", worker_id, " received waited-for ", expect, " command");
+#endif
+            return true;
+        } else if (command == "QUIT"sv) {
+            lmq.log(LogLevel::debug, __FILE__, __LINE__, "Worker ", worker_id, " received QUIT command, shutting down");
+            detail::send_control(sock, "QUITTING");
+            sock.setsockopt<int>(ZMQ_LINGER, 1000);
+            sock.close();
+            return false;
+        } else {
+            lmq.log(LogLevel::error, __FILE__, __LINE__, "Internal error: worker ", worker_id, " received invalid command: `", command, "'");
+        }
+    }
+}
+
+}
+
 void LokiMQ::worker_thread(unsigned int index, std::optional<std::string> tagged, std::function<void()> start) {
     std::string routing_id = (tagged ? "t" : "w") + std::to_string(index); // for routing
     std::string_view worker_id{tagged ? *tagged : routing_id};              // for debug
@@ -23,6 +58,8 @@ void LokiMQ::worker_thread(unsigned int index, std::optional<std::string> tagged
     sock.setsockopt(ZMQ_ROUTING_ID, routing_id.data(), routing_id.size());
     LMQ_LOG(debug, "New worker thread ", worker_id, " (", routing_id, ") started");
     sock.connect(SN_ADDR_WORKERS);
+    if (tagged)
+        detail::send_control(sock, "STARTING");
 
     Message message{*this, 0, AuthLevel::none, ""s};
     std::vector<zmq::message_t> parts;
@@ -36,28 +73,9 @@ void LokiMQ::worker_thread(unsigned int index, std::optional<std::string> tagged
 
         waiting_for_command = true;
 
-        while (true) {
-            LMQ_TRACE("tagged worker ", worker_id, " waiting for startup signal");
-            recv_message_parts(sock, parts);
-            if (parts.size() != 1) {
-                LMQ_LOG(error, "Internal error: worker ", worker_id, " received invalid ", parts.size(), "-part startup msg");
-                continue;
-            }
-            auto command = view(parts[0]);
-            if (command == "START"sv) {
-                LMQ_LOG(debug, "Tagged worker ", worker_id, " received start signal, starting up");
-                if (start) start();
-                break;
-            } else if (command == "QUIT"sv) {
-                LMQ_LOG(debug, "Tagged worker ", worker_id, " shutting down");
-                detail::send_control(sock, "QUITTING");
-                sock.setsockopt<int>(ZMQ_LINGER, 1000);
-                sock.close();
-                return;
-            } else {
-                LMQ_LOG(error, "Internal error: worker ", worker_id, " received invalid command: `", command, "'");
-            }
-        }
+        if (!worker_wait_for(*this, sock, parts, worker_id, "START"sv))
+            return;
+        if (start) start();
     } else {
         // Otherwise for a regular worker we can only be started by an active main proxy thread
         // which will have preloaded our first job so we can start off right away.
@@ -68,28 +86,9 @@ void LokiMQ::worker_thread(unsigned int index, std::optional<std::string> tagged
     run_info& run = tagged ? std::get<run_info>(tagged_workers[index - 1]) : workers[index];
 
     while (true) {
-        while (waiting_for_command) {
-            LMQ_TRACE("worker ", worker_id, " waiting for command");
-            parts.clear();
-            recv_message_parts(sock, parts);
-
-            if (parts.size() != 1) {
-                LMQ_LOG(error, "Internal error: worker ", worker_id, " received invalid ", parts.size(), "-part worker instruction");
-                continue;
-            }
-            auto command = view(parts[0]);
-            if (command == "RUN"sv) {
-                LMQ_LOG(debug, "worker ", worker_id, " running ", run.is_batch_job ? "batch"s : "command " + run.command);
-                waiting_for_command = false;
-            } else if (command == "QUIT"sv) {
-                LMQ_LOG(debug, "worker ", worker_id, " shutting down");
-                detail::send_control(sock, "QUITTING");
-                sock.setsockopt<int>(ZMQ_LINGER, 1000);
-                sock.close();
+        if (waiting_for_command) {
+            if (!worker_wait_for(*this, sock, parts, worker_id, "RUN"sv))
                 return;
-            } else {
-                LMQ_LOG(error, "Internal error: worker ", worker_id, " received invalid command: `", command, "'");
-            }
         }
 
         try {
