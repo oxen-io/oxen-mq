@@ -204,7 +204,7 @@ void LokiMQ::process_zap_requests() {
                 else
                     o << v;
             }
-            log_(LogLevel::trace, __FILE__, __LINE__, o.str());
+            log(LogLevel::trace, __FILE__, __LINE__, o.str());
         } else
 #endif
             LMQ_LOG(debug, "Processing ZAP authentication request");
