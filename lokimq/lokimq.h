@@ -86,13 +86,12 @@ static constexpr size_t MAX_COMMAND_LENGTH = 200;
 
 class CatHelper;
 
-/// Handle for a tagged thread constructed by add_tagged_thread(...).  Not directly constructible, but
-/// is safe to copy.
-struct TaggedThread {
-    const std::string name;
+/// Opaque handle for a tagged thread constructed by add_tagged_thread(...).  Not directly
+/// constructible, but is safe (and cheap) to copy.
+struct TaggedThreadID {
 private:
     const int _id;
-    TaggedThread(std::string name, int id) : name{std::move(name)}, _id{id} {}
+    explicit constexpr TaggedThreadID(int id) : _id{id} {}
     friend class LokiMQ;
     template <typename R> friend class Batch;
 };
@@ -264,9 +263,9 @@ public:
      */
     int STARTUP_UMASK = -1;
 
-    /// A special TaggedThread value that always refers to the proxy thread; the main use of this is
+    /// A special TaggedThreadID value that always refers to the proxy thread; the main use of this is
     /// to direct very simple batch completion jobs to be executed directly in the proxy thread.
-    inline static const TaggedThread run_in_proxy{"_proxy", -1};
+    inline static constexpr TaggedThreadID run_in_proxy{-1};
 
     /// Writes a message to the logging system; intended mostly for internal use.
     template <typename... T>
@@ -836,10 +835,10 @@ public:
      * \param start - similar to init, but this is called immediately *after* the LokiMQ object has
      * started up and so can use LokiMQ object functionality.
      *
-     * \returns a TaggedThread object that can be passed to job(), batch(), or add_timer() to direct
-     * the task to the tagged thread.
+     * \returns a TaggedThreadID object that can be passed to job(), batch(), or add_timer() to
+     * direct the task to the tagged thread.
      */
-    TaggedThread add_tagged_thread(std::string name, std::function<void()> init = nullptr, std::function<void()> start = nullptr);
+    TaggedThreadID add_tagged_thread(std::string name, std::function<void()> init = nullptr, std::function<void()> start = nullptr);
 
     /**
      * Sets the number of worker threads reserved for batch jobs.  If not explicitly called then
@@ -1132,7 +1131,7 @@ public:
      * \param thread an optional tagged thread in which this job should run.  You may *not* pass the
      * proxy thread here.
      */
-    void job(std::function<void()> f, const TaggedThread *thread = nullptr);
+    void job(std::function<void()> f, std::optional<TaggedThreadID> = std::nullopt);
 
     /**
      * Adds a timer that gets scheduled periodically in the job queue.  Normally jobs are not
@@ -1143,7 +1142,7 @@ public:
      *
      * \param thread specifies a thread (added with add_tagged_thread()) on which this timer must run.
      */
-    void add_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch = true, const TaggedThread* thread = nullptr);
+    void add_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch = true, std::optional<TaggedThreadID> = std::nullopt);
 };
 
 /// Helper class that slightly simplifies adding commands to a category.

@@ -48,7 +48,7 @@ TEST_CASE("batch jobs to tagged threads", "[tagged][batch]") {
     }
     
     done = false;
-    lmq.job([&] { id = std::this_thread::get_id(); done = true; }, &t_abc);
+    lmq.job([&] { id = std::this_thread::get_id(); done = true; }, t_abc);
     wait_for([&] { return done.load(); });
     {
         auto lock = catch_lock();
@@ -56,7 +56,7 @@ TEST_CASE("batch jobs to tagged threads", "[tagged][batch]") {
     }
 
     done = false;
-    lmq.job([&] { id = std::this_thread::get_id(); done = true; }, &t_def);
+    lmq.job([&] { id = std::this_thread::get_id(); done = true; }, t_def);
     wait_for([&] { return done.load(); });
     {
         auto lock = catch_lock();
@@ -74,7 +74,7 @@ TEST_CASE("batch jobs to tagged threads", "[tagged][batch]") {
     std::this_thread::sleep_for(50ms);
 
     done = false;
-    lmq.job([&] { id = std::this_thread::get_id(); done = true; }, &t_abc);
+    lmq.job([&] { id = std::this_thread::get_id(); done = true; }, t_abc);
     wait_for([&] { return done.load(); });
     {
         auto lock = catch_lock();
@@ -86,9 +86,9 @@ TEST_CASE("batch jobs to tagged threads", "[tagged][batch]") {
     // We can queue up a bunch of jobs which should all happen in order, and all on the abc thread.
     std::vector<int> v;
     for (int i = 0; i < 100; i++) {
-        lmq.job([&] { if (std::this_thread::get_id() == id_abc) v.push_back(v.size()); }, &t_abc);
+        lmq.job([&] { if (std::this_thread::get_id() == id_abc) v.push_back(v.size()); }, t_abc);
     }
-    lmq.job([&] { done = true; }, &t_abc);
+    lmq.job([&] { done = true; }, t_abc);
     wait_for([&] { return done.load(); });
     {
         auto lock = catch_lock();
@@ -125,7 +125,7 @@ TEST_CASE("batch job completion on tagged threads", "[tagged][batch-completion]"
         for (auto& r : result)
             sum += r.get();
         result_sum = std::this_thread::get_id() == id_abc ? sum : -sum;
-    }, &t_abc);
+    }, t_abc);
     lmq.batch(std::move(batch));
     wait_for([&] { return result_sum.load() != -1; });
     {
@@ -148,7 +148,7 @@ TEST_CASE("timer job completion on tagged threads", "[tagged][timer]") {
     std::atomic<int> ticks = 0;
     std::atomic<int> abc_ticks = 0;
     lmq.add_timer([&] { ticks++; }, 10ms);
-    lmq.add_timer([&] { if (std::this_thread::get_id() == id_abc) abc_ticks++; }, 10ms, true, &t_abc);
+    lmq.add_timer([&] { if (std::this_thread::get_id() == id_abc) abc_ticks++; }, 10ms, true, t_abc);
 
     wait_for([&] { return ticks.load() > 2 && abc_ticks > 2; });
     {

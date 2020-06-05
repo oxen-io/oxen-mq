@@ -26,7 +26,7 @@ void LokiMQ::proxy_batch(detail::Batch* batch) {
     proxy_skip_one_poll = true;
 }
 
-void LokiMQ::job(std::function<void()> f, const TaggedThread* thread) {
+void LokiMQ::job(std::function<void()> f, std::optional<TaggedThreadID> thread) {
     if (thread && thread->_id == -1)
         throw std::logic_error{"job() cannot be used to queue an in-proxy job"};
     auto* b = new Batch<void>;
@@ -107,7 +107,7 @@ void LokiMQ::_queue_timer_job(int timer_id) {
             auto it = timer_jobs.find(timer_id);
             if (it != timer_jobs.end())
                 it->second.running = false;
-        }, &LokiMQ::run_in_proxy);
+        }, LokiMQ::run_in_proxy);
     }
     batches.insert(b);
     LMQ_TRACE("b: ", b->size().first, ", ", b->size().second, "; thread = ", thread);
@@ -118,7 +118,7 @@ void LokiMQ::_queue_timer_job(int timer_id) {
     queue.emplace(static_cast<detail::Batch*>(b), 0);
 }
 
-void LokiMQ::add_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch, const TaggedThread* thread) {
+void LokiMQ::add_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch, std::optional<TaggedThreadID> thread) {
     int th_id = thread ? thread->_id : 0;
     if (proxy_thread.joinable()) {
         detail::send_control(get_control_socket(), "TIMER", bt_serialize(bt_list{{
@@ -133,7 +133,7 @@ void LokiMQ::add_timer(std::function<void()> job, std::chrono::milliseconds inte
 
 void LokiMQ::TimersDeleter::operator()(void* timers) { zmq_timers_destroy(&timers); }
 
-TaggedThread LokiMQ::add_tagged_thread(std::string name, std::function<void()> init, std::function<void()> start) {
+TaggedThreadID LokiMQ::add_tagged_thread(std::string name, std::function<void()> start) {
     if (proxy_thread.joinable())
         throw std::logic_error{"Cannot add tagged threads after calling `start()`"};
 
@@ -151,7 +151,7 @@ TaggedThread LokiMQ::add_tagged_thread(std::string name, std::function<void()> i
         return worker_thread(id, name, std::move(start));
     }};
 
-    return {std::move(name), static_cast<int>(run.worker_id)};
+    return TaggedThreadID{static_cast<int>(run.worker_id)};
 }
 
 }
