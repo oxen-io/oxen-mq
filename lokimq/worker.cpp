@@ -5,27 +5,93 @@
 
 namespace lokimq {
 
-void LokiMQ::worker_thread(unsigned int index) {
-    std::string worker_id = "w" + std::to_string(index);
+void LokiMQ::worker_thread(unsigned int index, std::optional<std::string> tagged, std::function<void()> start) {
+    std::string routing_id = (tagged ? "t" : "w") + std::to_string(index); // for routing
+    std::string_view worker_id{tagged ? *tagged : routing_id};              // for debug
 
+    [[maybe_unused]] std::string thread_name = tagged.value_or("lmq-" + routing_id);
 #if defined(__linux__) || defined(__sun) || defined(__MINGW32__)
-    pthread_setname_np(pthread_self(), ("lmq-" + worker_id).c_str());
+    if (thread_name.size() > 15) thread_name.resize(15);
+    pthread_setname_np(pthread_self(), thread_name.c_str());
 #elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
-    pthread_set_name_np(pthread_self(), ("lmq-" + worker_id).c_str());
+    pthread_set_name_np(pthread_self(), thread_name.c_str());
 #elif defined(__MACH__)
-    pthread_setname_np(("lmq-" + worker_id).c_str());
+    pthread_setname_np(thread_name.c_str());
 #endif
 
     zmq::socket_t sock{context, zmq::socket_type::dealer};
-    sock.setsockopt(ZMQ_ROUTING_ID, worker_id.data(), worker_id.size());
-    LMQ_LOG(debug, "New worker thread ", worker_id, " started");
+    sock.setsockopt(ZMQ_ROUTING_ID, routing_id.data(), routing_id.size());
+    LMQ_LOG(debug, "New worker thread ", worker_id, " (", routing_id, ") started");
     sock.connect(SN_ADDR_WORKERS);
 
     Message message{*this, 0, AuthLevel::none, ""s};
     std::vector<zmq::message_t> parts;
-    run_info& run = workers[index]; // This contains our first job, and will be updated later with subsequent jobs
+
+    bool waiting_for_command;
+    if (tagged) {
+        // If we're a tagged worker then we got started up before LokiMQ started, so we need to wait
+        // for an all-clear signal from LokiMQ first, then we fire our `start` callback, then we can
+        // start waiting for commands in the main loop further down.  (We also can't get the
+        // reference to our `tagged_workers` element until the main proxy threads is running).
+
+        waiting_for_command = true;
+
+        while (true) {
+            LMQ_TRACE("tagged worker ", worker_id, " waiting for startup signal");
+            recv_message_parts(sock, parts);
+            if (parts.size() != 1) {
+                LMQ_LOG(error, "Internal error: worker ", worker_id, " received invalid ", parts.size(), "-part startup msg");
+                continue;
+            }
+            auto command = view(parts[0]);
+            if (command == "START"sv) {
+                LMQ_LOG(debug, "Tagged worker ", worker_id, " received start signal, starting up");
+                if (start) start();
+                break;
+            } else if (command == "QUIT"sv) {
+                LMQ_LOG(debug, "Tagged worker ", worker_id, " shutting down");
+                detail::send_control(sock, "QUITTING");
+                sock.setsockopt<int>(ZMQ_LINGER, 1000);
+                sock.close();
+                return;
+            } else {
+                LMQ_LOG(error, "Internal error: worker ", worker_id, " received invalid command: `", command, "'");
+            }
+        }
+    } else {
+        // Otherwise for a regular worker we can only be started by an active main proxy thread
+        // which will have preloaded our first job so we can start off right away.
+        waiting_for_command = false;
+    }
+
+    // This will always contains the current job, and is guaranteed to never be invalidated.
+    run_info& run = tagged ? std::get<run_info>(tagged_workers[index - 1]) : workers[index];
 
     while (true) {
+        while (waiting_for_command) {
+            LMQ_TRACE("worker ", worker_id, " waiting for command");
+            parts.clear();
+            recv_message_parts(sock, parts);
+
+            if (parts.size() != 1) {
+                LMQ_LOG(error, "Internal error: worker ", worker_id, " received invalid ", parts.size(), "-part worker instruction");
+                continue;
+            }
+            auto command = view(parts[0]);
+            if (command == "RUN"sv) {
+                LMQ_LOG(debug, "worker ", worker_id, " running ", run.is_batch_job ? "batch"s : "command " + run.command);
+                waiting_for_command = false;
+            } else if (command == "QUIT"sv) {
+                LMQ_LOG(debug, "worker ", worker_id, " shutting down");
+                detail::send_control(sock, "QUITTING");
+                sock.setsockopt<int>(ZMQ_LINGER, 1000);
+                sock.close();
+                return;
+            } else {
+                LMQ_LOG(error, "Internal error: worker ", worker_id, " received invalid command: `", command, "'");
+            }
+        }
+
         try {
             if (run.is_batch_job) {
                 if (run.batch_jobno >= 0) {
@@ -72,32 +138,9 @@ void LokiMQ::worker_thread(unsigned int index) {
             LMQ_LOG(warn, worker_id, " caught non-standard exception when processing command");
         }
 
-        while (true) {
-            // Signal that we are ready for another job and wait for it.  (We do this down here
-            // because our first job gets set up when the thread is started).
-            detail::send_control(sock, "RAN");
-            LMQ_TRACE("worker ", worker_id, " waiting for requests");
-            parts.clear();
-            recv_message_parts(sock, parts);
-
-            if (parts.size() != 1) {
-                LMQ_LOG(error, "Internal error: worker ", worker_id, " received invalid ", parts.size(), "-part worker instruction");
-                continue;
-            }
-            auto command = view(parts[0]);
-            if (command == "RUN") {
-                LMQ_LOG(debug, "worker ", worker_id, " running command ", run.command);
-                break; // proxy has set up a command for us, go back and run it.
-            } else if (command == "QUIT") {
-                LMQ_LOG(debug, "worker ", worker_id, " shutting down");
-                detail::send_control(sock, "QUITTING");
-                sock.setsockopt<int>(ZMQ_LINGER, 1000);
-                sock.close();
-                return;
-            } else {
-                LMQ_LOG(error, "Internal error: worker ", worker_id, " received invalid command: `", command, "'");
-            }
-        }
+        // Tell the proxy thread that we are ready for another job
+        detail::send_control(sock, "RAN");
+        waiting_for_command = true;
     }
 }
 
@@ -125,46 +168,66 @@ void LokiMQ::proxy_worker_message(std::vector<zmq::message_t>& parts) {
     }
     auto route = view(parts[0]), cmd = view(parts[1]);
     LMQ_TRACE("worker message from ", route);
-    assert(route.size() >= 2 && route[0] == 'w' && route[1] >= '0' && route[1] <= '9');
-    std::string_view worker_id_str{&route[1], route.size()-1}; // Chop off the leading "w"
+    assert(route.size() >= 2 && (route[0] == 'w' || route[0] == 't') && route[1] >= '0' && route[1] <= '9');
+    bool tagged_worker = route[0] == 't';
+    std::string_view worker_id_str{&route[1], route.size()-1}; // Chop off the leading "w" (or "t")
     unsigned int worker_id = detail::extract_unsigned(worker_id_str);
-    if (!worker_id_str.empty() /* didn't consume everything */ || worker_id >= workers.size()) {
+    if (!worker_id_str.empty() /* didn't consume everything */ ||
+            (tagged_worker
+                ? 0 == worker_id || worker_id > tagged_workers.size() // tagged worker ids are indexed from 1 to N (0 means untagged)
+                : worker_id >= workers.size() // regular worker ids are indexed from 0 to N-1
+            )
+    ) {
         LMQ_LOG(error, "Worker id '", route, "' is invalid, unable to process worker command");
         return;
     }
 
-    auto& run = workers[worker_id];
+    auto& run = tagged_worker ? std::get<run_info>(tagged_workers[worker_id - 1]) : workers[worker_id];
 
     LMQ_TRACE("received ", cmd, " command from ", route);
-    if (cmd == "RAN") {
-        LMQ_LOG(debug, "Worker ", route, " finished ", run.command);
+    if (cmd == "RAN"sv) {
+        LMQ_TRACE("Worker ", route, " finished ", run.is_batch_job ? "batch job" : run.command);
         if (run.is_batch_job) {
-            auto& jobs = run.is_reply_job ? reply_jobs : batch_jobs;
-            auto& active = run.is_reply_job ? reply_jobs_active : batch_jobs_active;
-            assert(active > 0);
-            active--;
+            if (tagged_worker) {
+                std::get<bool>(tagged_workers[worker_id - 1]) = false;
+            } else {
+                auto& active = run.is_reply_job ? reply_jobs_active : batch_jobs_active;
+                assert(active > 0);
+                active--;
+            }
             bool clear_job = false;
             if (run.batch_jobno == -1) {
                 // Returned from the completion function
                 clear_job = true;
             } else {
-                auto status = run.batch->job_finished();
-                if (status == detail::BatchStatus::complete) {
-                    jobs.emplace(run.batch, -1);
-                } else if (status == detail::BatchStatus::complete_proxy) {
-                    try {
-                        run.batch->job_completion(); // RUN DIRECTLY IN PROXY THREAD
-                    } catch (const std::exception &e) {
-                        // Raise these to error levels: the caller really shouldn't be doing
-                        // anything non-trivial in an in-proxy completion function!
-                        LMQ_LOG(error, "proxy thread caught exception when processing in-proxy completion command: ", e.what());
-                    } catch (...) {
-                        LMQ_LOG(error, "proxy thread caught non-standard exception when processing in-proxy completion command");
+                auto [state, thread] = run.batch->job_finished();
+                if (state == detail::BatchState::complete) {
+                    if (thread == -1) { // run directly in proxy
+                        LMQ_TRACE("Completion job running directly in proxy");
+                        try {
+                            run.batch->job_completion(); // RUN DIRECTLY IN PROXY THREAD
+                        } catch (const std::exception &e) {
+                            // Raise these to error levels: the caller really shouldn't be doing
+                            // anything non-trivial in an in-proxy completion function!
+                            LMQ_LOG(error, "proxy thread caught exception when processing in-proxy completion command: ", e.what());
+                        } catch (...) {
+                            LMQ_LOG(error, "proxy thread caught non-standard exception when processing in-proxy completion command");
+                        }
+                        clear_job = true;
+                    } else {
+                        auto& jobs =
+                            thread > 0
+                            ? std::get<std::queue<batch_job>>(tagged_workers[thread - 1]) // run in tagged thread
+                            : run.is_reply_job
+                              ? reply_jobs
+                              : batch_jobs;
+                        jobs.emplace(run.batch, -1);
                     }
-                    clear_job = true;
-                } else if (status == detail::BatchStatus::done) {
+                } else if (state == detail::BatchState::done) {
+                    // No completion job
                     clear_job = true;
                 }
+                // else the job is still running
             }
 
             if (clear_job) {
@@ -179,11 +242,11 @@ void LokiMQ::proxy_worker_message(std::vector<zmq::message_t>& parts) {
         if (max_workers == 0) { // Shutting down
             LMQ_TRACE("Telling worker ", route, " to quit");
             route_control(workers_socket, route, "QUIT");
-        } else {
+        } else if (!tagged_worker) {
             idle_workers.push_back(worker_id);
         }
-    } else if (cmd == "QUITTING") {
-        workers[worker_id].worker_thread.join();
+    } else if (cmd == "QUITTING"sv) {
+        run.worker_thread.join();
         LMQ_LOG(debug, "Worker ", route, " exited normally");
     } else {
         LMQ_LOG(error, "Worker ", route, " sent unknown control message: `", cmd, "'");
@@ -192,7 +255,7 @@ void LokiMQ::proxy_worker_message(std::vector<zmq::message_t>& parts) {
 
 void LokiMQ::proxy_run_worker(run_info& run) {
     if (!run.worker_thread.joinable())
-        run.worker_thread = std::thread{&LokiMQ::worker_thread, this, run.worker_id};
+        run.worker_thread = std::thread{[this, id=run.worker_id] { worker_thread(id); }};
     else
         send_routed_message(workers_socket, run.worker_routing_id, "RUN");
 }
