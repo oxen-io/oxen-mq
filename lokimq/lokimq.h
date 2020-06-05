@@ -838,7 +838,7 @@ public:
      * \returns a TaggedThreadID object that can be passed to job(), batch(), or add_timer() to
      * direct the task to the tagged thread.
      */
-    TaggedThreadID add_tagged_thread(std::string name, std::function<void()> init = nullptr, std::function<void()> start = nullptr);
+    TaggedThreadID add_tagged_thread(std::string name, std::function<void()> start = nullptr);
 
     /**
      * Sets the number of worker threads reserved for batch jobs.  If not explicitly called then

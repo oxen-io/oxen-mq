@@ -2,17 +2,16 @@
 #include "common.h"
 #include <future>
 
-TEST_CASE("tagged thread init and start functions", "[tagged][init]") {
+TEST_CASE("tagged thread start functions", "[tagged][start]") {
     lokimq::LokiMQ lmq{get_logger(""), LogLevel::trace};
 
     lmq.set_general_threads(2);
     lmq.set_batch_threads(2);
     auto t_abc = lmq.add_tagged_thread("abc");
-    std::atomic<bool> init_called = false, initghi_called = false, start_called = false;
-    auto t_def = lmq.add_tagged_thread("def", [&] { init_called = true; });
-    auto t_ghi = lmq.add_tagged_thread("def", [&] { initghi_called = true; }, [&] { start_called = false; });
+    std::atomic<bool> start_called = false;
+    auto t_def = lmq.add_tagged_thread("def", [&] { start_called = true; });
 
-    wait_for([&] { return init_called.load() && initghi_called.load(); });
+    std::this_thread::sleep_for(20ms);
     {
         auto lock = catch_lock();
         REQUIRE_FALSE( start_called );
@@ -22,7 +21,7 @@ TEST_CASE("tagged thread init and start functions", "[tagged][init]") {
     wait_for([&] { return start_called.load(); });
     {
         auto lock = catch_lock();
-        REQUIRE_FALSE( start_called );
+        REQUIRE( start_called );
     }
 }
 

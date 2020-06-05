@@ -397,13 +397,34 @@ void LokiMQ::proxy_loop() {
         throw zmq::error_t{};
     }
 
-    // Tell any tagged workers to go ahead with startup:
-    for (auto& w : tagged_workers) {
-        LMQ_LOG(debug, "Telling tagged thread worker ", std::get<run_info>(w).worker_routing_id, " to finish startup");
-        route_control(workers_socket, std::get<run_info>(w).worker_routing_id, "START");
-    }
-
     std::vector<zmq::message_t> parts;
+
+    // Wait for tagged worker threads to get ready and connect to us (we get a "STARTING" message)
+    // and send them back a "START" to let them know to go ahead with startup.  We need this
+    // synchronization dance to guarantee that the workers are routable before we can proceed.
+    if (!tagged_workers.empty()) {
+        LMQ_LOG(debug, "Waiting for tagged workers");
+        std::unordered_set<std::string_view> waiting_on;
+        for (auto& w : tagged_workers)
+            waiting_on.emplace(std::get<run_info>(w).worker_routing_id);
+        for (; !waiting_on.empty(); parts.clear()) {
+            recv_message_parts(workers_socket, parts);
+            if (parts.size() != 2 || view(parts[1]) != "STARTING"sv) {
+                LMQ_LOG(error, "Received invalid message on worker socket while waiting for tagged thread startup");
+                continue;
+            }
+            LMQ_LOG(debug, "Received STARTING message from ", view(parts[0]));
+            if (auto it = waiting_on.find(view(parts[0])); it != waiting_on.end())
+                waiting_on.erase(it);
+            else
+                LMQ_LOG(error, "Received STARTING message from unknown worker ", view(parts[0]));
+        }
+
+        for (auto&w : tagged_workers) {
+            LMQ_LOG(debug, "Telling tagged thread worker ", std::get<run_info>(w).worker_routing_id, " to finish startup");
+            route_control(workers_socket, std::get<run_info>(w).worker_routing_id, "START");
+        }
+    }
 
     while (true) {
         std::chrono::milliseconds poll_timeout;
