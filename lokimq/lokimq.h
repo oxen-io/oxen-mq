@@ -86,6 +86,17 @@ static constexpr size_t MAX_COMMAND_LENGTH = 200;
 
 class CatHelper;
 
+/// Handle for a tagged thread constructed by add_tagged_thread(...).  Not directly constructible, but
+/// is safe to copy.
+struct TaggedThread {
+    const std::string name;
+private:
+    const int _id;
+    TaggedThread(std::string name, int id) : name{std::move(name)}, _id{id} {}
+    friend class LokiMQ;
+    template <typename R> friend class Batch;
+};
+
 /**
  * Class that handles LokiMQ listeners, connections, proxying, and workers.  An application
  * typically has just one instance of this class.
@@ -253,6 +264,10 @@ public:
      */
     int STARTUP_UMASK = -1;
 
+    /// A special TaggedThread value that always refers to the proxy thread; the main use of this is
+    /// to direct very simple batch completion jobs to be executed directly in the proxy thread.
+    inline static const TaggedThread run_in_proxy{"_proxy", -1};
+
 private:
 
     /// The lookup function that tells us where to connect to a peer, or empty if not found.
@@ -382,7 +397,8 @@ private:
 
     /// Timers.  TODO: once cppzmq adds an interface around the zmq C timers API then switch to it.
     struct TimersDeleter { void operator()(void* timers); };
-    std::unordered_map<int, std::tuple<std::function<void()>, bool, bool>> timer_jobs; // id => {func, squelch, running}
+    struct timer_data { std::function<void()> function; bool squelch; bool running; int thread; };
+    std::unordered_map<int, timer_data> timer_jobs;
     std::unique_ptr<void, TimersDeleter> timers;
 public:
     // This needs to be public because we have to be able to call it from a plain C function.
@@ -408,8 +424,8 @@ private:
     /// Number of active workers
     int active_workers() const { return workers.size() - idle_workers.size(); }
 
-    /// Worker thread loop
-    void worker_thread(unsigned int index);
+    /// Worker thread loop.  Tagged and start are provided for a tagged worker thread.
+    void worker_thread(unsigned int index, std::optional<std::string> tagged = std::nullopt, std::function<void()> start = nullptr);
 
     /// If set, skip polling for one proxy loop iteration (set when we know we have something
     /// processible without having to shove it onto a socket, such as scheduling an internal job).
@@ -506,7 +522,8 @@ private:
 
     /// Currently active batch/reply jobs; this is the container that owns the Batch instances
     std::unordered_set<detail::Batch*> batches;
-    /// Individual batch jobs waiting to run
+    /// Individual batch jobs waiting to run; .second is the 0-n batch number or -1 for the
+    /// completion job
     using batch_job = std::pair<detail::Batch*, int>;
     std::queue<batch_job> batch_jobs, reply_jobs;
     int batch_jobs_active = 0;
@@ -526,7 +543,7 @@ private:
     void proxy_timer(bt_list_consumer timer_data);
 
     /// Same, but deserialized
-    void proxy_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch);
+    void proxy_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch, int thread);
 
     /// ZAP (https://rfc.zeromq.org/spec:27/ZAP/) authentication handler; this does non-blocking
     /// processing of any waiting authentication requests for new incoming connections.
@@ -616,6 +633,7 @@ private:
     struct run_info {
         bool is_batch_job = false;
         bool is_reply_job = false;
+        bool is_tagged_thread_job = false;
 
         // If is_batch_job is false then these will be set appropriate (if is_batch_job is true then
         // these shouldn't be accessed and likely contain stale data).
@@ -637,8 +655,8 @@ private:
 
         // These belong to the proxy thread and must not be accessed by a worker:
         std::thread worker_thread;
-        size_t worker_id; // The index in `workers`
-        std::string worker_routing_id; // "w123" where 123 == worker_id
+        size_t worker_id; // The index in `workers` (0-n) or index+1 in `tagged_workers` (1-n)
+        std::string worker_routing_id; // "w123" where 123 == worker_id; "n123" for tagged threads.
 
         /// Loads the run info with an incoming command
         run_info& load(category* cat, std::string command, ConnectionID conn, Access access, std::string remote,
@@ -647,13 +665,18 @@ private:
         /// Loads the run info with a stored pending command
         run_info& load(pending_command&& pending);
         /// Loads the run info with a batch job
-        run_info& load(batch_job&& bj, bool reply_job = false);
+        run_info& load(batch_job&& bj, bool reply_job = false, int tagged_thread = 0);
     };
     /// Data passed to workers for the RUN command.  The proxy thread sets elements in this before
     /// sending RUN to a worker then the worker uses it to get call info, and only allocates it
     /// once, before starting any workers.  Workers may only access their own index and may not
     /// change it.
     std::vector<run_info> workers;
+
+    /// Workers that are reserved for tagged thread tasks (as created with add_tagged_thread).  The
+    /// queue here is similar to worker_jobs, but contains only the tagged thread's jobs.  The bool
+    /// is whether the worker is currently busy (true) or available (false).
+    std::vector<std::tuple<run_info, bool, std::queue<batch_job>>> tagged_workers;
 
 public:
     /**
@@ -792,6 +815,31 @@ public:
      * not those of `cat`, even if `cat` is more restrictive than `dog`.
      */
     void add_command_alias(std::string from, std::string to);
+
+    /** Creates a "tagged thread" and starts it immediately.  A tagged thread is one that batches,
+     * jobs, and timer jobs can be sent to by specifically, typically to perform coordination of
+     * some thread-unsafe work.
+     *
+     * Tagged threads will *only* process jobs sent specifically to them; they do not participate in
+     * the thread pool used for regular jobs.  Each tagged thread also has its own job queue
+     * completely separate from any other jobs.
+     *
+     * Tagged threads must be created *before* `start()` is called.  The name will be used to set the
+     * thread name in the process table (if supported on the OS).
+     *
+     * \param name - the name of the thread; will be used in log messages and (if supported by the
+     * OS) as the system thread name.
+     * \param init - an optional callback to invoke from the thread immediately after creating it.
+     * This can be used to perform initialization, however should not depend on LokiMQ having
+     * started.
+     *
+     * \param start - similar to init, but this is called immediately *after* the LokiMQ object has
+     * started up and so can use LokiMQ object functionality.
+     *
+     * \returns a TaggedThread object that can be passed to job(), batch(), or add_timer() to direct
+     * the task to the tagged thread.
+     */
+    TaggedThread add_tagged_thread(std::string name, std::function<void()> init = nullptr, std::function<void()> start = nullptr);
 
     /**
      * Sets the number of worker threads reserved for batch jobs.  If not explicitly called then
@@ -1079,8 +1127,12 @@ public:
     /**
      * Queues a single job to be executed with no return value.  This is a shortcut for creating and
      * submitting a single-job, no-completion-function batch job.
+     *
+     * \param f the callback to invoke
+     * \param thread an optional tagged thread in which this job should run.  You may *not* pass the
+     * proxy thread here.
      */
-    void job(std::function<void()> f);
+    void job(std::function<void()> f, const TaggedThread *thread = nullptr);
 
     /**
      * Adds a timer that gets scheduled periodically in the job queue.  Normally jobs are not
@@ -1088,8 +1140,10 @@ public:
      * previously scheduled callback of the job has not yet completed.  If you want to override this
      * (so that, under heavy load or long jobs, there can be more than one of the same job scheduled
      * or running at a time) then specify `squelch` as `false`.
+     *
+     * \param thread specifies a thread (added with add_tagged_thread()) on which this timer must run.
      */
-    void add_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch = true);
+    void add_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch = true, const TaggedThread* thread = nullptr);
 };
 
 /// Helper class that slightly simplifies adding commands to a category.

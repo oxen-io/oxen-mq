@@ -11,6 +11,7 @@ set(LMQ_TEST_SRC
     test_encoding.cpp
     test_failures.cpp
     test_requests.cpp
+    test_tagged_threads.cpp
     )
 
 add_executable(tests ${LMQ_TEST_SRC})

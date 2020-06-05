@@ -14,6 +14,7 @@ void LokiMQ::proxy_quit() {
     LMQ_LOG(debug, "Received quit command, shutting down proxy thread");
 
     assert(std::none_of(workers.begin(), workers.end(), [](auto& worker) { return worker.worker_thread.joinable(); }));
+    assert(std::none_of(tagged_workers.begin(), tagged_workers.end(), [](auto& worker) { return std::get<0>(worker).worker_thread.joinable(); }));
 
     command.setsockopt<int>(ZMQ_LINGER, 0);
     command.close();
@@ -289,6 +290,9 @@ void LokiMQ::proxy_control_message(std::vector<zmq::message_t>& parts) {
             for (const auto &route : idle_workers)
                 route_control(workers_socket, workers[route].worker_routing_id, "QUIT");
             idle_workers.clear();
+            for (auto& [run, busy, queue] : tagged_workers)
+                if (!busy)
+                    route_control(workers_socket, run.worker_routing_id, "QUIT");
             return;
         }
     }
@@ -329,6 +333,7 @@ void LokiMQ::proxy_loop() {
             LMQ_LOG(debug, "    - ", cat.first, ": ", cat.second.reserved_threads);
         LMQ_LOG(debug, "    - (batch jobs): ", batch_jobs_reserved);
         LMQ_LOG(debug, "    - (reply jobs): ", reply_jobs_reserved);
+        LMQ_LOG(debug, "Plus ", tagged_workers.size(), " tagged worker threads");
     }
 
     workers.reserve(max_workers);
@@ -392,12 +397,19 @@ void LokiMQ::proxy_loop() {
         throw zmq::error_t{};
     }
 
+    // Tell any tagged workers to go ahead with startup:
+    for (auto& w : tagged_workers) {
+        LMQ_LOG(debug, "Telling tagged thread worker ", std::get<run_info>(w).worker_routing_id, " to finish startup");
+        route_control(workers_socket, std::get<run_info>(w).worker_routing_id, "START");
+    }
+
     std::vector<zmq::message_t> parts;
 
     while (true) {
         std::chrono::milliseconds poll_timeout;
         if (max_workers == 0) { // Will be 0 only if we are quitting
-            if (std::none_of(workers.begin(), workers.end(), [](auto &w) { return w.worker_thread.joinable(); })) {
+            if (std::none_of(workers.begin(), workers.end(), [](auto &w) { return w.worker_thread.joinable(); }) &&
+                    std::none_of(tagged_workers.begin(), tagged_workers.end(), [](auto &w) { return std::get<0>(w).worker_thread.joinable(); })) {
                 // All the workers have finished, so we can finish shutting down
                 return proxy_quit();
             }
@@ -616,7 +628,19 @@ bool LokiMQ::proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>
 }
 
 void LokiMQ::proxy_process_queue() {
-    // First up: process any batch jobs; since these are internal they are given higher priority.
+    if (max_workers == 0) // shutting down
+        return;
+
+    // First: send any tagged thread tasks to the tagged threads, if idle
+    for (auto& [run, busy, queue] : tagged_workers) {
+        if (!busy && !queue.empty()) {
+            busy = true;
+            proxy_run_worker(run.load(std::move(queue.front()), false, run.worker_id));
+            queue.pop();
+        }
+    }
+
+    // Second: process any batch jobs; since these are internal they are given higher priority.
     proxy_run_batch_jobs(batch_jobs, batch_jobs_reserved, batch_jobs_active, false);
 
     // Next any reply batch jobs (which are a bit different from the above, since they are

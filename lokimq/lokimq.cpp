@@ -348,6 +348,7 @@ LokiMQ::run_info& LokiMQ::run_info::load(category* cat_, std::string command_, C
                 std::vector<zmq::message_t> data_parts_, const std::pair<CommandCallback, bool>* callback_) {
     is_batch_job = false;
     is_reply_job = false;
+    is_tagged_thread_job = false;
     cat = cat_;
     command = std::move(command_);
     conn = std::move(conn_);
@@ -363,9 +364,10 @@ LokiMQ::run_info& LokiMQ::run_info::load(pending_command&& pending) {
             std::move(pending.remote), std::move(pending.data_parts), pending.callback);
 }
 
-LokiMQ::run_info& LokiMQ::run_info::load(batch_job&& bj, bool reply_job) {
+LokiMQ::run_info& LokiMQ::run_info::load(batch_job&& bj, bool reply_job, int tagged_thread) {
     is_batch_job = true;
     is_reply_job = reply_job;
+    is_tagged_thread_job = tagged_thread > 0;
     batch_jobno = bj.second;
     batch = bj.first;
     return *this;
