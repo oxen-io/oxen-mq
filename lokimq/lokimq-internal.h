@@ -4,12 +4,11 @@
 // Inside some method:
 //     LMQ_LOG(warn, "bad ", 42, " stuff");
 //
-// (The "this->" is here to work around gcc 5 bugginess when called in a `this`-capturing lambda.)
-#define LMQ_LOG(level, ...) this->log_(LogLevel::level, __FILE__, __LINE__, __VA_ARGS__)
+#define LMQ_LOG(level, ...) log(LogLevel::level, __FILE__, __LINE__, __VA_ARGS__)
 
 #ifndef NDEBUG
 // Same as LMQ_LOG(trace, ...) when not doing a release build; nothing under a release build.
-#  define LMQ_TRACE(...) this->log_(LogLevel::trace, __FILE__, __LINE__, __VA_ARGS__)
+#  define LMQ_TRACE(...) log(LogLevel::trace, __FILE__, __LINE__, __VA_ARGS__)
 #else
 #  define LMQ_TRACE(...)
 #endif

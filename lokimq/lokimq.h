@@ -268,6 +268,10 @@ public:
     /// to direct very simple batch completion jobs to be executed directly in the proxy thread.
     inline static const TaggedThread run_in_proxy{"_proxy", -1};
 
+    /// Writes a message to the logging system; intended mostly for internal use.
+    template <typename... T>
+    void log(LogLevel lvl, const char* filename, int line, const T&... stuff);
+
 private:
 
     /// The lookup function that tells us where to connect to a peer, or empty if not found.
@@ -279,10 +283,6 @@ private:
 
     /// The callback to call with log messages
     Logger logger;
-
-    /// Logging implementation
-    template <typename... T>
-    void log_(LogLevel lvl, const char* filename, int line, const T&... stuff);
 
     ///////////////////////////////////////////////////////////////////////////////////
     /// NB: The following are all the domain of the proxy thread (once it is started)!
@@ -1433,7 +1433,7 @@ inline std::string_view trim_log_filename(std::string_view local_file) {
 }
 
 template <typename... T>
-void LokiMQ::log_(LogLevel lvl, const char* file, int line, const T&... stuff) {
+void LokiMQ::log(LogLevel lvl, const char* file, int line, const T&... stuff) {
     if (log_level() < lvl)
         return;
 
