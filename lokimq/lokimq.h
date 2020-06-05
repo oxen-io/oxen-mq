@@ -816,8 +816,8 @@ public:
     void add_command_alias(std::string from, std::string to);
 
     /** Creates a "tagged thread" and starts it immediately.  A tagged thread is one that batches,
-     * jobs, and timer jobs can be sent to by specifically, typically to perform coordination of
-     * some thread-unsafe work.
+     * jobs, and timer jobs can be sent to specifically, typically to perform coordination of some
+     * thread-unsafe work.
      *
      * Tagged threads will *only* process jobs sent specifically to them; they do not participate in
      * the thread pool used for regular jobs.  Each tagged thread also has its own job queue
