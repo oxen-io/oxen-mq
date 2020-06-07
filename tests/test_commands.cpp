@@ -202,7 +202,8 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
     LokiMQ nsa{get_logger("NSA» ")};
     nsa.add_category("backdoor", Access{AuthLevel::admin});
     nsa.add_command("backdoor", "data", [&](Message& m) {
-            backdoor_details.emplace(m.data[0]);
+        auto l = catch_lock();
+        backdoor_details.emplace(m.data[0]);
     });
     nsa.start();
     auto nsa_c = nsa.connect_remote(listen, connect_success, connect_failure, server.get_pubkey(), AuthLevel::admin);
@@ -252,7 +253,7 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
                 },
                 personal_detail);
     }
-    wait_for([&] { auto lock = catch_lock(); return things_remembered == all_the_things.size(); });
+    wait_for([&] { auto lock = catch_lock(); return things_remembered == all_the_things.size() && things_remembered == backdoor_details.size(); });
     {
         auto l = catch_lock();
         REQUIRE( things_remembered == all_the_things.size() );
