@@ -93,13 +93,19 @@ void LokiMQ::worker_thread(unsigned int index, std::optional<std::string> tagged
 
         try {
             if (run.is_batch_job) {
+                auto* batch = std::get<detail::Batch*>(run.to_run);
                 if (run.batch_jobno >= 0) {
-                    LMQ_TRACE("worker thread ", worker_id, " running batch ", run.batch, "#", run.batch_jobno);
-                    run.batch->run_job(run.batch_jobno);
+                    LMQ_TRACE("worker thread ", worker_id, " running batch ", batch, "#", run.batch_jobno);
+                    batch->run_job(run.batch_jobno);
                 } else if (run.batch_jobno == -1) {
-                    LMQ_TRACE("worker thread ", worker_id, " running batch ", run.batch, " completion");
-                    run.batch->job_completion();
+                    LMQ_TRACE("worker thread ", worker_id, " running batch ", batch, " completion");
+                    batch->job_completion();
                 }
+            } else if (run.is_injected) {
+                auto& func = std::get<std::function<void()>>(run.to_run);
+                LMQ_TRACE("worker thread ", worker_id, " invoking injected command ", run.command);
+                func();
+                func = nullptr;
             } else {
                 message.conn = run.conn;
                 message.access = run.access;
@@ -108,7 +114,8 @@ void LokiMQ::worker_thread(unsigned int index, std::optional<std::string> tagged
 
                 LMQ_TRACE("Got incoming command from ", message.remote, "/", message.conn, message.conn.route.empty() ? " (outgoing)" : " (incoming)");
 
-                if (run.callback->second /*is_request*/) {
+                auto& [callback, is_request] = *std::get<const std::pair<CommandCallback, bool>*>(run.to_run);
+                if (is_request) {
                     message.reply_tag = {run.data_parts[0].data<char>(), run.data_parts[0].size()};
                     for (auto it = run.data_parts.begin() + 1; it != run.data_parts.end(); ++it)
                         message.data.emplace_back(it->data<char>(), it->size());
@@ -118,7 +125,7 @@ void LokiMQ::worker_thread(unsigned int index, std::optional<std::string> tagged
                 }
 
                 LMQ_TRACE("worker thread ", worker_id, " invoking ", run.command, " callback with ", message.data.size(), " message parts");
-                run.callback->first(message);
+                callback(message);
             }
         }
         catch (const bt_deserialize_invalid& e) {
@@ -195,16 +202,17 @@ void LokiMQ::proxy_worker_message(std::vector<zmq::message_t>& parts) {
                 active--;
             }
             bool clear_job = false;
+            auto* batch = std::get<detail::Batch*>(run.to_run);
             if (run.batch_jobno == -1) {
                 // Returned from the completion function
                 clear_job = true;
             } else {
-                auto [state, thread] = run.batch->job_finished();
+                auto [state, thread] = batch->job_finished();
                 if (state == detail::BatchState::complete) {
                     if (thread == -1) { // run directly in proxy
                         LMQ_TRACE("Completion job running directly in proxy");
                         try {
-                            run.batch->job_completion(); // RUN DIRECTLY IN PROXY THREAD
+                            batch->job_completion(); // RUN DIRECTLY IN PROXY THREAD
                         } catch (const std::exception &e) {
                             // Raise these to error levels: the caller really shouldn't be doing
                             // anything non-trivial in an in-proxy completion function!
@@ -220,7 +228,7 @@ void LokiMQ::proxy_worker_message(std::vector<zmq::message_t>& parts) {
                             : run.is_reply_job
                               ? reply_jobs
                               : batch_jobs;
-                        jobs.emplace(run.batch, -1);
+                        jobs.emplace(batch, -1);
                     }
                 } else if (state == detail::BatchState::done) {
                     // No completion job
@@ -230,9 +238,9 @@ void LokiMQ::proxy_worker_message(std::vector<zmq::message_t>& parts) {
             }
 
             if (clear_job) {
-                batches.erase(run.batch);
-                delete run.batch;
-                run.batch = nullptr;
+                batches.erase(batch);
+                delete batch;
+                run.to_run = static_cast<detail::Batch*>(nullptr);
             }
         } else {
             assert(run.cat->active_threads > 0);
@@ -360,6 +368,39 @@ void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
     proxy_run_worker(run);
     category.active_threads++;
 }
+
+void LokiMQ::inject_task(const std::string& category, std::string command, std::string remote, std::function<void()> callback) {
+    if (!callback) return;
+    auto it = categories.find(category);
+    if (it == categories.end())
+        throw std::out_of_range{"Invalid category `" + category + "': category does not exist"};
+    detail::send_control(get_control_socket(), "INJECT", bt_serialize(detail::serialize_object(
+                injected_task{it->second, std::move(command), std::move(remote), std::move(callback)})));
+}
+
+void LokiMQ::proxy_inject_task(injected_task task) {
+    auto& category = task.cat;
+    if (category.active_threads >= category.reserved_threads && active_workers() >= general_workers) {
+        // No free worker slot, queue for later
+        if (category.max_queue >= 0 && category.queued >= category.max_queue) {
+            LMQ_LOG(warn, "No space to queue injected task ", task.command, "; already have ", category.queued,
+                    "commands queued in that category (max ", category.max_queue, "); dropping task");
+            return;
+        }
+        LMQ_LOG(debug, "No available free workers for injected task ", task.command, "; queuing for later");
+        pending_commands.emplace_back(category, std::move(task.command), std::move(task.callback), std::move(task.remote));
+        category.queued++;
+        return;
+    }
+
+    auto& run = get_idle_worker();
+    LMQ_TRACE("Forwarding incoming injected task ", task.command, " from ", task.remote, " to worker ", run.worker_routing_id);
+    run.load(&category, std::move(task.command), std::move(task.remote), std::move(task.callback));
+
+    proxy_run_worker(run);
+    category.active_threads++;
+}
+
 
 
 }
