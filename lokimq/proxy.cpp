@@ -263,6 +263,9 @@ void LokiMQ::proxy_control_message(std::vector<zmq::message_t>& parts) {
             LMQ_TRACE("proxy batch jobs");
             auto ptrval = bt_deserialize<uintptr_t>(data);
             return proxy_batch(reinterpret_cast<detail::Batch*>(ptrval));
+        } else if (cmd == "INJECT") {
+            LMQ_TRACE("proxy inject");
+            return proxy_inject_task(detail::deserialize_object<injected_task>(bt_deserialize<uintptr_t>(data)));
         } else if (cmd == "SET_SNS") {
             return proxy_set_active_sns(data);
         } else if (cmd == "UPDATE_SNS") {
@@ -683,6 +686,5 @@ void LokiMQ::proxy_process_queue() {
         }
     }
 }
-
 
 }

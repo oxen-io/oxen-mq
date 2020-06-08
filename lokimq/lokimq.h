@@ -596,6 +596,18 @@ private:
     bool proxy_check_auth(size_t conn_index, bool outgoing, const peer_info& peer,
             zmq::message_t& command, const cat_call_t& cat_call, std::vector<zmq::message_t>& data);
 
+    struct injected_task {
+        category& cat;
+        std::string command;
+        std::string remote;
+        std::function<void()> callback;
+    };
+
+    /// Injects a external callback to be handled by a worker; this is the proxy side of
+    /// inject_task().
+    void proxy_inject_task(injected_task task);
+
+
     /// Set of active service nodes.
     pubkey_set active_service_nodes;
 
@@ -607,20 +619,30 @@ private:
     void proxy_update_active_sns_clean(pubkey_set added, pubkey_set removed);
 
     /// Details for a pending command; such a command already has authenticated access and is just
-    /// waiting for a thread to become available to handle it.
+    /// waiting for a thread to become available to handle it.  This also gets used (via the
+    /// `callback` variant) for injected external jobs to be able to integrate some external
+    /// interface with the lokimq job queue.
     struct pending_command {
         category& cat;
         std::string command;
         std::vector<zmq::message_t> data_parts;
-        const std::pair<CommandCallback, bool>* callback;
+        std::variant<
+            const std::pair<CommandCallback, bool>*, // Normal command callback
+            std::function<void()> // Injected external callback
+        > callback;
         ConnectionID conn;
         Access access;
         std::string remote;
 
+        // Normal ctor for an actual lmq command being processed
         pending_command(category& cat, std::string command, std::vector<zmq::message_t> data_parts,
                 const std::pair<CommandCallback, bool>* callback, ConnectionID conn, Access access, std::string remote)
             : cat{cat}, command{std::move(command)}, data_parts{std::move(data_parts)},
             callback{callback}, conn{std::move(conn)}, access{std::move(access)}, remote{std::move(remote)} {}
+
+        // Ctor for an injected external command.
+        pending_command(category& cat, std::string command, std::function<void()> callback, std::string remote)
+            : cat{cat}, command{std::move(command)}, callback{std::move(callback)}, remote{std::move(remote)} {}
     };
     std::list<pending_command> pending_commands;
 
@@ -635,9 +657,15 @@ private:
         bool is_batch_job = false;
         bool is_reply_job = false;
         bool is_tagged_thread_job = false;
+        bool is_injected = false;
+
+        // resets the job type bools, above.
+        void reset() { is_batch_job = is_reply_job = is_tagged_thread_job = is_injected = false; }
 
         // If is_batch_job is false then these will be set appropriate (if is_batch_job is true then
-        // these shouldn't be accessed and likely contain stale data).
+        // these shouldn't be accessed and likely contain stale data).  Note that if the command is
+        // an external, injected command then conn, access, conn_route, and data_parts will be
+        // empty/default constructed.
         category *cat;
         std::string command;
         ConnectionID conn; // The connection (or SN pubkey) to reply on/to.
@@ -649,10 +677,13 @@ private:
         // If is_batch_job true then these are set (if is_batch_job false then don't access these!):
         int batch_jobno; // >= 0 for a job, -1 for the completion job
 
-        union {
-            const std::pair<CommandCallback, bool>* callback; // set if !is_batch_job
-            detail::Batch* batch;                             // set if is_batch_job
-        };
+        // The callback or batch job to run.  The first of these is for regular tasks, the second
+        // for batch jobs, the third for injected external tasks.
+        std::variant<
+            const std::pair<CommandCallback, bool>*,
+            detail::Batch*,
+            std::function<void()>
+        > to_run;
 
         // These belong to the proxy thread and must not be accessed by a worker:
         std::thread worker_thread;
@@ -663,8 +694,12 @@ private:
         run_info& load(category* cat, std::string command, ConnectionID conn, Access access, std::string remote,
                 std::vector<zmq::message_t> data_parts, const std::pair<CommandCallback, bool>* callback);
 
+        /// Loads the run info with an injected external command
+        run_info& load(category* cat, std::string command, std::string remote, std::function<void()> callback);
+
         /// Loads the run info with a stored pending command
         run_info& load(pending_command&& pending);
+
         /// Loads the run info with a batch job
         run_info& load(batch_job&& bj, bool reply_job = false, int tagged_thread = 0);
     };
@@ -1090,6 +1125,32 @@ public:
      */
     template <typename... T>
     void request(ConnectionID to, std::string_view cmd, ReplyCallback callback, const T&... opts);
+
+    /** Injects an external task into the lokimq command queue.  This is used to allow connecting
+     * non-LokiMQ requests into the LokiMQ thread pool as if they were ordinary requests, to be
+     * scheduled as commands of an individual category.  For example, you might support rpc requests
+     * via LokiMQ as `rpc.some_command` and *also* accept them over HTTP.  Using `inject_task()`
+     * allows you to handle processing the request in the same thread pool with the same priority as
+     * `rpc.*` commands.
+     *
+     * @param category - the category name that should handle the request for the purposes of
+     * scheduling the job.  The category must have been added using add_category().  The category
+     * can be an actual category with added commands, in which case the injected tasks are queued
+     * along with LMQ requests for that category, or can have no commands to set up a distinct
+     * category for the injected jobs.
+     *
+     * @param command - a command name; this is mainly used for debugging and does not need to
+     * actually exist (and, in fact, is often less confusing if it does not).  It is recommended for
+     * clarity purposes to use something that doesn't look like a typical command, for example
+     * "(http)".
+     *
+     * @param remote - some free-form identifier of the remote connection.  For example, this could
+     * be a remote IP address.  Can be blank if there is nothing suitable.
+     *
+     * @param callback - the function to call from a worker thread when the injected task is
+     * processed.  Takes no arguments.
+     */
+    void inject_task(const std::string& category, std::string command, std::string remote, std::function<void()> callback);
 
     /// The key pair this LokiMQ was created with; if empty keys were given during construction then
     /// this returns the generated keys.

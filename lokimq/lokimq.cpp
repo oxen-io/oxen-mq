@@ -349,30 +349,45 @@ void LokiMQ::set_general_threads(int threads) {
 
 LokiMQ::run_info& LokiMQ::run_info::load(category* cat_, std::string command_, ConnectionID conn_, Access access_, std::string remote_,
                 std::vector<zmq::message_t> data_parts_, const std::pair<CommandCallback, bool>* callback_) {
-    is_batch_job = false;
-    is_reply_job = false;
-    is_tagged_thread_job = false;
+    reset();
     cat = cat_;
     command = std::move(command_);
     conn = std::move(conn_);
     access = std::move(access_);
     remote = std::move(remote_);
     data_parts = std::move(data_parts_);
-    callback = callback_;
+    to_run = callback_;
+    return *this;
+}
+
+LokiMQ::run_info& LokiMQ::run_info::load(category* cat_, std::string command_, std::string remote_, std::function<void()> callback) {
+    reset();
+    is_injected = true;
+    cat = cat_;
+    command = std::move(command_);
+    conn = {};
+    access = {};
+    remote = std::move(remote_);
+    to_run = std::move(callback);
     return *this;
 }
 
 LokiMQ::run_info& LokiMQ::run_info::load(pending_command&& pending) {
+    if (auto *f = std::get_if<std::function<void()>>(&pending.callback))
+        return load(&pending.cat, std::move(pending.command), std::move(pending.remote), std::move(*f));
+
+    assert(pending.callback.index() == 0);
     return load(&pending.cat, std::move(pending.command), std::move(pending.conn), std::move(pending.access),
-            std::move(pending.remote), std::move(pending.data_parts), pending.callback);
+            std::move(pending.remote), std::move(pending.data_parts), std::get<0>(pending.callback));
 }
 
 LokiMQ::run_info& LokiMQ::run_info::load(batch_job&& bj, bool reply_job, int tagged_thread) {
+    reset();
     is_batch_job = true;
     is_reply_job = reply_job;
     is_tagged_thread_job = tagged_thread > 0;
     batch_jobno = bj.second;
-    batch = bj.first;
+    to_run = bj.first;
     return *this;
 }
 

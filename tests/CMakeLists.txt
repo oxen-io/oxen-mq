@@ -10,6 +10,7 @@ set(LMQ_TEST_SRC
     test_commands.cpp
     test_encoding.cpp
     test_failures.cpp
+    test_inject.cpp
     test_requests.cpp
     test_tagged_threads.cpp
     )
