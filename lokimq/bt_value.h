@@ -57,8 +57,6 @@ using bt_variant = std::variant<
     bt_dict
 >;
 
-static_assert(std::is_unsigned_v<volatile unsigned>);
-
 #ifdef __cpp_lib_remove_cvref // C++20
 using std::remove_cvref_t;
 #else
