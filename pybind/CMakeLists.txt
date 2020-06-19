@@ -1,4 +1,5 @@
 pybind11_add_module(pylokimq MODULE
+  bencode.cpp
   lokimq.cpp
   module.cpp)
 set_target_properties(pylokimq PROPERTIES
