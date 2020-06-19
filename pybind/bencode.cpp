@@ -4,8 +4,6 @@
 
 namespace pybind11::detail
 {
-  template <>
-  struct type_caster<lokimq::bt_variant> : variant_caster<lokimq::bt_variant> { };
   
   /// this is because bt_value is really a bt_variant so we do some incantations to make type recursion work
   /// mostly stolen from variant's typecaster
@@ -29,12 +27,20 @@ namespace pybind11::detail
         // slot of the variant. Without two-pass loading `double` would be filled
         // because it appears first and a conversion is possible.
       if (convert && load_alternative(src, false, type_list<lokimq::bt_variant>{}))
-            return true;
-        return load_alternative(src, convert, type_list<lokimq::bt_variant>{});
+        return true;
+      return load_alternative(src, convert, type_list<lokimq::bt_variant>{});
     }
 
     
     static handle cast(lokimq::bt_value && src, return_value_policy policy, handle parent) {
+      if(auto ptr = std::get_if<std::string>(&src))
+      {
+        return PyBytes_FromStringAndSize(ptr->data(), ptr->size());
+      }
+      else if(auto ptr = std::get_if<std::string_view>(&src))
+      {
+        return PyBytes_FromStringAndSize(ptr->data(), ptr->size());
+      }
       return type_caster<lokimq::bt_variant>::cast(std::forward<lokimq::bt_variant>(src), policy, parent);
     }
     using Type = lokimq::bt_value;
@@ -42,19 +48,31 @@ namespace pybind11::detail
   };
 
   template <>
-  struct type_caster<lokimq::bt_value> : bt_value_typecaster { };
-  
+  struct type_caster<lokimq::bt_value> : bt_value_typecaster {};
   
 }
 
 namespace lokimq
 {
+
+
   
   void
   BEncode_Init(py::module & mod)
   {
     auto submod = mod.def_submodule("bencode", "bittorrent encoding/decoding module");
-    submod.def("decode", [](std::string_view data) -> bt_value { return bt_deserialize<bt_value>(data); });
-    submod.def("encode", [](bt_value stuff) -> std::string { return bt_serialize(stuff); });
+    submod.def("decode",
+        [](py::bytes data) -> bt_variant {
+          char * ptr;
+          ssize_t slen;
+          if(PyBytes_AsStringAndSize(data.ptr(), &ptr, &slen) == -1)
+          {
+            throw std::invalid_argument("could not decode bytes");
+          }
+          size_t len = slen;
+          return bt_deserialize<bt_variant>(std::string_view{ptr, len});
+        },
+               "decode a bittorrent encoded value from string to native python value");
+    submod.def("encode", [](bt_variant stuff) -> py::bytes { return bt_serialize(stuff); }, "bitorrent encode a native python value to a string");
   }
 }
