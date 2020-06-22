@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.7)
 
-project(liblokimq CXX)
+project(liblokimq CXX C)
 
 include(GNUInstallDirs)
 
