@@ -4,7 +4,9 @@
 #include <random>
 
 extern "C" {
-#include <sodium.h>
+#include <sodium/core.h>
+#include <sodium/crypto_box.h>
+#include <sodium/crypto_scalarmult.h>
 }
 #include "hex.h"
 

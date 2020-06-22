@@ -2,6 +2,11 @@
 #include "auth.h"
 #include "bt_value.h"
 #include <string_view>
+#include <iosfwd>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <variant>
 
 namespace lokimq {
 

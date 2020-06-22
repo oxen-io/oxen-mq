@@ -27,6 +27,7 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "bt_serialize.h"
+#include <iterator>
 
 namespace lokimq {
 namespace detail {

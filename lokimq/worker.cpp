@@ -1,6 +1,5 @@
 #include "lokimq.h"
 #include "batch.h"
-#include "hex.h"
 #include "lokimq-internal.h"
 
 namespace lokimq {

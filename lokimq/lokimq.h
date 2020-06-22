@@ -42,6 +42,7 @@
 #include <chrono>
 #include <atomic>
 #include <cassert>
+#include <cstdint>
 #include "zmq.hpp"
 #include "bt_serialize.h"
 #include "connections.h"

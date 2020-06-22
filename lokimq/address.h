@@ -29,6 +29,8 @@
 #pragma once
 #include <string>
 #include <string_view>
+#include <cstdint>
+#include <iosfwd>
 
 namespace lokimq {
 

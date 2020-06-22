@@ -29,13 +29,19 @@
 #pragma once
 
 #include <vector>
-#include <algorithm>
 #include <functional>
 #include <cstring>
-#include <ostream>
 #include <sstream>
+#include <ostream>
+#include <string>
 #include <string_view>
 #include <variant>
+#include <cstdint>
+#include <limits>
+#include <stdexcept>
+#include <type_traits>
+#include <utility>
+#include <algorithm>
 
 #include "bt_value.h"
 
