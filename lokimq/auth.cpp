@@ -1,6 +1,8 @@
 #include "lokimq.h"
 #include "hex.h"
 #include "lokimq-internal.h"
+#include <ostream>
+#include <sstream>
 
 namespace lokimq {
 

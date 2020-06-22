@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <utility>
 #include <stdexcept>
+#include <ostream>
 #include "hex.h"
 #include "base32z.h"
 #include "base64.h"
