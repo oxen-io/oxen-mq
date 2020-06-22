@@ -2,6 +2,7 @@
 #include "lokimq-internal.h"
 #include <map>
 #include <random>
+#include <ostream>
 
 extern "C" {
 #include <sodium/core.h>
