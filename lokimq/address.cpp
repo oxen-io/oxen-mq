@@ -181,6 +181,20 @@ address::address(std::string_view addr) {
         throw std::invalid_argument{"Invalid trailing garbage '" + std::string{addr} + "' in address"};
 }
 
+address& address::set_pubkey(std::string_view pk) {
+    if (pk.size() == 0) {
+        if (protocol == proto::tcp_curve) protocol = proto::tcp;
+        else if (protocol == proto::ipc_curve) protocol = proto::ipc;
+    } else if (pk.size() == 32) {
+        if (protocol == proto::tcp) protocol = proto::tcp_curve;
+        else if (protocol == proto::ipc) protocol = proto::ipc_curve;
+    } else {
+        throw std::invalid_argument{"Invalid pubkey passed to set_pubkey(): require 0- or 32-byte pubkey"};
+    }
+    pubkey = pk;
+    return *this;
+}
+
 std::string address::encode_pubkey(encoding enc) const {
     std::string pk;
     if (enc == encoding::hex)

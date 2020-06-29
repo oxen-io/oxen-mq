@@ -27,10 +27,9 @@ TEST_CASE("connections with curve authentication", "[curve][connect]") {
     auto pubkey = server.get_pubkey();
     std::atomic<bool> got{false};
     bool success = false;
-    auto server_conn = client.connect_remote(listen,
+    auto server_conn = client.connect_remote(address{listen, pubkey},
             [&](auto conn) { success = true; got = true; },
-            [&](auto conn, std::string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); got = true; },
-            pubkey);
+            [&](auto conn, std::string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); got = true; });
 
     wait_for_conn(got);
     {

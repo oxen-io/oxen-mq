@@ -44,6 +44,7 @@
 #include <cassert>
 #include <cstdint>
 #include "zmq.hpp"
+#include "address.h"
 #include "bt_serialize.h"
 #include "connections.h"
 #include "message.h"
@@ -967,12 +968,11 @@ public:
      * The `on_connect` and `on_failure` callbacks are invoked when a connection has been
      * established or failed to establish.
      *
-     * @param remote the remote connection address, such as `tcp://localhost:1234`.
+     * @param remote the remote connection address either as implicitly from a string or as a full
+     * lokimq::address object; see address.h for details.  This specifies both the connection
+     * address and whether curve encryption should be used.
      * @param on_connect called with the identifier after the connection has been established.
      * @param on_failure called with the identifier and failure message if we fail to connect.
-     * @param pubkey if non-empty then connect securely (using curve encryption) and verify that the
-     * remote's pubkey equals the given value.  Specifying this is similar to using connect_sn()
-     * except that we do not treat the remote as a SN for command authorization purposes.
      * @param auth_level determines the authentication level of the remote for issuing commands to
      * us.  The default is `AuthLevel::none`.
      * @param timeout how long to try before aborting the connection attempt and calling the
@@ -982,8 +982,23 @@ public:
      * @param returns ConnectionID that uniquely identifies the connection to this remote node.  In
      * order to talk to it you will need the returned value (or a copy of it).
      */
+    ConnectionID connect_remote(const address& remote, ConnectSuccess on_connect, ConnectFailure on_failure,
+            AuthLevel auth_level = AuthLevel::none, std::chrono::milliseconds timeout = REMOTE_CONNECT_TIMEOUT);
+
+    /// Same as the above, but takes the address as a string_view and constructs an `address` from
+    /// it.
     ConnectionID connect_remote(std::string_view remote, ConnectSuccess on_connect, ConnectFailure on_failure,
-            std::string_view pubkey = {},
+            AuthLevel auth_level = AuthLevel::none, std::chrono::milliseconds timeout = REMOTE_CONNECT_TIMEOUT) {
+        return connect_remote(address{remote}, std::move(on_connect), std::move(on_failure), auth_level, timeout);
+    }
+
+    /// Deprecated version of the above that takes the remote address and remote pubkey for curve
+    /// encryption as separate arguments.  New code should either use a pubkey-embedded address
+    /// string, or specify remote address and pubkey with an `address` object such as:
+    ///     connect_remote(address{remote, pubkey}, ...)
+    [[deprecated("use connect_remote() with a lokimq::address instead")]]
+    ConnectionID connect_remote(std::string_view remote, ConnectSuccess on_connect, ConnectFailure on_failure,
+            std::string_view pubkey,
             AuthLevel auth_level = AuthLevel::none,
             std::chrono::milliseconds timeout = REMOTE_CONNECT_TIMEOUT);
 

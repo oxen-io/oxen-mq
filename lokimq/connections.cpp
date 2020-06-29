@@ -76,28 +76,30 @@ ConnectionID LokiMQ::connect_sn(std::string_view pubkey, std::chrono::millisecon
     return pubkey;
 }
 
-ConnectionID LokiMQ::connect_remote(std::string_view remote, ConnectSuccess on_connect, ConnectFailure on_failure,
-        std::string_view pubkey, AuthLevel auth_level, std::chrono::milliseconds timeout) {
+ConnectionID LokiMQ::connect_remote(const address& remote, ConnectSuccess on_connect, ConnectFailure on_failure,
+        AuthLevel auth_level, std::chrono::milliseconds timeout) {
     if (!proxy_thread.joinable())
         throw std::logic_error("Cannot call connect_remote() before calling `start()`");
 
-    if (remote.size() < 7 || !(remote.substr(0, 6) == "tcp://" || remote.substr(0, 6) == "ipc://" /* unix domain sockets */))
-        throw std::runtime_error("Invalid connect_remote: remote address '" + std::string{remote} + "' is not a valid or supported zmq connect string");
-
     auto id = next_conn_id++;
-    LMQ_TRACE("telling proxy to connect to ", remote, ", id ", id,
-            pubkey.empty() ? "using NULL auth" : ", using CURVE with remote pubkey [" + to_hex(pubkey) + "]");
+    LMQ_TRACE("telling proxy to connect to ", remote, ", id ", id);
     detail::send_control(get_control_socket(), "CONNECT_REMOTE", bt_serialize<bt_dict>({
         {"auth_level", static_cast<std::underlying_type_t<AuthLevel>>(auth_level)},
         {"conn_id", id},
         {"connect", detail::serialize_object(std::move(on_connect))},
         {"failure", detail::serialize_object(std::move(on_failure))},
-        {"pubkey", pubkey},
-        {"remote", remote},
+        {"pubkey", remote.curve() ? remote.pubkey : ""},
+        {"remote", remote.zmq_address()},
         {"timeout", timeout.count()},
     }));
 
     return id;
+}
+
+ConnectionID LokiMQ::connect_remote(std::string_view remote, ConnectSuccess on_connect, ConnectFailure on_failure,
+        std::string_view pubkey, AuthLevel auth_level, std::chrono::milliseconds timeout) {
+    return connect_remote(address{remote}.set_pubkey(pubkey),
+            std::move(on_connect), std::move(on_failure), auth_level, timeout);
 }
 
 void LokiMQ::disconnect(ConnectionID id, std::chrono::milliseconds linger) {
