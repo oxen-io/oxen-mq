@@ -41,10 +41,9 @@ TEST_CASE("basic commands", "[commands]") {
     bool success = false, failed = false;
     std::string pubkey;
 
-    auto c = client.connect_remote(listen,
+    auto c = client.connect_remote(address{listen, server.get_pubkey()},
             [&](auto conn) { pubkey = conn.pubkey(); success = true; got = true; },
-            [&](auto conn, std::string_view) { failed = true; got = true; },
-            server.get_pubkey());
+            [&](auto conn, std::string_view) { failed = true; got = true; });
 
     wait_for_conn(got);
     {
@@ -107,9 +106,10 @@ TEST_CASE("outgoing auth level", "[commands][auth]") {
 
     client.PUBKEY_BASED_ROUTING_ID = false; // establishing multiple connections below, so we need unique routing ids
 
-    auto public_c = client.connect_remote(listen, [](auto&&...) {}, [](auto&&...) {}, server.get_pubkey());
-    auto basic_c = client.connect_remote(listen, [](auto&&...) {}, [](auto&&...) {}, server.get_pubkey(), AuthLevel::basic);
-    auto admin_c = client.connect_remote(listen, [](auto&&...) {}, [](auto&&...) {}, server.get_pubkey(), AuthLevel::admin);
+    address server_addr{listen, server.get_pubkey()};
+    auto public_c = client.connect_remote(server_addr, [](auto&&...) {}, [](auto&&...) {});
+    auto basic_c = client.connect_remote(server_addr, [](auto&&...) {}, [](auto&&...) {}, AuthLevel::basic);
+    auto admin_c = client.connect_remote(server_addr, [](auto&&...) {}, [](auto&&...) {}, AuthLevel::admin);
 
     client.send(public_c, "public.reflect", "public.hi");
     wait_for([&] { return public_hi == 1; });
@@ -206,7 +206,7 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
         backdoor_details.emplace(m.data[0]);
     });
     nsa.start();
-    auto nsa_c = nsa.connect_remote(listen, connect_success, connect_failure, server.get_pubkey(), AuthLevel::admin);
+    auto nsa_c = nsa.connect_remote(address{listen, server.get_pubkey()}, connect_success, connect_failure, AuthLevel::admin);
     nsa.send(nsa_c, "hey google.install backdoor");
 
     wait_for([&] { auto lock = catch_lock(); return (bool) backdoor; });
@@ -227,6 +227,7 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
     std::set<std::string> all_the_things;
     for (auto& pd : personal_details) all_the_things.insert(pd.second.begin(), pd.second.end());
 
+    address server_addr{listen, server.get_pubkey()};
     std::map<int, std::set<std::string>> google_knows;
     int things_remembered{0};
     for (int i = 0; i < 5; i++) {
@@ -241,7 +242,7 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
         });
         c->start();
         conns.push_back(
-                c->connect_remote(listen, connect_success, connect_failure, server.get_pubkey(), AuthLevel::basic));
+                c->connect_remote(server_addr, connect_success, connect_failure, AuthLevel::basic));
         for (auto& personal_detail : personal_details[i])
             c->request(conns.back(), "hey google.remember",
                 [&](bool success, std::vector<std::string> data) {

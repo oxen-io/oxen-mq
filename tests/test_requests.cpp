@@ -30,10 +30,9 @@ TEST_CASE("basic requests", "[requests]") {
     std::atomic<bool> connected{false}, failed{false};
     std::string pubkey;
 
-    auto c = client.connect_remote(listen,
+    auto c = client.connect_remote(address{listen, server.get_pubkey()},
             [&](auto conn) { pubkey = conn.pubkey(); connected = true; },
-            [&](auto, auto) { failed = true; },
-            server.get_pubkey());
+            [&](auto, auto) { failed = true; });
 
     wait_for([&] { return connected || failed; });
     {
@@ -88,10 +87,9 @@ TEST_CASE("request from server to client", "[requests]") {
     std::atomic<bool> connected{false}, failed{false};
     std::string pubkey;
 
-    auto c = client.connect_remote(listen,
+    auto c = client.connect_remote(address{listen, server.get_pubkey()},
             [&](auto conn) { pubkey = conn.pubkey(); connected = true; },
-            [&](auto, auto) { failed = true; },
-            server.get_pubkey());
+            [&](auto, auto) { failed = true; });
 
     int i;
     for (i = 0; i < 5; i++) {
@@ -151,10 +149,9 @@ TEST_CASE("request timeouts", "[requests][timeout]") {
     std::atomic<bool> connected{false}, failed{false};
     std::string pubkey;
 
-    auto c = client.connect_remote(listen,
+    auto c = client.connect_remote(address{listen, server.get_pubkey()},
             [&](auto conn) { pubkey = conn.pubkey(); connected = true; },
-            [&](auto, auto) { failed = true; },
-            server.get_pubkey());
+            [&](auto, auto) { failed = true; });
 
     wait_for([&] { return connected || failed; });
 
