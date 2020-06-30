@@ -865,12 +865,9 @@ public:
      *
      * \param name - the name of the thread; will be used in log messages and (if supported by the
      * OS) as the system thread name.
-     * \param init - an optional callback to invoke from the thread immediately after creating it.
-     * This can be used to perform initialization, however should not depend on LokiMQ having
-     * started.
      *
-     * \param start - similar to init, but this is called immediately *after* the LokiMQ object has
-     * started up and so can use LokiMQ object functionality.
+     * \param start - an optional callback to invoke from the thread as soon as LokiMQ itself starts
+     * up (i.e. after a call to `start()`).
      *
      * \returns a TaggedThreadID object that can be passed to job(), batch(), or add_timer() to
      * direct the task to the tagged thread.
