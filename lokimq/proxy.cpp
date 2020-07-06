@@ -2,6 +2,14 @@
 #include "lokimq-internal.h"
 #include "hex.h"
 
+#if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
+extern "C" {
+#include <pthread.h>
+#include <pthread_np.h>
+}
+#endif
+
+
 namespace lokimq {
 
 void LokiMQ::proxy_quit() {
