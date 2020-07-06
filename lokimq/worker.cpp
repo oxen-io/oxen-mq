@@ -2,6 +2,13 @@
 #include "batch.h"
 #include "lokimq-internal.h"
 
+#if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
+extern "C" {
+#include <pthread.h>
+#include <pthread_np.h>
+}
+#endif
+
 namespace lokimq {
 
 namespace {
