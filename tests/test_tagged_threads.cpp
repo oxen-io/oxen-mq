@@ -25,6 +25,11 @@ TEST_CASE("tagged thread start functions", "[tagged][start]") {
     }
 }
 
+TEST_CASE("tagged threads quit-before-start", "[tagged][quit]") {
+    auto lmq = std::make_unique<lokimq::LokiMQ>(get_logger(""), LogLevel::trace);
+    auto t_abc = lmq->add_tagged_thread("abc");
+    REQUIRE_NOTHROW(lmq.reset());
+}
 
 TEST_CASE("batch jobs to tagged threads", "[tagged][batch]") {
     lokimq::LokiMQ lmq{get_logger(""), LogLevel::trace};
