@@ -393,8 +393,22 @@ LokiMQ::run_info& LokiMQ::run_info::load(batch_job&& bj, bool reply_job, int tag
 
 
 LokiMQ::~LokiMQ() {
-    if (!proxy_thread.joinable())
+    if (!proxy_thread.joinable()) {
+        if (!tagged_workers.empty()) {
+            // This is a bit icky: we have tagged workers that are waiting for a signal on
+            // workers_socket, but the listening end of workers_socket doesn't get set up until the
+            // proxy thread starts (and we're getting destructed here without a proxy thread).  So
+            // we need to start listening on it here in the destructor so that we establish a
+            // connection and send the QUITs to the tagged worker threads.
+            workers_socket.bind(SN_ADDR_WORKERS);
+            for (auto& [run, busy, queue] : tagged_workers)
+                route_control(workers_socket, run.worker_routing_id, "QUIT");
+            for (auto& [run, busy, queue] : tagged_workers)
+                run.worker_thread.join();
+        }
+
         return;
+    }
 
     LMQ_LOG(info, "LokiMQ shutting down proxy thread");
     detail::send_control(get_control_socket(), "QUIT");
