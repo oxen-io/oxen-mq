@@ -400,9 +400,18 @@ LokiMQ::~LokiMQ() {
             // proxy thread starts (and we're getting destructed here without a proxy thread).  So
             // we need to start listening on it here in the destructor so that we establish a
             // connection and send the QUITs to the tagged worker threads.
+            workers_socket.setsockopt<int>(ZMQ_ROUTER_MANDATORY, 1);
             workers_socket.bind(SN_ADDR_WORKERS);
-            for (auto& [run, busy, queue] : tagged_workers)
-                route_control(workers_socket, run.worker_routing_id, "QUIT");
+            for (auto& [run, busy, queue] : tagged_workers) {
+                while (true) {
+                    try {
+                        route_control(workers_socket, run.worker_routing_id, "QUIT");
+                        break;
+                    } catch (const zmq::error_t&) {
+                        std::this_thread::sleep_for(5ms);
+                    }
+                }
+            }
             for (auto& [run, busy, queue] : tagged_workers)
                 run.worker_thread.join();
         }
