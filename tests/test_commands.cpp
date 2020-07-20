@@ -362,3 +362,78 @@ TEST_CASE("send failure callbacks", "[commands][queue_full]") {
         REQUIRE( send_failures.load() > 0 );
     }
 }
+
+TEST_CASE("data parts", "[send][data_parts]") {
+    std::string listen = "tcp://127.0.0.1:4567";
+    LokiMQ server{
+        "", "", // generate ephemeral keys
+        false, // not a service node
+        [](auto) { return ""; },
+        get_logger("S» "),
+        LogLevel::trace
+    };
+    server.listen_curve(listen);
+
+    std::mutex mut;
+    std::vector<std::string> r;
+
+    server.add_category("public", Access{AuthLevel::none});
+    server.add_command("public", "hello", [&](Message& m) {
+        std::lock_guard l{mut};
+        for (const auto& s : m.data)
+            r.emplace_back(s);
+    });
+    server.start();
+
+    LokiMQ client{get_logger("C» "), LogLevel::trace};
+    client.start();
+
+    std::atomic<bool> got{false};
+    bool success = false, failed = false;
+    std::string pubkey;
+
+    auto c = client.connect_remote(address{listen, server.get_pubkey()},
+            [&](auto conn) { pubkey = conn.pubkey(); success = true; got = true; },
+            [&](auto conn, std::string_view) { failed = true; got = true; });
+
+    wait_for_conn(got);
+    {
+        auto lock = catch_lock();
+        REQUIRE( got );
+        REQUIRE( success );
+        REQUIRE_FALSE( failed );
+        REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
+    }
+
+    std::vector some_data{{"abc"s, "def"s, "omg123\0zzz"s}};
+    client.send(c, "public.hello", lokimq::send_option::data_parts(some_data.begin(), some_data.end()));
+    reply_sleep();
+    {
+        auto lock = catch_lock();
+        std::lock_guard l{mut};
+        REQUIRE( r == some_data );
+        r.clear();
+    }
+
+    std::vector some_data2{{"a"sv, "b"sv, "\0"sv}};
+    client.send(c, "public.hello",
+            "hi",
+            lokimq::send_option::data_parts(some_data2.begin(), some_data2.end()),
+            "another",
+            "string"sv,
+            lokimq::send_option::data_parts(some_data.begin(), some_data.end()));
+
+    std::vector<std::string> expected;
+    expected.push_back("hi");
+    expected.insert(expected.end(), some_data2.begin(), some_data2.end());
+    expected.push_back("another");
+    expected.push_back("string");
+    expected.insert(expected.end(), some_data.begin(), some_data.end());
+
+    reply_sleep();
+    {
+        auto lock = catch_lock();
+        std::lock_guard l{mut};
+        REQUIRE( r == expected );
+    }
+}

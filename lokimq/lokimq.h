@@ -32,6 +32,7 @@
 #include <string_view>
 #include <list>
 #include <queue>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <memory>
@@ -1263,9 +1264,10 @@ struct data_parts_impl {
     data_parts_impl(InputIt begin, InputIt end) : begin{std::move(begin)}, end{std::move(end)} {}
 };
 
-/// Specifies an iterator pair of data options to send, for when the number of arguments to send()
-/// cannot be determined at compile time.
-template <typename InputIt>
+/// Specifies an iterator pair of data parts to send, for when the number of arguments to send()
+/// cannot be determined at compile time.  The iterator pair must be over strings or string_view (or
+/// something convertible to a string_view).
+template <typename InputIt, typename = std::enable_if_t<std::is_convertible_v<decltype(*std::declval<InputIt>()), std::string_view>>>
 data_parts_impl<InputIt> data_parts(InputIt begin, InputIt end) { return {std::move(begin), std::move(end)}; }
 
 /// Specifies a connection hint when passed in to send().  If there is no current connection to the
@@ -1395,7 +1397,7 @@ inline void apply_send_option(bt_list& parts, bt_dict&, std::string_view arg) {
 template <typename InputIt>
 void apply_send_option(bt_list& parts, bt_dict&, const send_option::data_parts_impl<InputIt> data) {
     for (auto it = data.begin; it != data.end; ++it)
-        parts.push_back(lokimq::bt_deserialize(*it));
+        parts.emplace_back(*it);
 }
 
 /// `hint` specialization: sets the hint in the control data
