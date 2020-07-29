@@ -324,17 +324,6 @@ struct bt_deserialize<T, std::enable_if_t<is_bt_output_list_container<T>>> {
     }
 };
 
-/// variant visitor; serializes whatever is contained
-class bt_serialize_visitor {
-    std::ostream &os;
-public:
-    using result_type = void;
-    bt_serialize_visitor(std::ostream &os) : os{os} {}
-    template <typename T> void operator()(const T &val) const {
-        bt_serialize<T>{}(os, val);
-    }
-};
-
 template <typename T>
 constexpr bool is_bt_deserializable = std::is_same_v<T, std::string> || std::is_integral_v<T> ||
     is_bt_output_dict_container<T> || is_bt_output_list_container<T>;
@@ -383,7 +372,12 @@ struct bt_deserialize_try_variant_impl<std::enable_if_t<!is_bt_deserializable<T>
 template <typename... Ts>
 struct bt_serialize<std::variant<Ts...>, std::void_t<bt_serialize<Ts>...>> {
     void operator()(std::ostream &os, const std::variant<Ts...>& val) {
-        std::visit(bt_serialize_visitor{os}, val);
+        std::visit(
+                [&os] (const auto& val) {
+                    using T = std::remove_cv_t<std::remove_reference_t<decltype(val)>>;
+                    bt_serialize<T>{}(os, val);
+                },
+                val);
     }
 };
 
