@@ -41,6 +41,7 @@
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+#include <tuple>
 #include <algorithm>
 
 #include "bt_value.h"
@@ -324,9 +325,64 @@ struct bt_deserialize<T, std::enable_if_t<is_bt_output_list_container<T>>> {
     }
 };
 
+/// Serializes a tuple or pair of serializable values (as a list on the wire)
+
+/// Common implementation for both tuple and pair:
+template <template<typename...> typename Tuple, typename... T>
+struct bt_serialize_tuple {
+private:
+    template <size_t... Is>
+    void operator()(std::ostream& os, const Tuple<T...>& elems, std::index_sequence<Is...>) {
+        os << 'l';
+        (bt_serialize<T>{}(os, std::get<Is>(elems)), ...);
+        os << 'e';
+    }
+public:
+    void operator()(std::ostream& os, const Tuple<T...>& elems) {
+        operator()(os, elems, std::index_sequence_for<T...>{});
+    }
+};
+template <template<typename...> typename Tuple, typename... T>
+struct bt_deserialize_tuple {
+private:
+    template <size_t... Is>
+    void operator()(std::string_view& s, Tuple<T...>& elems, std::index_sequence<Is...>) {
+        // Smallest list is 2 bytes "le", for an empty list.
+        if (s.size() < 2) throw bt_deserialize_invalid("Deserialization failed: end of string found where tuple expected");
+        if (s[0] != 'l') throw bt_deserialize_invalid_type("Deserialization of tuple failed: expected 'l', found '"s + s[0] + "'"s);
+        s.remove_prefix(1);
+        (bt_deserialize<T>{}(s, std::get<Is>(elems)), ...);
+        if (s.empty())
+            throw bt_deserialize_invalid("Deserialization failed: encountered end of string before tuple was finished");
+        if (s[0] != 'e')
+            throw bt_deserialize_invalid("Deserialization failed: expected end of tuple but found something else");
+        s.remove_prefix(1); // Consume the 'e'
+    }
+public:
+    void operator()(std::string_view& s, Tuple<T...>& elems) {
+        operator()(s, elems, std::index_sequence_for<T...>{});
+    }
+};
+template <typename... T>
+struct bt_serialize<std::tuple<T...>> : bt_serialize_tuple<std::tuple, T...> {};
+template <typename... T>
+struct bt_deserialize<std::tuple<T...>> : bt_deserialize_tuple<std::tuple, T...> {};
+template <typename S, typename T>
+struct bt_serialize<std::pair<S, T>> : bt_serialize_tuple<std::pair, S, T> {};
+template <typename S, typename T>
+struct bt_deserialize<std::pair<S, T>> : bt_deserialize_tuple<std::pair, S, T> {};
+
+template <typename T>
+constexpr bool is_bt_tuple = false;
+template <typename... T>
+constexpr bool is_bt_tuple<std::tuple<T...>> = true;
+template <typename S, typename T>
+constexpr bool is_bt_tuple<std::pair<S, T>> = true;
+
+
 template <typename T>
 constexpr bool is_bt_deserializable = std::is_same_v<T, std::string> || std::is_integral_v<T> ||
-    is_bt_output_dict_container<T> || is_bt_output_list_container<T>;
+    is_bt_output_dict_container<T> || is_bt_output_list_container<T> || is_bt_tuple<T>;
 
 // General template and base case; this base will only actually be invoked when Ts... is empty,
 // which means we reached the end without finding any variant type capable of holding the value.
@@ -347,6 +403,7 @@ template <typename Variant, typename T, typename... Ts>
 struct bt_deserialize_try_variant_impl<std::enable_if_t<is_bt_deserializable<T>>, Variant, T, Ts...> {
     void operator()(std::string_view& s, Variant& variant) {
         if (    is_bt_output_list_container<T> ? s[0] == 'l' :
+                is_bt_tuple<T>                 ? s[0] == 'l' :
                 is_bt_output_dict_container<T> ? s[0] == 'd' :
                 std::is_integral_v<T>          ? s[0] == 'i' :
                 std::is_same_v<T, std::string> ? s[0] >= '0' && s[0] <= '9' :
@@ -515,6 +572,58 @@ IntType get_int(const bt_value &v) {
     return static_cast<IntType>(value);
 }
 
+namespace detail {
+template <typename Tuple, size_t... Is>
+void get_tuple_impl(Tuple& t, const bt_list& l, std::index_sequence<Is...>);
+}
+
+/// Converts a bt_list into the given template std::tuple or std::pair.  Throws a
+/// std::invalid_argument if the list has the wrong size or wrong element types.  Supports recursion
+/// (i.e. if the tuple itself contains tuples or pairs).  The tuple (or nested tuples) may only
+/// contain integral types, strings, string_views, bt_list, bt_dict, and tuples/pairs of those.
+template <typename Tuple>
+Tuple get_tuple(const bt_list& x) {
+    Tuple t;
+    detail::get_tuple_impl(t, x, std::make_index_sequence<std::tuple_size_v<Tuple>>{});
+    return t;
+}
+template <typename Tuple>
+Tuple get_tuple(const bt_value& x) {
+    return get_tuple<Tuple>(std::get<bt_list>(static_cast<const bt_variant&>(x)));
+}
+
+namespace detail {
+template <typename T, typename It>
+void get_tuple_impl_one(T& t, It& it) {
+    const bt_variant& v = *it++;
+    if constexpr (std::is_integral_v<T>) {
+        t = lokimq::get_int<T>(v);
+    } else if constexpr (is_bt_tuple<T>) {
+        if (std::holds_alternative<bt_list>(v))
+            throw std::invalid_argument{"Unable to convert tuple: cannot create sub-tuple from non-bt_list"};
+        t = get_tuple<T>(std::get<bt_list>(v));
+    } else if constexpr (std::is_same_v<std::string, T> || std::is_same_v<std::string_view, T>) {
+        // If we request a string/string_view, we might have the other one and need to copy/view it.
+        if (std::holds_alternative<std::string_view>(v))
+            t = std::get<std::string_view>(v);
+        else
+            t = std::get<std::string>(v);
+    } else {
+        t = std::get<T>(v);
+    }
+}
+template <typename Tuple, size_t... Is>
+void get_tuple_impl(Tuple& t, const bt_list& l, std::index_sequence<Is...>) {
+    if (l.size() != sizeof...(Is))
+        throw std::invalid_argument{"Unable to convert tuple: bt_list has wrong size"};
+    auto it = l.begin();
+    (get_tuple_impl_one(std::get<Is>(t), it), ...);
+}
+} // namespace detail
+
+
+
+
 /// Class that allows you to walk through a bt-encoded list in memory without copying or allocating
 /// memory.  It accesses existing memory directly and so the caller must ensure that the referenced
 /// memory stays valid for the lifetime of the bt_list_consumer object.
@@ -560,9 +669,10 @@ public:
         return ret;
     }
 
-    /// Consumes a list, return it as a list-like type.  This typically requires dynamic allocation,
-    /// but only has to parse the data once.  Compare with consume_list_data() which allows
-    /// alloc-free traversal, but requires parsing twice (if the contents are to be used).
+    /// Consumes a list, return it as a list-like type.  Can also be used for tuples/pairs.  This
+    /// typically requires dynamic allocation, but only has to parse the data once.  Compare with
+    /// consume_list_data() which allows alloc-free traversal, but requires parsing twice (if the
+    /// contents are to be used).
     template <typename T = bt_list>
     T consume_list() {
         T list;
@@ -689,7 +799,7 @@ public:
     template <typename T = bt_list>
     std::pair<std::string_view, T> next_list() {
         std::pair<std::string_view, T> pair;
-        pair.first = consume_list(pair.second);
+        pair.first = next_list(pair.second);
         return pair;
     }
 

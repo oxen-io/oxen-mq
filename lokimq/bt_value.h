@@ -71,10 +71,22 @@ struct has_alternative<T, std::variant<V...>> : std::bool_constant<(std::is_same
 template <typename T, typename Variant>
 constexpr bool has_alternative_v = has_alternative<T, Variant>::value;
 
+namespace detail {
+    template <typename Tuple, size_t... Is>
+    bt_list tuple_to_list(const Tuple& tuple, std::index_sequence<Is...>) {
+        return {{bt_value{std::get<Is>(tuple)}...}};
+    }
+    template <typename T> constexpr bool is_tuple = false;
+    template <typename... T> constexpr bool is_tuple<std::tuple<T...>> = true;
+    template <typename S, typename T> constexpr bool is_tuple<std::pair<S, T>> = true;
+}
+
 /// Recursive generic type that can fully represent everything valid for a BT serialization.
-/// This is basically just an empty wrapper around the std::variant, except we add some integer
-/// constructors so that any unsigned value goes to the uint64_t and any signed value goes to the
-/// int64_t.
+/// This is basically just an empty wrapper around the std::variant, except we add some extra
+/// converting constructors:
+/// - integer constructors so that any unsigned value goes to the uint64_t and any signed value goes
+///   to the int64_t.
+/// - std::tuple and std::pair constructors that build a bt_list out of the tuple/pair elements.
 struct bt_value : bt_variant {
     using bt_variant::bt_variant;
     using bt_variant::operator=;
@@ -85,9 +97,15 @@ struct bt_value : bt_variant {
     template <typename T, typename U = std::remove_reference_t<T>, std::enable_if_t<std::is_integral_v<U> && std::is_signed_v<U>, int> = 0>
     bt_value(T&& sint) : bt_variant{static_cast<int64_t>(sint)} {}
 
-    // This forward ctor shouldn't be necessary, but clang fails to find the base variant ctors without it.
-    template <typename T, typename U = std::remove_reference_t<T>, std::enable_if_t<!std::is_integral_v<U>, int> = 0>
+    template <typename... T>
+    bt_value(const std::tuple<T...>& tuple) : bt_variant{detail::tuple_to_list(tuple, std::index_sequence_for<T...>{})} {}
+
+    template <typename S, typename T>
+    bt_value(const std::pair<S, T>& pair) : bt_variant{detail::tuple_to_list(pair, std::index_sequence_for<S, T>{})} {}
+
+    template <typename T, typename U = std::remove_reference_t<T>, std::enable_if_t<!std::is_integral_v<U> && !detail::is_tuple<U>, int> = 0>
     bt_value(T&& v) : bt_variant{std::forward<T>(v)} {}
+
 };
 
 }
