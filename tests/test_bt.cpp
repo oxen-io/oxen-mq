@@ -157,6 +157,73 @@ TEST_CASE("bt_value deserialization", "[bt][deserialization][bt_value]") {
     REQUIRE( std::get<bt_list>(a.at("bar")).empty() );
 }
 
+TEST_CASE("bt tuple serialization", "[bt][tuple][serialization]") {
+    // Deserializing directly into a tuple:
+    std::tuple<int, std::string, std::vector<int>> x{42, "hi", {{1,2,3,4,5}}};
+    REQUIRE( bt_serialize(x) == "li42e2:hili1ei2ei3ei4ei5eee" );
+
+    using Y = std::tuple<std::string, std::string, std::unordered_map<std::string, int>>;
+    REQUIRE( bt_deserialize<Y>("l5:hello3:omgd1:ai1e1:bi2eee")
+            == Y{"hello", "omg", {{"a",1}, {"b",2}}} );
+
+    using Z = std::tuple<std::tuple<int, std::string, std::string>, std::pair<int, int>>;
+    Z z{{3, "abc", "def"}, {4, 5}};
+    REQUIRE( bt_serialize(z) == "lli3e3:abc3:defeli4ei5eee" );
+    REQUIRE( bt_deserialize<Z>("lli6e3:ghi3:jkleli7ei8eee") == Z{{6, "ghi", "jkl"}, {7, 8}} );
+
+    using W = std::pair<std::string, std::pair<int, unsigned>>;
+    REQUIRE( bt_serialize(W{"zzzzzzzzzz", {42, 42}}) == "l10:zzzzzzzzzzli42ei42eee" );
+
+    REQUIRE_THROWS( bt_deserialize<std::tuple<int>>("li1e") ); // missing closing e
+    REQUIRE_THROWS( bt_deserialize<std::pair<int, int>>("li1ei-4e") ); // missing closing e
+    REQUIRE_THROWS( bt_deserialize<std::tuple<int>>("li1ei2ee") ); // too many elements
+    REQUIRE_THROWS( bt_deserialize<std::pair<int, int>>("li1ei-2e0:e") ); // too many elements
+    REQUIRE_THROWS( bt_deserialize<std::tuple<int, int>>("li1ee") ); // too few elements
+    REQUIRE_THROWS( bt_deserialize<std::pair<int, int>>("li1ee") ); // too few elements
+    REQUIRE_THROWS( bt_deserialize<std::tuple<std::string>>("li1ee") ); // wrong element type
+    REQUIRE_THROWS( bt_deserialize<std::pair<int, std::string>>("li1ei8ee") ); // wrong element type
+    REQUIRE_THROWS( bt_deserialize<std::pair<int, std::string>>("l1:x1:xe") ); // wrong element type
+
+    // Converting from a generic bt_value/bt_list:
+    bt_value a = bt_get("l5:hello3:omgi12345ee");
+    using V1 = std::tuple<std::string, std::string_view, uint16_t>;
+    REQUIRE( get_tuple<V1>(a) == V1{"hello", "omg"sv, 12345} );
+
+    bt_value b = bt_get("l5:hellod1:ai1e1:bi2eee");
+    using V2 = std::pair<std::string_view, bt_dict>;
+    REQUIRE( get_tuple<V2>(b) == V2{"hello", {{"a",1U}, {"b",2U}}} );
+
+    bt_value c = bt_get("l5:helloi-4ed1:ai-1e1:bi-2eee");
+    using V3 = std::tuple<std::string, int, bt_dict>;
+    REQUIRE( get_tuple<V3>(c) == V3{"hello", -4, {{"a",-1}, {"b",-2}}} );
+
+    REQUIRE_THROWS( get_tuple<V1>(bt_get("l5:hello3:omge")) ); // too few
+    REQUIRE_THROWS( get_tuple<V1>(bt_get("l5:hello3:omgi1ei1ee")) ); // too many
+    REQUIRE_THROWS( get_tuple<V1>(bt_get("l5:helloi1ei1ee")) ); // wrong type
+
+    // Construct a bt_value from tuples:
+    bt_value l{std::make_tuple(3, 4, "hi"sv)};
+    REQUIRE( bt_serialize(l) == "li3ei4e2:hie" );
+    bt_list m{{1, 2, std::make_tuple(3, 4, "hi"sv), std::make_pair("foo"s, "bar"sv), -4}};
+    REQUIRE( bt_serialize(m) == "li1ei2eli3ei4e2:hiel3:foo3:barei-4ee" );
+
+    // Consumer deserialization:
+    bt_list_consumer lc{"li1ei2eli3ei4e2:hiel3:foo3:barei-4ee"};
+    REQUIRE( lc.consume_integer<int>() == 1 );
+    REQUIRE( lc.consume_integer<int>() == 2 );
+    REQUIRE( lc.consume_list<std::tuple<int, int, std::string>>() == std::make_tuple(3, 4, "hi"s) );
+    REQUIRE( lc.consume_list<std::pair<std::string_view, std::string_view>>() == std::make_pair("foo"sv, "bar"sv) );
+    REQUIRE( lc.consume_integer<int>() == -4 );
+
+    bt_dict_consumer dc{"d1:Ai0e1:ali1e3:omge1:bli1ei2ei3eee"};
+    REQUIRE( dc.key() == "A" );
+    REQUIRE( dc.skip_until("a") );
+    REQUIRE( dc.next_list<std::pair<int8_t, std::string_view>>() ==
+            std::make_pair("a"sv, std::make_pair(int8_t{1}, "omg"sv)) );
+    REQUIRE( dc.next_list<std::tuple<int, int, int>>() ==
+            std::make_pair("b"sv, std::make_tuple(1, 2, 3)) );
+}
+
 #if 0
     {
         std::cout << "zomg consumption\n";
