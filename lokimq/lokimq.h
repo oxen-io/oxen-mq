@@ -93,7 +93,7 @@ class CatHelper;
 /// constructible, but is safe (and cheap) to copy.
 struct TaggedThreadID {
 private:
-    const int _id;
+    int _id;
     explicit constexpr TaggedThreadID(int id) : _id{id} {}
     friend class LokiMQ;
     template <typename R> friend class Batch;
