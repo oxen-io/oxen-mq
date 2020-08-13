@@ -72,20 +72,20 @@ template <typename R> class Batch;
  * use a longer keep-alive to a host call `connect()` first with the desired keep-alive time or pass
  * the send_option::keep_alive.
  */
-static constexpr auto DEFAULT_SEND_KEEP_ALIVE = 30s;
+inline constexpr auto DEFAULT_SEND_KEEP_ALIVE = 30s;
 
 // The default timeout for connect_remote()
-static constexpr auto REMOTE_CONNECT_TIMEOUT = 10s;
+inline constexpr auto REMOTE_CONNECT_TIMEOUT = 10s;
 
 // The amount of time we wait for a reply to a REQUEST before calling the callback with
 // `false` to signal a timeout.
-static constexpr auto DEFAULT_REQUEST_TIMEOUT = 15s;
+inline constexpr auto DEFAULT_REQUEST_TIMEOUT = 15s;
 
 /// Maximum length of a category
-static constexpr size_t MAX_CATEGORY_LENGTH = 50;
+inline constexpr size_t MAX_CATEGORY_LENGTH = 50;
 
 /// Maximum length of a command
-static constexpr size_t MAX_COMMAND_LENGTH = 200;
+inline constexpr size_t MAX_COMMAND_LENGTH = 200;
 
 class CatHelper;
 
