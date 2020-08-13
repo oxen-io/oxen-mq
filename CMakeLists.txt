@@ -138,9 +138,13 @@ install(
 )
 
 install(
-    FILES lokimq/auth.h
+    FILES lokimq/address.h
+          lokimq/auth.h
+          lokimq/base32z.h
+          lokimq/base64.h
           lokimq/batch.h
           lokimq/bt_serialize.h
+          lokimq/bt_value.h
           lokimq/connections.h
           lokimq/hex.h
           lokimq/lokimq.h
