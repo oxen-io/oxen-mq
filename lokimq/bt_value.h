@@ -106,6 +106,7 @@ struct bt_value : bt_variant {
     template <typename T, typename U = std::remove_reference_t<T>, std::enable_if_t<!std::is_integral_v<U> && !detail::is_tuple<U>, int> = 0>
     bt_value(T&& v) : bt_variant{std::forward<T>(v)} {}
 
+    bt_value(const char* s) : bt_value{std::string_view{s}} {}
 };
 
 }
