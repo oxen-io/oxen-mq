@@ -90,6 +90,9 @@ TEST_CASE("bt_value serialization", "[bt][serialization][bt_value]") {
     std::string x_ = bt_serialize(dna);
     REQUIRE( bt_serialize(dna) == "i42e" );
 
+    bt_value foo{"foo"};
+    REQUIRE( bt_serialize(foo) == "3:foo" );
+
     bt_value ibig{-8'000'000'000'000'000'000LL};
     bt_value ubig{10'000'000'000'000'000'000ULL};
     int16_t ismall = -123;
