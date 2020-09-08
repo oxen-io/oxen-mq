@@ -387,12 +387,12 @@ void LokiMQ::proxy_loop() {
     if (saved_umask != -1)
         umask(saved_umask);
 
-    // set socket gid if it is provided
-    if (SOCKET_GID != -1) {
+    // set socket gid / uid if it is provided
+    if (SOCKET_GID != -1 or SOCKET_UID != -1) {
         for(size_t i = 0; i < bind.size(); i++) {
             const address addr(bind[i].first);
             if(addr.ipc()) {
-                if(chown(addr.socket.c_str(), -1, SOCKET_GID) == -1) {
+                if(chown(addr.socket.c_str(), SOCKET_UID, SOCKET_GID) == -1) {
                     throw std::runtime_error("cannot set group on " + addr.socket + ": " + strerror(errno));
                 }
             }
