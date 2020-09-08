@@ -269,6 +269,9 @@ public:
     /** The gid that owns any sockets when constructed (same as umask)
      */
     int SOCKET_GID = -1;
+    /** The uid that owns any sockets when constructed (same as umask but requires root)
+     */
+    int SOCKET_UID = -1;
 
     /// A special TaggedThreadID value that always refers to the proxy thread; the main use of this is
     /// to direct very simple batch completion jobs to be executed directly in the proxy thread.
