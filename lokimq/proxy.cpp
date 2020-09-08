@@ -12,6 +12,8 @@ extern "C" {
 #ifndef _WIN32
 extern "C" {
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 }
 #endif
 
@@ -384,6 +386,18 @@ void LokiMQ::proxy_loop() {
 #ifndef _WIN32
     if (saved_umask != -1)
         umask(saved_umask);
+
+    // set socket gid if it is provided
+    if (SOCKET_GID != -1) {
+        for(size_t i = 0; i < bind.size(); i++) {
+            const address addr(bind[i].first);
+            if(addr.ipc()) {
+                if(chown(addr.socket.c_str(), -1, SOCKET_GID) == -1) {
+                    throw std::runtime_error("cannot set group on " + addr.socket + ": " + strerror(errno));
+                }
+            }
+        }
+    }
 #endif
 
     pollitems_stale = true;

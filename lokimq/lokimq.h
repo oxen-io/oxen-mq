@@ -266,6 +266,10 @@ public:
      */
     int STARTUP_UMASK = -1;
 
+    /** The gid that owns any sockets when constructed (same as umask)
+     */
+    int SOCKET_GID = -1;
+
     /// A special TaggedThreadID value that always refers to the proxy thread; the main use of this is
     /// to direct very simple batch completion jobs to be executed directly in the proxy thread.
     inline static constexpr TaggedThreadID run_in_proxy{-1};
