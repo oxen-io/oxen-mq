@@ -68,7 +68,7 @@ else()
 endif()
 
 if(lokimq_build_static_libzmq)
-    message(STATUS "libzmq >= 4.3 not found or static build requested, building bundled 4.3.2")
+    message(STATUS "libzmq >= 4.3 not found or static build requested, building bundled version")
     list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/local-libzmq")
     include(LocalLibzmq)
     target_link_libraries(lokimq PUBLIC libzmq_vendor)
