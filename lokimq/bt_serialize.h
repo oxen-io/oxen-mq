@@ -85,6 +85,19 @@ class bt_deserialize_invalid_type : public bt_deserialize_invalid {
     using bt_deserialize_invalid::bt_deserialize_invalid;
 };
 
+/// Exception throw if serialization to static buffer runs out of buffer
+class bt_serialize_length_error : public std::length_error {
+    using std::length_error::length_error;
+};
+
+/// Exception throw if attempting to serialize in invalid context
+/// example: constructing a dict and calling non-dict serialization method.
+/// NOTE: currently only relevant/useful to fixed-buffer serializiation
+class bt_serialize_invalid_call : public std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+
 namespace detail {
 
 /// Reads digits into an unsigned 64-bit int.
@@ -909,5 +922,192 @@ public:
     bt_dict_consumer consume_dict_consumer() { return consume_dict_data(); }
 };
 
+/// Currently this is not idiot-proof.  That is to say, the compiler won't catch everything and
+/// you technically can create invalid BEncoded strings.  Basically you can add list elements
+/// to a dict and dict elements to a list, and obviously that can end badly.  This may be fixed
+/// at a later time.
+struct fixed_buffer_producer
+{
+    char* begin;
+    char* end;
+
+    char* original_begin;
+
+    fixed_buffer_producer(char* begin, char* end) : begin(begin), end(end), original_begin(begin){
+        if (not (end > begin))
+            throw bt_serialize_length_error("Fixed buffer for serialization end pointer < begin pointer.");
+    }
+
+    // For now, used just for strings.  If we end up serializing large numbers as integers this
+    // will be used for that as well.  As this is designed for strings, will optimize for small
+    // integers and won't work for values > 99999.
+    size_t num_digits(size_t value)
+    {
+        size_t digits = 1;
+
+        if (value > 10) digits++;
+        if (value > 100) digits++;
+        if (value > 1000) digits++;
+        if (value > 10000) digits++;
+
+        return digits;
+    }
+
+    void check_space(size_t len)
+    {
+        if (end <= begin or (size_t)(end - begin) < len)
+            throw  bt_serialize_length_error("Static buffer BEncode buffer overflow.");
+    }
+
+    // MUST check for space before calling this.
+    size_t append_size(size_t size)
+    {
+        size_t digits = 1;
+        char* op = begin;
+
+        *(begin++) = (size % 10) + '0';
+        size /= 10;
+
+        while (size > 0)
+        {
+            *(begin++) = (size % 10) + '0';
+            size /= 10;
+            digits++;
+        }
+
+        char* ed = begin - 1;
+        while (ed > op)
+        {
+            char tmp = *ed;
+            *ed-- = *op;
+            *op++ = tmp;
+        }
+
+        return digits;
+    }
+
+    template <typename T>
+    fixed_buffer_producer& append_integer(T number)
+    {
+        static_assert(std::is_integral<T>::value, "Can't BEncode non-integral type as integer.");
+
+        // integer takes min space 3, e.g. i3e or i0e
+        check_space(3);
+        *(begin++) = 'i';
+
+        char* op = begin;
+
+        // first digit always present, even if value is 0
+        *(begin++) = (number % 10) + '0';
+        number /= 10;
+
+        // will have to profile, but one assumes it is faster to check per-digit than
+        // to calculate number of digits then check.
+        while (number > 0)
+        {
+            check_space(2); // need space for the 'e' to end the number, as well as current digit
+            *(begin++) = (number % 10) + '0';
+            number /= 10;
+        }
+
+        char *ed = begin - 1;
+        while (ed > op)
+        {
+            char tmp = *ed;
+            *ed-- = *op;
+            *op++ = tmp;
+        }
+
+        *(begin++) = 'e';
+
+        return *this;
+    }
+
+    template <typename T>
+    fixed_buffer_producer& append_integer(T number, std::string_view key)
+    {
+        static_assert(std::is_integral<T>::value, "Can't BEncode non-integral type as integer.");
+
+        append_string(key);
+        append_integer(number);
+        return *this;
+    }
+
+    fixed_buffer_producer& append_string(std::string_view string)
+    {
+        size_t digits = num_digits(string.size());
+
+        check_space(digits + string.size() + 1);
+
+        append_size(string.size());
+
+        *(begin++) = ':';
+
+        memcpy(begin, string.data(), string.size());
+        begin += string.size();
+        return *this;
+    }
+
+    fixed_buffer_producer& append_string(std::string_view string, std::string_view key)
+    {
+        append_string(key);
+        append_string(string);
+        return *this;
+    }
+
+    fixed_buffer_producer& append_serialized_data(std::string_view string)
+    {
+        check_space(string.size());
+        memcpy(begin, string.data(), string.size());
+        begin += string.size();
+        return *this;
+    }
+
+    fixed_buffer_producer& start_list()
+    {
+        check_space(2);
+        *(begin++) = 'l';
+        end--;
+        return *this;
+    }
+
+    fixed_buffer_producer& start_list(std::string_view key)
+    {
+        append_string(key);
+        return start_list();
+    }
+
+    fixed_buffer_producer& start_dict()
+    {
+        check_space(2);
+        *(begin++) = 'd';
+        end--;
+        return *this;
+    }
+
+    fixed_buffer_producer& start_dict(std::string_view key)
+    {
+        append_string(key);
+        return start_dict();
+    }
+
+    fixed_buffer_producer& end_list()
+    {
+        *(begin++) = 'e';
+        end++;
+        return *this;
+    }
+
+    fixed_buffer_producer& end_dict()
+    {
+        return end_list();
+    }
+
+    size_t size()
+    {
+        return begin - original_begin;
+    }
+
+};
 
 } // namespace lokimq
