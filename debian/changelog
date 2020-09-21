@@ -1,3 +1,9 @@
+lokimq (1.2.0~pre1-1) unstable; urgency=medium
+
+  * lokimq 1.2.0 dev snapshot
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Mon, 21 Sep 2020 20:58:30 -0300
+
 lokimq (1.1.4-1) unstable; urgency=medium
 
   * Silence spurious warning on optional send failure
@@ -5,7 +11,7 @@ lokimq (1.1.4-1) unstable; urgency=medium
   * Add checking for a negative int in bt_*_consumer
   * 1.1.4
 
- -- Jason Rhinelander <jason@imaginary.ca>  Thu, 30 Apr 2020 15:16:05 -0300
+ -- Jason Rhinelander <jason@imaginary.ca>  Mon, 21 Sep 2020 20:57:48 -0300
 
 lokimq (1.1.3-1) unstable; urgency=medium
 
