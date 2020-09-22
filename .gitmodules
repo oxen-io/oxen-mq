@@ -1,6 +1,3 @@
-[submodule "mapbox-variant"]
-	path = mapbox-variant
-	url = https://github.com/mapbox/variant.git
 [submodule "cppzmq"]
 	path = cppzmq
 	url = https://github.com/zeromq/cppzmq.git

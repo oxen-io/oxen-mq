@@ -27,12 +27,13 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "bt_serialize.h"
+#include <iterator>
 
 namespace lokimq {
 namespace detail {
 
 /// Reads digits into an unsigned 64-bit int.  
-uint64_t extract_unsigned(string_view& s) {
+uint64_t extract_unsigned(std::string_view& s) {
     if (s.empty())
         throw bt_deserialize_invalid{"Expected 0-9 but found end of string"};
     if (s[0] < '0' || s[0] > '9')
@@ -48,7 +49,7 @@ uint64_t extract_unsigned(string_view& s) {
     return uval;
 }
 
-void bt_deserialize<string_view>::operator()(string_view& s, string_view& val) {
+void bt_deserialize<std::string_view>::operator()(std::string_view& s, std::string_view& val) {
     if (s.size() < 2) throw bt_deserialize_invalid{"Deserialize failed: given data is not an bt-encoded string"};
     if (s[0] < '0' || s[0] > '9')
         throw bt_deserialize_invalid_type{"Expected 0-9 but found '"s + s[0] + "'"};
@@ -72,37 +73,33 @@ static_assert(std::numeric_limits<int64_t>::min() + std::numeric_limits<int64_t>
         static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) + uint64_t{1} == (uint64_t{1} << 63),
         "Non 2s-complement architecture not supported!");
 
-std::pair<maybe_signed_int64_t, bool> bt_deserialize_integer(string_view& s) {
+std::pair<uint64_t, bool> bt_deserialize_integer(std::string_view& s) {
     // Smallest possible encoded integer is 3 chars: "i0e"
     if (s.size() < 3) throw bt_deserialize_invalid("Deserialization failed: end of string found where integer expected");
     if (s[0] != 'i') throw bt_deserialize_invalid_type("Deserialization failed: expected 'i', found '"s + s[0] + '\'');
     s.remove_prefix(1);
-    std::pair<maybe_signed_int64_t, bool> result;
+    std::pair<uint64_t, bool> result;
     if (s[0] == '-') {
         result.second = true;
         s.remove_prefix(1);
     }
 
-    uint64_t uval = extract_unsigned(s);
+    result.first = extract_unsigned(s);
     if (s.empty())
         throw bt_deserialize_invalid("Integer deserialization failed: encountered end of string before integer was finished");
     if (s[0] != 'e')
         throw bt_deserialize_invalid("Integer deserialization failed: expected digit or 'e', found '"s + s[0] + '\'');
     s.remove_prefix(1);
-    if (result.second) { // negative
-        if (uval > (uint64_t{1} << 63))
-            throw bt_deserialize_invalid("Deserialization of integer failed: negative integer value is too large for a 64-bit signed int");
-        result.first.i64 = -uval;
-    } else {
-        result.first.u64 = uval;
-    }
+    if (result.second /*negative*/ && result.first > (uint64_t{1} << 63))
+        throw bt_deserialize_invalid("Deserialization of integer failed: negative integer value is too large for a 64-bit signed int");
+
     return result;
 }
 
 template struct bt_deserialize<int64_t>;
 template struct bt_deserialize<uint64_t>;
 
-void bt_deserialize<bt_value, void>::operator()(string_view& s, bt_value& val) {
+void bt_deserialize<bt_value, void>::operator()(std::string_view& s, bt_value& val) {
     if (s.size() < 2) throw bt_deserialize_invalid("Deserialization failed: end of string found where bt-encoded value expected");
 
     switch (s[0]) {
@@ -119,8 +116,9 @@ void bt_deserialize<bt_value, void>::operator()(string_view& s, bt_value& val) {
             break;
         }
         case 'i': {
-            auto read = bt_deserialize_integer(s);
-            val = read.first.i64; // We only store an i64, but can get a u64 out of it via get<uint64_t>(val)
+            auto [magnitude, negative] = bt_deserialize_integer(s);
+            if (negative) val = -static_cast<int64_t>(magnitude);
+            else val = magnitude;
             break;
         }
         case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9': {
@@ -137,7 +135,7 @@ void bt_deserialize<bt_value, void>::operator()(string_view& s, bt_value& val) {
 } // namespace detail
 
 
-bt_list_consumer::bt_list_consumer(string_view data_) : data{std::move(data_)} {
+bt_list_consumer::bt_list_consumer(std::string_view data_) : data{std::move(data_)} {
     if (data.empty()) throw std::runtime_error{"Cannot create a bt_list_consumer with an empty string_view"};
     if (data[0] != 'l') throw std::runtime_error{"Cannot create a bt_list_consumer with non-list data"};
     data.remove_prefix(1);
@@ -145,13 +143,13 @@ bt_list_consumer::bt_list_consumer(string_view data_) : data{std::move(data_)} {
 
 /// Attempt to parse the next value as a string (and advance just past it).  Throws if the next
 /// value is not a string.
-string_view bt_list_consumer::consume_string_view() {
+std::string_view bt_list_consumer::consume_string_view() {
     if (data.empty())
         throw bt_deserialize_invalid{"expected a string, but reached end of data"};
     else if (!is_string())
         throw bt_deserialize_invalid_type{"expected a string, but found "s + data.front()};
-    string_view next{data}, result;
-    detail::bt_deserialize<string_view>{}(next, result);
+    std::string_view next{data}, result;
+    detail::bt_deserialize<std::string_view>{}(next, result);
     data = next;
     return result;
 }
@@ -174,7 +172,7 @@ void bt_list_consumer::skip_value() {
         throw bt_deserialize_invalid_type{"next bt value has unknown type"};
 }
 
-string_view bt_list_consumer::consume_list_data() {
+std::string_view bt_list_consumer::consume_list_data() {
     auto start = data.begin();
     if (data.size() < 2 || !is_list()) throw bt_deserialize_invalid_type{"next bt value is not a list"};
     data.remove_prefix(1); // Descend into the sublist, consume the "l"
@@ -187,7 +185,7 @@ string_view bt_list_consumer::consume_list_data() {
     return {start, static_cast<size_t>(std::distance(start, data.begin()))};
 }
 
-string_view bt_list_consumer::consume_dict_data() {
+std::string_view bt_list_consumer::consume_dict_data() {
     auto start = data.begin();
     if (data.size() < 2 || !is_dict()) throw bt_deserialize_invalid_type{"next bt value is not a dict"};
     data.remove_prefix(1); // Descent into the dict, consumer the "d"
@@ -202,7 +200,7 @@ string_view bt_list_consumer::consume_dict_data() {
     return {start, static_cast<size_t>(std::distance(start, data.begin()))};
 }
 
-bt_dict_consumer::bt_dict_consumer(string_view data_) {
+bt_dict_consumer::bt_dict_consumer(std::string_view data_) {
     data = std::move(data_);
     if (data.empty()) throw std::runtime_error{"Cannot create a bt_dict_consumer with an empty string_view"};
     if (data.size() < 2 || data[0] != 'd') throw std::runtime_error{"Cannot create a bt_dict_consumer with non-dict data"};
@@ -220,10 +218,10 @@ bool bt_dict_consumer::consume_key() {
     return true;
 }
 
-std::pair<string_view, string_view> bt_dict_consumer::next_string() {
+std::pair<std::string_view, std::string_view> bt_dict_consumer::next_string() {
     if (!is_string())
         throw bt_deserialize_invalid_type{"expected a string, but found "s + data.front()};
-    std::pair<string_view, string_view> ret;
+    std::pair<std::string_view, std::string_view> ret;
     ret.second = bt_list_consumer::consume_string_view();
     ret.first = flush_key();
     return ret;
