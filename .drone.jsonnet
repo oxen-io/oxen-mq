@@ -1,63 +1,35 @@
-local debian_pipeline(name, image, arch='amd64', deps='g++ libsodium-dev libzmq3-dev', cmake_extra='', build_type='Release', extra_cmds=[], allow_fail=false) = {
+local distro = "sid";
+
+local apt_get_quiet = 'apt-get -o=Dpkg::Use-Pty=0 -q';
+
+local deb_pipeline(name, image, buildarch='amd64', debarch='amd64') = {
     kind: 'pipeline',
     type: 'docker',
     name: name,
-    platform: { arch: arch },
-    environment: { CLICOLOR_FORCE: '1' }, // Lets color through ninja (1.9+)
+    platform: { arch: buildarch },
     steps: [
         {
             name: 'build',
             image: image,
-            [if allow_fail then "failure"]: "ignore",
+            environment: { SSH_KEY: { from_secret: "SSH_KEY" } },
             commands: [
-                'apt-get update',
-                'apt-get install -y eatmydata',
-                'eatmydata apt-get dist-upgrade -y',
-                'eatmydata apt-get install -y cmake git ninja-build pkg-config ccache ' + deps,
-                'git submodule update --init --recursive',
-                'mkdir build',
-                'cd build',
-                'cmake .. -G Ninja -DCMAKE_CXX_FLAGS=-fdiagnostics-color=always -DCMAKE_BUILD_TYPE='+build_type+' -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ' + cmake_extra,
-                'ninja -v',
-                './tests/tests --use-colour yes'
-            ] + extra_cmds,
+                'echo "man-db man-db/auto-update boolean false" | debconf-set-selections',
+                apt_get_quiet + ' update',
+                apt_get_quiet + ' install -y eatmydata',
+                'eatmydata ' + apt_get_quiet + ' dist-upgrade -y',
+                'eatmydata ' + apt_get_quiet + ' install -y git-buildpackage devscripts g++ ccache openssh-client',
+                'eatmydata dpkg-reconfigure ccache',
+                'cd debian && eatmydata mk-build-deps -i -r --tool="' + apt_get_quiet + ' -o Debug::pkgProblemResolver=yes --no-install-recommends -y" control && cd ..',
+                'eatmydata gbp buildpackage --git-no-pbuilder --git-builder=\'debuild --prepend-path=/usr/lib/ccache --preserve-envvar=CCACHE_*\' --git-upstream-tag=HEAD -us -uc',
+                './debian/ci-upload.sh ' + distro + ' ' + debarch,
+            ],
         }
     ]
 };
 
 [
-    debian_pipeline("Ubuntu focal (amd64)", "ubuntu:focal"),
-    debian_pipeline("Ubuntu bionic (amd64)", "ubuntu:bionic", deps='libsodium-dev g++-8',
-                    cmake_extra='-DCMAKE_C_COMPILER=gcc-8 -DCMAKE_CXX_COMPILER=g++-8'),
-    debian_pipeline("Debian sid (amd64)", "debian:sid"),
-    debian_pipeline("Debian sid/Debug (amd64)", "debian:sid", build_type='Debug'),
-    debian_pipeline("Debian sid/clang-10 (amd64)", "debian:sid", deps='clang-10 lld-10 libsodium-dev libzmq3-dev',
-                    cmake_extra='-DCMAKE_C_COMPILER=clang-10 -DCMAKE_CXX_COMPILER=clang++-10 ' + std.join(' ', [
-                        '-DCMAKE_'+type+'_LINKER_FLAGS=-fuse-ld=lld-10' for type in ['EXE','MODULE','SHARED','STATIC']])),
-    debian_pipeline("Debian buster (amd64)", "debian:buster"),
-    debian_pipeline("Debian buster (i386)", "i386/debian:buster"),
-    debian_pipeline("Ubuntu bionic (ARM64)", "ubuntu:bionic", arch="arm64", deps='libsodium-dev g++-8',
-                    cmake_extra='-DCMAKE_C_COMPILER=gcc-8 -DCMAKE_CXX_COMPILER=g++-8'),
-    debian_pipeline("Debian sid (ARM64)", "debian:sid", arch="arm64"),
-    debian_pipeline("Debian buster (armhf)", "arm32v7/debian:buster", arch="arm64"),
-    {
-        kind: 'pipeline',
-        type: 'exec',
-        name: 'macOS (Catalina w/macports)',
-        platform: { os: 'darwin', arch: 'amd64' },
-        environment: { CLICOLOR_FORCE: '1' }, // Lets color through ninja (1.9+)
-        steps: [
-            {
-                name: 'build',
-                commands: [
-                    'git submodule update --init --recursive',
-                    'mkdir build',
-                    'cd build',
-                    'cmake .. -G Ninja -DCMAKE_CXX_FLAGS=-fcolor-diagnostics -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER_LAUNCHER=ccache',
-                    'ninja -v',
-                    './tests/tests --use-colour yes'
-                ],
-            }
-        ]
-    },
+    deb_pipeline("Debian sid (amd64)", "debian:sid"),
+    deb_pipeline("Debian sid (i386)", "i386/debian:sid", buildarch='amd64', debarch='i386'),
+    deb_pipeline("Debian sid (arm64)", "arm64v8/debian:sid", buildarch='arm64', debarch="arm64"),
+    deb_pipeline("Debian sid (armhf)", "arm32v7/debian:sid", buildarch='arm64', debarch="armhf"),
 ]
