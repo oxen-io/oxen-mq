@@ -21,6 +21,7 @@ include /usr/share/dpkg/pkg-info.mk
 override_dh_auto_configure:
 	debian/gen-liblokimq-install.sh $(DEB_VERSION_UPSTREAM)
 	dh_auto_configure -- -DLOKIMQ_INSTALL_CPPZMQ=ON \
+		-DLOKIMQ_BUILD_TESTS=OFF \
 		-DCMAKE_C_COMPILER=gcc-8 -DCMAKE_CXX_COMPILER=g++-8
 
 # dh_make generated override targets
