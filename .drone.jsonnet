@@ -4,7 +4,7 @@ local apt_get_quiet = 'apt-get -o=Dpkg::Use-Pty=0 -q';
 
 local repo_suffix = ''; // can be /beta or /staging for non-primary repo deps
 
-local deb_pipeline(name, image, buildarch='amd64', debarch='amd64') = {
+local deb_pipeline(name, image, buildarch='amd64', debarch='amd64', jobs=6) = {
     kind: 'pipeline',
     type: 'docker',
     name: name,
@@ -27,7 +27,7 @@ local deb_pipeline(name, image, buildarch='amd64', debarch='amd64') = {
                 'cd debian',
                 'eatmydata mk-build-deps -i -r --tool="' + apt_get_quiet + ' -o Debug::pkgProblemResolver=yes --no-install-recommends -y" control',
                 'cd ..',
-                'eatmydata gbp buildpackage --git-no-pbuilder --git-builder=\'debuild --prepend-path=/usr/lib/ccache --preserve-envvar=CCACHE_*\' --git-upstream-tag=HEAD -us -uc',
+                'eatmydata gbp buildpackage --git-no-pbuilder --git-builder=\'debuild --prepend-path=/usr/lib/ccache --preserve-envvar=CCACHE_*\' --git-upstream-tag=HEAD -us -uc -j' + jobs,
                 './debian/ci-upload.sh ' + distro + ' ' + debarch,
             ],
         }
@@ -37,6 +37,6 @@ local deb_pipeline(name, image, buildarch='amd64', debarch='amd64') = {
 [
     deb_pipeline("Debian sid (amd64)", "debian:sid"),
     deb_pipeline("Debian sid (i386)", "i386/debian:sid", buildarch='amd64', debarch='i386'),
-    deb_pipeline("Debian sid (arm64)", "arm64v8/debian:sid", buildarch='arm64', debarch="arm64"),
-    deb_pipeline("Debian sid (armhf)", "arm32v7/debian:sid", buildarch='arm64', debarch="armhf"),
+    deb_pipeline("Debian sid (arm64)", "arm64v8/debian:sid", buildarch='arm64', debarch="arm64", jobs=4),
+    deb_pipeline("Debian sid (armhf)", "arm32v7/debian:sid", buildarch='arm64', debarch="armhf", jobs=4),
 ]
