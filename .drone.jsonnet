@@ -6,12 +6,19 @@ local apt_get_quiet = 'apt-get -o=Dpkg::Use-Pty=0 -q';
 
 local repo_suffix = ''; // can be /beta or /staging for non-primary repo deps
 
+local submodules = {
+    name: 'submodules',
+    image: 'drone/git',
+    commands: ['git fetch --tags', 'git submodule update --init --recursive']
+};
+
 local deb_pipeline(image, buildarch='amd64', debarch='amd64', jobs=6) = {
     kind: 'pipeline',
     type: 'docker',
     name: distro_name + ' (' + debarch + ')',
     platform: { arch: buildarch },
     steps: [
+        submodules,
         {
             name: 'build',
             image: image,
