@@ -1,6 +1,6 @@
-local distro = "focal";
-local distro_name = 'Ubuntu 20.04';
-local distro_docker = 'ubuntu:focal';
+local distro = "bionic";
+local distro_name = 'Ubuntu 18.04';
+local distro_docker = 'ubuntu:bionic';
 
 local apt_get_quiet = 'apt-get -o=Dpkg::Use-Pty=0 -q';
 
