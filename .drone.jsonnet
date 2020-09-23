@@ -36,6 +36,7 @@ local deb_pipeline(image, buildarch='amd64', debarch='amd64', jobs=6) = {
                 'eatmydata mk-build-deps -i -r --tool="' + apt_get_quiet + ' -o Debug::pkgProblemResolver=yes --no-install-recommends -y" control',
                 'cd ..',
                 'mkdir -p /usr/lib/' + (if debarch == 'amd64' then 'x86_64' else if debarch == 'i386' then 'i386' else if debarch == 'arm64' then 'aarch64' else if debarch == 'armhf' then 'arm' else 'unknown') + '-linux-gnu/pgm-5.2/include', # Work around broken libzmq3-dev pkgconfig
+                'patch -i debian/dh-lib.patch /usr/share/perl5/Debian/Debhelper/Dh_Lib.pm', # patch debian bug #897569
                 'eatmydata gbp buildpackage --git-no-pbuilder --git-builder=\'debuild --prepend-path=/usr/lib/ccache --preserve-envvar=CCACHE_*\' --git-upstream-tag=HEAD -us -uc -j' + jobs,
                 './debian/ci-upload.sh ' + distro + ' ' + debarch,
             ],
