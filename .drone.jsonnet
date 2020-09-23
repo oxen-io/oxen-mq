@@ -1,13 +1,15 @@
 local distro = "sid";
+local distro_name = 'Debian sid';
+local distro_docker = 'debian:sid';
 
 local apt_get_quiet = 'apt-get -o=Dpkg::Use-Pty=0 -q';
 
 local repo_suffix = ''; // can be /beta or /staging for non-primary repo deps
 
-local deb_pipeline(name, image, buildarch='amd64', debarch='amd64', jobs=6) = {
+local deb_pipeline(image, buildarch='amd64', debarch='amd64', jobs=6) = {
     kind: 'pipeline',
     type: 'docker',
-    name: name,
+    name: distro_name + ' (' + debarch + ')',
     platform: { arch: buildarch },
     steps: [
         {
@@ -34,8 +36,8 @@ local deb_pipeline(name, image, buildarch='amd64', debarch='amd64', jobs=6) = {
 };
 
 [
-    deb_pipeline("Debian sid (amd64)", "debian:sid"),
-    deb_pipeline("Debian sid (i386)", "i386/debian:sid", buildarch='amd64', debarch='i386'),
-    deb_pipeline("Debian sid (arm64)", "arm64v8/debian:sid", buildarch='arm64', debarch="arm64", jobs=4),
-    deb_pipeline("Debian sid (armhf)", "arm32v7/debian:sid", buildarch='arm64', debarch="armhf", jobs=4),
+    deb_pipeline(distro_docker),
+    deb_pipeline("i386/" + distro_docker, buildarch='amd64', debarch='i386'),
+    deb_pipeline("arm64v8/" + distro_docker, buildarch='arm64', debarch="arm64", jobs=4),
+    deb_pipeline("arm32v7/" + distro_docker, buildarch='arm64', debarch="armhf", jobs=4),
 ]
