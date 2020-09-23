@@ -30,11 +30,12 @@ local deb_pipeline(image, buildarch='amd64', debarch='amd64', jobs=6) = {
                 apt_get_quiet + ' update',
                 apt_get_quiet + ' install -y eatmydata',
                 'eatmydata ' + apt_get_quiet + ' dist-upgrade -y',
-                'eatmydata ' + apt_get_quiet + ' install --no-install-recommends -y git-buildpackage devscripts equivs g++ ccache openssh-client',
+                'eatmydata ' + apt_get_quiet + ' install --no-install-recommends -y git-buildpackage devscripts equivs g++-8 ccache openssh-client',
                 'eatmydata dpkg-reconfigure ccache',
                 'cd debian',
                 'eatmydata mk-build-deps -i -r --tool="' + apt_get_quiet + ' -o Debug::pkgProblemResolver=yes --no-install-recommends -y" control',
                 'cd ..',
+                'mkdir -p /usr/lib/' + (if debarch == 'amd64' then 'x86_64' else if debarch == 'i386' then 'i386' else if debarch == 'arm64' then 'aarch64' else if debarch == 'armhf' then 'arm' else 'unknown') + '-linux-gnu/pgm-5.2/include', # Work around broken libzmq3-dev pkgconfig
                 'eatmydata gbp buildpackage --git-no-pbuilder --git-builder=\'debuild --prepend-path=/usr/lib/ccache --preserve-envvar=CCACHE_*\' --git-upstream-tag=HEAD -us -uc -j' + jobs,
                 './debian/ci-upload.sh ' + distro + ' ' + debarch,
             ],
