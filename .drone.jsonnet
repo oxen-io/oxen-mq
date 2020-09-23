@@ -16,7 +16,7 @@ local deb_pipeline(name, image, buildarch='amd64', debarch='amd64', jobs=6) = {
             environment: { SSH_KEY: { from_secret: "SSH_KEY" } },
             commands: [
                 'echo "man-db man-db/auto-update boolean false" | debconf-set-selections',
-                'cd debian/deb.loki.network.gpg /etc/apt/trusted.gpg.d/deb.loki.network.gpg',
+                'cp debian/deb.loki.network.gpg /etc/apt/trusted.gpg.d/deb.loki.network.gpg',
                 'echo deb https://deb.loki.network' + repo_suffix + ' ' + distro + ' main >/etc/apt/sources.list.d/loki.list',
                 apt_get_quiet + ' update',
                 apt_get_quiet + ' install -y eatmydata',
