@@ -1,7 +1,7 @@
 Source: lokimq
 Priority: optional
 Maintainer: Jason Rhinelander <jason@imaginary.ca>
-Build-Depends: debhelper-compat (= 11), cmake (>= 3.5), g++, pkg-config, libzmq3-dev (>= 4.3), libsodium-dev
+Build-Depends: debhelper-compat (= 11), cmake (>= 3.5), g++-8, pkg-config, libzmq3-dev (>= 4.3), libsodium-dev
 Standards-Version: 4.4.1
 Section: libs
 Homepage: https://github.com/loki-project/loki-mq

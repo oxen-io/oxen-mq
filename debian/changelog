@@ -1,3 +1,9 @@
+lokimq (1.2.0~pre1-1~ubuntu1804) bionic; urgency=medium
+
+  * Fork sid deb to bionic.
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Wed, 23 Sep 2020 17:13:45 -0300
+
 lokimq (1.2.0~pre1-1) unstable; urgency=medium
 
   * lokimq 1.2.0 dev snapshot
