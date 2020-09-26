@@ -1,3 +1,10 @@
+lokimq (1.2.0~pre2-1~ubuntu2004) focal; urgency=medium
+
+  [ Thomas Winget ]
+  * add method to get current buffer from bt list/dict consumer
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Fri, 25 Sep 2020 21:34:33 -0300
+
 lokimq (1.2.0~pre1-1~ubuntu2004) focal; urgency=medium
 
   * Fork sid deb to focal.
