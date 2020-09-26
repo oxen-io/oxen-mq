@@ -1,3 +1,10 @@
+lokimq (1.2.0~pre2-1~deb10) buster; urgency=medium
+
+  [ Thomas Winget ]
+  * add method to get current buffer from bt list/dict consumer
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Fri, 25 Sep 2020 21:28:05 -0300
+
 lokimq (1.2.0~pre1-1~deb10) buster; urgency=medium
 
   * Fork sid deb to buster.
