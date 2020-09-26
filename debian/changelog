@@ -1,3 +1,89 @@
+lokimq (1.2.0~pre2-1) unstable; urgency=medium
+
+  [ Jason Rhinelander ]
+  * Add support for setting umask when binding
+  * Add base32z encoder/decoder
+  * Add base64 encoder/decoder
+  * Add address parsing/generating class
+  * Require C++17
+  * Silence c++17 warnings from cppzmq
+  * Remove pre-C++17 workarounds/ifdefs
+  * C++17 class template deduction
+  * Add missing initialization of curr
+  * Make from_{hex,base32z,base64} compatible with std::byte
+
+  [ Stephen Shelton ]
+  * Wrap code section in README.md
+
+  [ Jason Rhinelander ]
+  * Add it pair versions of {to,from}_{hex,base32z,base64}
+  * C++17 changes; replace mapbox with std::variant
+  * Add missing files
+  * Fix test segfault under clang
+  * Add missing <string> headers for libc++
+  * Fix sodium linking and call sodium_init()
+  * Link to sodium publicly
+  * Move -isystem hack inside if-found
+  * Add drone ci builds
+  * Add Debug ci build, set other builds to Release
+  * Let color through Ninja (1.9+)
+  * Move address << operator implementation out of header
+  * Tweak test timeout
+  * Add macOS build
+  * README: C++14 -> C++17
+  * Remove unused variable
+  * Tagged threads for jobs, batches, and timers
+  * Made `log()` callable publicly
+  * Rename TaggedThread to TaggedThreadID, drop .name attribute
+  * Drop tagged thread init function; add synchronization dance
+  * Fix grammar
+  * Resolve race condition in test suite
+  * Pass compiler through ExternalProject_Add
+  * Remove debugging
+  * Add "C" to languages
+  * include fixes from iwyu
+  * Add missing header
+  * More header fixes
+  * Take lokimq::address as connect_remote argument
+  * Allow injecting tasks into lokimq job queue
+  * Doc fix - remove "init" and update "start" doc
+  * Add missing header for BSD pthread naming
+  * Fix tagged workers not being properly shut down
+  * Add test that destruction doesn't throw
+  * Wait for tagged workers
+  * Fix & add tests for send_option::data_parts(...)
+  * Replace visitor class with generic lambda
+  * Add serialization/deserialization of tuples and pairs
+  * Drop const from _id
+  * Add missing headers to installed header list
+  * inline constexpr lokimq constants
+  * Add C string bt_value ctor
+
+  [ Jeff Becker ]
+  * allow an IPC socket to set which group it is owned by using SOCKET_GID similar to how STARTUP_UMASK is done.
+  * allow changing uid as root
+
+  [ Jason Rhinelander ]
+  * Update bundled libzmq version
+  * Make drone build debs
+  * Add repo & no recommends
+  * Remove mapbox variant dep
+  * Parallelize
+  * single apt-get update; include gpg pubkey
+  * fix typo
+  * de-https
+  * Allow binary
+  * Remove old cmake flag
+  * DRY
+  * Add separate submodules step
+  * drop mapbox-variant
+  * Don't build tests
+
+  [ Thomas Winget ]
+  * add method to get current buffer from bt list/dict consumer
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Fri, 25 Sep 2020 21:08:51 -0300
+
 lokimq (1.2.0~pre1-1) unstable; urgency=medium
 
   * lokimq 1.2.0 dev snapshot
