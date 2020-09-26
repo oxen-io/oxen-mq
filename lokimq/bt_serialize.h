@@ -639,6 +639,9 @@ public:
     bt_list_consumer(const bt_list_consumer&) = default;
     bt_list_consumer& operator=(const bt_list_consumer&) = default;
 
+    /// Get a copy of the current buffer
+    std::string_view current_buffer() const { return data; }
+
     /// Returns true if the next value indicates the end of the list
     bool is_finished() const { return data.front() == 'e'; }
     /// Returns true if the next element looks like an encoded string
