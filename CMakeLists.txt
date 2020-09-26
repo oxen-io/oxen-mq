@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.7)
 
-project(liblokimq CXX)
+project(liblokimq CXX C)
 
 include(GNUInstallDirs)
 
 set(LOKIMQ_VERSION_MAJOR 1)
-set(LOKIMQ_VERSION_MINOR 1)
-set(LOKIMQ_VERSION_PATCH 4)
+set(LOKIMQ_VERSION_MINOR 2)
+set(LOKIMQ_VERSION_PATCH 0)
 set(LOKIMQ_VERSION "${LOKIMQ_VERSION_MAJOR}.${LOKIMQ_VERSION_MINOR}.${LOKIMQ_VERSION_PATCH}")
 message(STATUS "lokimq v${LOKIMQ_VERSION}")
 
@@ -22,6 +22,7 @@ configure_file(lokimq/version.h.in lokimq/version.h @ONLY)
 configure_file(liblokimq.pc.in liblokimq.pc @ONLY)
 
 add_library(lokimq
+    lokimq/address.cpp
     lokimq/auth.cpp
     lokimq/bt_serialize.cpp
     lokimq/connections.cpp
@@ -46,17 +47,18 @@ if(TARGET libzmq)
 elseif(BUILD_SHARED_LIBS)
     include(FindPkgConfig)
     pkg_check_modules(libzmq libzmq>=4.3 IMPORTED_TARGET)
-    # Debian sid includes a -isystem in the mit-krb package that, starting with pkg-config 0.29.2,
-    # breaks cmake's pkgconfig module because it stupidly thinks "-isystem" is a path, so if we find
-    # -isystem in the include dirs then hack it out.
-    get_property(zmq_inc TARGET PkgConfig::libzmq PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
-    list(FIND zmq_inc "-isystem" broken_isystem)
-    if(NOT broken_isystem EQUAL -1)
-      list(REMOVE_AT zmq_inc ${broken_isystem})
-      set_property(TARGET PkgConfig::libzmq PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${zmq_inc})
-    endif()
 
     if(libzmq_FOUND)
+        # Debian sid includes a -isystem in the mit-krb package that, starting with pkg-config 0.29.2,
+        # breaks cmake's pkgconfig module because it stupidly thinks "-isystem" is a path, so if we find
+        # -isystem in the include dirs then hack it out.
+        get_property(zmq_inc TARGET PkgConfig::libzmq PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+        list(FIND zmq_inc "-isystem" broken_isystem)
+        if(NOT broken_isystem EQUAL -1)
+          list(REMOVE_AT zmq_inc ${broken_isystem})
+          set_property(TARGET PkgConfig::libzmq PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${zmq_inc})
+        endif()
+
         target_link_libraries(lokimq PUBLIC PkgConfig::libzmq)
     else()
         set(lokimq_build_static_libzmq ON)
@@ -66,7 +68,7 @@ else()
 endif()
 
 if(lokimq_build_static_libzmq)
-    message(STATUS "libzmq >= 4.3 not found or static build requested, building bundled 4.3.2")
+    message(STATUS "libzmq >= 4.3 not found or static build requested, building bundled version")
     list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/local-libzmq")
     include(LocalLibzmq)
     target_link_libraries(lokimq PUBLIC libzmq_vendor)
@@ -77,12 +79,11 @@ target_include_directories(lokimq
         $<INSTALL_INTERFACE:>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cppzmq>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/mapbox-variant/include>
 )
 
 target_compile_options(lokimq PRIVATE -Wall -Wextra -Werror)
 set_target_properties(lokimq PROPERTIES
-    CXX_STANDARD 14
+    CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
     POSITION_INDEPENDENT_CODE ON
@@ -101,7 +102,7 @@ endfunction()
 # If the caller has already set up a sodium target then we will just link to it, otherwise we go
 # looking for it.
 if(TARGET sodium)
-    target_link_libraries(lokimq PRIVATE sodium)
+    target_link_libraries(lokimq PUBLIC sodium)
     if(lokimq_build_static_libzmq)
         target_link_libraries(libzmq_vendor INTERFACE sodium)
     endif()
@@ -109,13 +110,13 @@ else()
     pkg_check_modules(sodium REQUIRED libsodium IMPORTED_TARGET)
 
     if(BUILD_SHARED_LIBS)
-        target_link_libraries(lokimq PRIVATE PkgConfig::sodium)
+        target_link_libraries(lokimq PUBLIC PkgConfig::sodium)
         if(lokimq_build_static_libzmq)
             target_link_libraries(libzmq_vendor INTERFACE PkgConfig::sodium)
         endif()
     else()
-        link_dep_libs(lokimq PRIVATE "${sodium_STATIC_LIBRARY_DIRS}" ${sodium_STATIC_LIBRARIES})
-        target_include_directories(lokimq PRIVATE ${sodium_STATIC_INCLUDE_DIRS})
+        link_dep_libs(lokimq PUBLIC "${sodium_STATIC_LIBRARY_DIRS}" ${sodium_STATIC_LIBRARIES})
+        target_include_directories(lokimq PUBLIC ${sodium_STATIC_INCLUDE_DIRS})
         if(lokimq_build_static_libzmq)
             link_dep_libs(libzmq_vendor INTERFACE "${sodium_STATIC_LIBRARY_DIRS}" ${sodium_STATIC_LIBRARIES})
             target_link_libraries(libzmq_vendor INTERFACE ${sodium_STATIC_INCLUDE_DIRS})
@@ -137,9 +138,13 @@ install(
 )
 
 install(
-    FILES lokimq/auth.h
+    FILES lokimq/address.h
+          lokimq/auth.h
+          lokimq/base32z.h
+          lokimq/base64.h
           lokimq/batch.h
           lokimq/bt_serialize.h
+          lokimq/bt_value.h
           lokimq/connections.h
           lokimq/hex.h
           lokimq/lokimq.h
@@ -148,17 +153,6 @@ install(
           ${CMAKE_CURRENT_BINARY_DIR}/lokimq/version.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq
 )
-option(LOKIMQ_INSTALL_MAPBOX_VARIANT "Install mapbox-variant headers with lokimq/ headers" ON)
-if(LOKIMQ_INSTALL_MAPBOX_VARIANT)
-  install(
-    FILES mapbox-variant/include/mapbox/variant.hpp
-          mapbox-variant/include/mapbox/variant_cast.hpp
-          mapbox-variant/include/mapbox/variant_io.hpp
-          mapbox-variant/include/mapbox/variant_visitor.hpp
-          mapbox-variant/include/mapbox/recursive_wrapper.hpp
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq/mapbox
-  )
-endif()
 
 option(LOKIMQ_INSTALL_CPPZMQ "Install cppzmq header with lokimq/ headers" ON)
 if(LOKIMQ_INSTALL_CPPZMQ)

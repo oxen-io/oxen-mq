@@ -41,10 +41,9 @@ TEST_CASE("basic commands", "[commands]") {
     bool success = false, failed = false;
     std::string pubkey;
 
-    auto c = client.connect_remote(listen,
+    auto c = client.connect_remote(address{listen, server.get_pubkey()},
             [&](auto conn) { pubkey = conn.pubkey(); success = true; got = true; },
-            [&](auto conn, string_view) { failed = true; got = true; },
-            server.get_pubkey());
+            [&](auto conn, std::string_view) { failed = true; got = true; });
 
     wait_for_conn(got);
     {
@@ -107,9 +106,10 @@ TEST_CASE("outgoing auth level", "[commands][auth]") {
 
     client.PUBKEY_BASED_ROUTING_ID = false; // establishing multiple connections below, so we need unique routing ids
 
-    auto public_c = client.connect_remote(listen, [](...) {}, [](...) {}, server.get_pubkey());
-    auto basic_c = client.connect_remote(listen, [](...) {}, [](...) {}, server.get_pubkey(), AuthLevel::basic);
-    auto admin_c = client.connect_remote(listen, [](...) {}, [](...) {}, server.get_pubkey(), AuthLevel::admin);
+    address server_addr{listen, server.get_pubkey()};
+    auto public_c = client.connect_remote(server_addr, [](auto&&...) {}, [](auto&&...) {});
+    auto basic_c = client.connect_remote(server_addr, [](auto&&...) {}, [](auto&&...) {}, AuthLevel::basic);
+    auto admin_c = client.connect_remote(server_addr, [](auto&&...) {}, [](auto&&...) {}, AuthLevel::admin);
 
     client.send(public_c, "public.reflect", "public.hi");
     wait_for([&] { return public_hi == 1; });
@@ -193,8 +193,8 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
 
     server.start();
 
-    auto connect_success = [&](...) { auto l = catch_lock(); REQUIRE(true); };
-    auto connect_failure = [&](...) { auto l = catch_lock(); REQUIRE(false); };
+    auto connect_success = [&](auto&&...) { auto l = catch_lock(); REQUIRE(true); };
+    auto connect_failure = [&](auto&&...) { auto l = catch_lock(); REQUIRE(false); };
 
 
     std::set<std::string> backdoor_details;
@@ -202,10 +202,11 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
     LokiMQ nsa{get_logger("NSA» ")};
     nsa.add_category("backdoor", Access{AuthLevel::admin});
     nsa.add_command("backdoor", "data", [&](Message& m) {
-            backdoor_details.emplace(m.data[0]);
+        auto l = catch_lock();
+        backdoor_details.emplace(m.data[0]);
     });
     nsa.start();
-    auto nsa_c = nsa.connect_remote(listen, connect_success, connect_failure, server.get_pubkey(), AuthLevel::admin);
+    auto nsa_c = nsa.connect_remote(address{listen, server.get_pubkey()}, connect_success, connect_failure, AuthLevel::admin);
     nsa.send(nsa_c, "hey google.install backdoor");
 
     wait_for([&] { auto lock = catch_lock(); return (bool) backdoor; });
@@ -226,6 +227,7 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
     std::set<std::string> all_the_things;
     for (auto& pd : personal_details) all_the_things.insert(pd.second.begin(), pd.second.end());
 
+    address server_addr{listen, server.get_pubkey()};
     std::map<int, std::set<std::string>> google_knows;
     int things_remembered{0};
     for (int i = 0; i < 5; i++) {
@@ -240,7 +242,7 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
         });
         c->start();
         conns.push_back(
-                c->connect_remote(listen, connect_success, connect_failure, server.get_pubkey(), AuthLevel::basic));
+                c->connect_remote(server_addr, connect_success, connect_failure, AuthLevel::basic));
         for (auto& personal_detail : personal_details[i])
             c->request(conns.back(), "hey google.remember",
                 [&](bool success, std::vector<std::string> data) {
@@ -252,7 +254,7 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
                 },
                 personal_detail);
     }
-    wait_for([&] { auto lock = catch_lock(); return things_remembered == all_the_things.size(); });
+    wait_for([&] { auto lock = catch_lock(); return things_remembered == all_the_things.size() && things_remembered == backdoor_details.size(); });
     {
         auto l = catch_lock();
         REQUIRE( things_remembered == all_the_things.size() );
@@ -303,10 +305,11 @@ TEST_CASE("send failure callbacks", "[commands][queue_full]") {
     // Handshake: we send HI, they reply HELLO.
     client.send(zmq::message_t{"HI", 2}, zmq::send_flags::none);
     zmq::message_t hello;
-    client.recv(hello);
-    string_view hello_sv{hello.data<char>(), hello.size()};
+    auto recvd = client.recv(hello);
+    std::string_view hello_sv{hello.data<char>(), hello.size()};
     {
         auto lock = catch_lock();
+        REQUIRE( recvd );
         REQUIRE( hello_sv == "HELLO" );
         REQUIRE_FALSE( hello.more() );
     }
@@ -357,5 +360,80 @@ TEST_CASE("send failure callbacks", "[commands][queue_full]") {
         REQUIRE( i < 100 );
         REQUIRE( send_attempts.load() == expected_attempts );
         REQUIRE( send_failures.load() > 0 );
+    }
+}
+
+TEST_CASE("data parts", "[send][data_parts]") {
+    std::string listen = "tcp://127.0.0.1:4567";
+    LokiMQ server{
+        "", "", // generate ephemeral keys
+        false, // not a service node
+        [](auto) { return ""; },
+        get_logger("S» "),
+        LogLevel::trace
+    };
+    server.listen_curve(listen);
+
+    std::mutex mut;
+    std::vector<std::string> r;
+
+    server.add_category("public", Access{AuthLevel::none});
+    server.add_command("public", "hello", [&](Message& m) {
+        std::lock_guard l{mut};
+        for (const auto& s : m.data)
+            r.emplace_back(s);
+    });
+    server.start();
+
+    LokiMQ client{get_logger("C» "), LogLevel::trace};
+    client.start();
+
+    std::atomic<bool> got{false};
+    bool success = false, failed = false;
+    std::string pubkey;
+
+    auto c = client.connect_remote(address{listen, server.get_pubkey()},
+            [&](auto conn) { pubkey = conn.pubkey(); success = true; got = true; },
+            [&](auto conn, std::string_view) { failed = true; got = true; });
+
+    wait_for_conn(got);
+    {
+        auto lock = catch_lock();
+        REQUIRE( got );
+        REQUIRE( success );
+        REQUIRE_FALSE( failed );
+        REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
+    }
+
+    std::vector some_data{{"abc"s, "def"s, "omg123\0zzz"s}};
+    client.send(c, "public.hello", lokimq::send_option::data_parts(some_data.begin(), some_data.end()));
+    reply_sleep();
+    {
+        auto lock = catch_lock();
+        std::lock_guard l{mut};
+        REQUIRE( r == some_data );
+        r.clear();
+    }
+
+    std::vector some_data2{{"a"sv, "b"sv, "\0"sv}};
+    client.send(c, "public.hello",
+            "hi",
+            lokimq::send_option::data_parts(some_data2.begin(), some_data2.end()),
+            "another",
+            "string"sv,
+            lokimq::send_option::data_parts(some_data.begin(), some_data.end()));
+
+    std::vector<std::string> expected;
+    expected.push_back("hi");
+    expected.insert(expected.end(), some_data2.begin(), some_data2.end());
+    expected.push_back("another");
+    expected.push_back("string");
+    expected.insert(expected.end(), some_data.begin(), some_data.end());
+
+    reply_sleep();
+    {
+        auto lock = catch_lock();
+        std::lock_guard l{mut};
+        REQUIRE( r == expected );
     }
 }

@@ -1,3 +1,10 @@
+lokimq (1.2.0~pre1-1~ubuntu1804) bionic; urgency=medium
+
+  * Fork sid deb to bionic.
+  * lokimq 1.2.0 dev snapshot
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Mon, 21 Sep 2020 20:58:30 -0300
+
 lokimq (1.1.4-1~ubuntu1804) bionic; urgency=medium
 
   * Silence spurious warning on optional send failure

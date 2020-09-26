@@ -2,9 +2,12 @@
 #include "lokimq-internal.h"
 #include <map>
 #include <random>
+#include <ostream>
 
 extern "C" {
-#include <sodium.h>
+#include <sodium/core.h>
+#include <sodium/crypto_box.h>
+#include <sodium/crypto_scalarmult.h>
 }
 #include "hex.h"
 
@@ -38,7 +41,7 @@ namespace detail {
 
 // Sends a control messages between proxy and threads or between proxy and workers consisting of a
 // single command codes with an optional data part (the data frame is omitted if empty).
-void send_control(zmq::socket_t& sock, string_view cmd, std::string data) {
+void send_control(zmq::socket_t& sock, std::string_view cmd, std::string data) {
     auto c = create_message(std::move(cmd));
     if (data.empty()) {
         sock.send(c, zmq::send_flags::none);
@@ -53,7 +56,7 @@ void send_control(zmq::socket_t& sock, string_view cmd, std::string data) {
 std::pair<std::string, AuthLevel> extract_metadata(zmq::message_t& msg) {
     auto result = std::make_pair(""s, AuthLevel::none);
     try {
-        string_view pubkey_hex{msg.gets("User-Id")};
+        std::string_view pubkey_hex{msg.gets("User-Id")};
         if (pubkey_hex.size() != 64)
             throw std::logic_error("bad user-id");
         assert(is_hex(pubkey_hex.begin(), pubkey_hex.end()));
@@ -174,7 +177,7 @@ zmq::socket_t& LokiMQ::get_control_socket() {
         return *last.second;
     }
 
-    std::lock_guard<std::mutex> lock{control_sockets_mutex};
+    std::lock_guard lock{control_sockets_mutex};
     if (proxy_shutting_down)
         throw std::runtime_error("Unable to obtain LokiMQ control socket: proxy thread is shutting down");
     auto control = std::make_shared<zmq::socket_t>(context, zmq::socket_type::dealer);
@@ -200,6 +203,9 @@ LokiMQ::LokiMQ(
 {
 
     LMQ_TRACE("Constructing LokiMQ, id=", object_id, ", this=", this);
+
+    if (sodium_init() == -1)
+        throw std::runtime_error{"libsodium initialization failed"};
 
     if (pubkey.empty() != privkey.empty()) {
         throw std::invalid_argument("LokiMQ construction failed: one (and only one) of pubkey/privkey is empty. Both must be specified, or both empty to generate a key.");
@@ -343,35 +349,75 @@ void LokiMQ::set_general_threads(int threads) {
 
 LokiMQ::run_info& LokiMQ::run_info::load(category* cat_, std::string command_, ConnectionID conn_, Access access_, std::string remote_,
                 std::vector<zmq::message_t> data_parts_, const std::pair<CommandCallback, bool>* callback_) {
-    is_batch_job = false;
-    is_reply_job = false;
+    reset();
     cat = cat_;
     command = std::move(command_);
     conn = std::move(conn_);
     access = std::move(access_);
     remote = std::move(remote_);
     data_parts = std::move(data_parts_);
-    callback = callback_;
+    to_run = callback_;
+    return *this;
+}
+
+LokiMQ::run_info& LokiMQ::run_info::load(category* cat_, std::string command_, std::string remote_, std::function<void()> callback) {
+    reset();
+    is_injected = true;
+    cat = cat_;
+    command = std::move(command_);
+    conn = {};
+    access = {};
+    remote = std::move(remote_);
+    to_run = std::move(callback);
     return *this;
 }
 
 LokiMQ::run_info& LokiMQ::run_info::load(pending_command&& pending) {
+    if (auto *f = std::get_if<std::function<void()>>(&pending.callback))
+        return load(&pending.cat, std::move(pending.command), std::move(pending.remote), std::move(*f));
+
+    assert(pending.callback.index() == 0);
     return load(&pending.cat, std::move(pending.command), std::move(pending.conn), std::move(pending.access),
-            std::move(pending.remote), std::move(pending.data_parts), pending.callback);
+            std::move(pending.remote), std::move(pending.data_parts), std::get<0>(pending.callback));
 }
 
-LokiMQ::run_info& LokiMQ::run_info::load(batch_job&& bj, bool reply_job) {
+LokiMQ::run_info& LokiMQ::run_info::load(batch_job&& bj, bool reply_job, int tagged_thread) {
+    reset();
     is_batch_job = true;
     is_reply_job = reply_job;
+    is_tagged_thread_job = tagged_thread > 0;
     batch_jobno = bj.second;
-    batch = bj.first;
+    to_run = bj.first;
     return *this;
 }
 
 
 LokiMQ::~LokiMQ() {
-    if (!proxy_thread.joinable())
+    if (!proxy_thread.joinable()) {
+        if (!tagged_workers.empty()) {
+            // This is a bit icky: we have tagged workers that are waiting for a signal on
+            // workers_socket, but the listening end of workers_socket doesn't get set up until the
+            // proxy thread starts (and we're getting destructed here without a proxy thread).  So
+            // we need to start listening on it here in the destructor so that we establish a
+            // connection and send the QUITs to the tagged worker threads.
+            workers_socket.setsockopt<int>(ZMQ_ROUTER_MANDATORY, 1);
+            workers_socket.bind(SN_ADDR_WORKERS);
+            for (auto& [run, busy, queue] : tagged_workers) {
+                while (true) {
+                    try {
+                        route_control(workers_socket, run.worker_routing_id, "QUIT");
+                        break;
+                    } catch (const zmq::error_t&) {
+                        std::this_thread::sleep_for(5ms);
+                    }
+                }
+            }
+            for (auto& [run, busy, queue] : tagged_workers)
+                run.worker_thread.join();
+        }
+
         return;
+    }
 
     LMQ_LOG(info, "LokiMQ shutting down proxy thread");
     detail::send_control(get_control_socket(), "QUIT");

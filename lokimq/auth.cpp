@@ -1,6 +1,8 @@
 #include "lokimq.h"
 #include "hex.h"
 #include "lokimq-internal.h"
+#include <ostream>
+#include <sstream>
 
 namespace lokimq {
 
@@ -12,7 +14,7 @@ namespace {
 
 // Builds a ZMTP metadata key-value pair.  These will be available on every message from that peer.
 // Keys must start with X- and be <= 255 characters.
-std::string zmtp_metadata(string_view key, string_view value) {
+std::string zmtp_metadata(std::string_view key, std::string_view value) {
     assert(key.size() > 2 && key.size() <= 255 && key[0] == 'X' && key[1] == '-');
 
     std::string result;
@@ -63,7 +65,7 @@ bool LokiMQ::proxy_check_auth(size_t conn_index, bool outgoing, const peer_info&
         msgs.push_back(create_message(peer.route));
     msgs.push_back(create_message(reply));
     if (cat_call.second && cat_call.second->second /*request command*/ && !data.empty()) {
-        msgs.push_back(create_message("REPLY"_sv));
+        msgs.push_back(create_message("REPLY"sv));
         msgs.push_back(create_message(view(data.front()))); // reply tag
     } else {
         msgs.push_back(create_message(view(cmd)));
@@ -87,7 +89,7 @@ void LokiMQ::set_active_sns(pubkey_set pubkeys) {
         proxy_set_active_sns(std::move(pubkeys));
     }
 }
-void LokiMQ::proxy_set_active_sns(string_view data) {
+void LokiMQ::proxy_set_active_sns(std::string_view data) {
     proxy_set_active_sns(detail::deserialize_object<pubkey_set>(bt_deserialize<uintptr_t>(data)));
 }
 void LokiMQ::proxy_set_active_sns(pubkey_set pubkeys) {
@@ -204,7 +206,7 @@ void LokiMQ::process_zap_requests() {
                 else
                     o << v;
             }
-            log_(LogLevel::trace, __FILE__, __LINE__, o.str());
+            log(LogLevel::trace, __FILE__, __LINE__, o.str());
         } else
 #endif
             LMQ_LOG(debug, "Processing ZAP authentication request");
@@ -267,7 +269,7 @@ void LokiMQ::process_zap_requests() {
                 status_text = "Invalid public key size for CURVE authentication";
             } else {
                 auto ip = view(frames[3]);
-                string_view pubkey;
+                std::string_view pubkey;
                 bool sn = false;
                 if (bind[bind_id].second.curve) {
                     pubkey = view(frames[6]);
