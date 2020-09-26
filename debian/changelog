@@ -1,3 +1,19 @@
+lokimq (1.2.0~pre2-1~ubuntu2010) groovy; urgency=medium
+
+  [ Jason Rhinelander ]
+  * Drop i386
+  * Add separate submodules step
+  * Drop mapbox-variant
+  * Don't build tests
+
+  [ Thomas Winget ]
+  * add method to get current buffer from bt list/dict consumer
+
+  [ Jason Rhinelander ]
+  * Fix gbp conf for groovy
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Fri, 25 Sep 2020 21:30:25 -0300
+
 lokimq (1.2.0~pre1-1~ubuntu2010) groovy; urgency=medium
 
   * Fork sid deb to groovy.
