@@ -12,7 +12,7 @@ class LokiMQ;
 class Message {
 public:
     LokiMQ& lokimq; ///< The owning LokiMQ object
-    std::vector<string_view> data; ///< The provided command data parts, if any.
+    std::vector<std::string_view> data; ///< The provided command data parts, if any.
     ConnectionID conn; ///< The connection info for routing a reply; also contains the pubkey/sn status.
     std::string reply_tag; ///< If the invoked command is a request command this is the required reply tag that will be prepended by `send_reply()`.
     Access access; ///< The access level of the invoker.  This can be higher than the access level of the command, for example for an admin invoking a basic command.
@@ -36,7 +36,7 @@ public:
     /// If you want to send a non-strong reply even when the remote is a service node then add
     /// an explicit `send_option::optional()` argument.
     template <typename... Args>
-    void send_back(string_view, Args&&... args);
+    void send_back(std::string_view, Args&&... args);
 
     /// Sends a reply to a request.  This takes no command: the command is always the built-in
     /// "REPLY" command, followed by the unique reply tag, then any reply data parts.  All other
@@ -51,7 +51,7 @@ public:
     /// Sends a request back to whomever sent this message.  This is effectively a wrapper around
     /// lmq.request() that takes care of setting up the recipient arguments.
     template <typename ReplyCallback, typename... Args>
-    void send_request(string_view cmd, ReplyCallback&& callback, Args&&... args);
+    void send_request(std::string_view cmd, ReplyCallback&& callback, Args&&... args);
 };
 
 }

@@ -1,15 +1,20 @@
 #pragma once
 #include "auth.h"
-#include "string_view.h"
+#include "bt_value.h"
+#include <string_view>
+#include <iosfwd>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <variant>
 
 namespace lokimq {
 
-class bt_dict;
 struct ConnectionID;
 
 namespace detail {
 template <typename... T>
-bt_dict build_send(ConnectionID to, string_view cmd, T&&... opts);
+bt_dict build_send(ConnectionID to, std::string_view cmd, T&&... opts);
 }
 
 /// Opaque data structure representing a connection which supports ==, !=, < and std::hash.  For
@@ -26,7 +31,7 @@ struct ConnectionID {
             throw std::runtime_error{"Invalid pubkey: expected 32 bytes"};
     }
     // Construction from a service node pubkey
-    ConnectionID(string_view pubkey_) : ConnectionID(std::string{pubkey_}) {}
+    ConnectionID(std::string_view pubkey_) : ConnectionID(std::string{pubkey_}) {}
 
     ConnectionID(const ConnectionID&) = default;
     ConnectionID(ConnectionID&&) = default;
@@ -75,7 +80,7 @@ private:
     friend class LokiMQ;
     friend struct std::hash<ConnectionID>;
     template <typename... T>
-    friend bt_dict detail::build_send(ConnectionID to, string_view cmd, T&&... opts);
+    friend bt_dict detail::build_send(ConnectionID to, std::string_view cmd, T&&... opts);
     friend std::ostream& operator<<(std::ostream& o, const ConnectionID& conn);
 };
 
