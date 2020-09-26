@@ -27,10 +27,9 @@ TEST_CASE("connections with curve authentication", "[curve][connect]") {
     auto pubkey = server.get_pubkey();
     std::atomic<bool> got{false};
     bool success = false;
-    auto server_conn = client.connect_remote(listen,
+    auto server_conn = client.connect_remote(address{listen, pubkey},
             [&](auto conn) { success = true; got = true; },
-            [&](auto conn, string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); got = true; },
-            pubkey);
+            [&](auto conn, std::string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); got = true; });
 
     wait_for_conn(got);
     {
@@ -53,6 +52,7 @@ TEST_CASE("self-connection SN optimization", "[connect][self]") {
     std::string pubkey, privkey;
     pubkey.resize(crypto_box_PUBLICKEYBYTES);
     privkey.resize(crypto_box_SECRETKEYBYTES);
+    REQUIRE(sodium_init() != -1);
     crypto_box_keypair(reinterpret_cast<unsigned char*>(&pubkey[0]), reinterpret_cast<unsigned char*>(&privkey[0]));
     LokiMQ sn{
         pubkey, privkey,
@@ -108,7 +108,7 @@ TEST_CASE("plain-text connections", "[plaintext][connect]") {
     bool success = false;
     auto c = client.connect_remote(listen,
             [&](auto conn) { success = true; got = true; },
-            [&](auto conn, string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); got = true; }
+            [&](auto conn, std::string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); got = true; }
             );
 
     wait_for_conn(got);
@@ -150,11 +150,11 @@ TEST_CASE("unique connection IDs", "[connect][id]") {
     std::atomic<bool> good1{false}, good2{false};
     auto r1 = client1.connect_remote(listen,
             [&](auto conn) { good1 = true; },
-            [&](auto conn, string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); }
+            [&](auto conn, std::string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); }
             );
     auto r2 = client2.connect_remote(listen,
             [&](auto conn) { good2 = true; },
-            [&](auto conn, string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); }
+            [&](auto conn, std::string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); }
             );
 
     wait_for_conn(good1);
@@ -188,6 +188,7 @@ TEST_CASE("SN disconnections", "[connect][disconnect]") {
     std::vector<std::unique_ptr<LokiMQ>> lmq;
     std::vector<std::string> pubkey, privkey;
     std::unordered_map<std::string, std::string> conn;
+    REQUIRE(sodium_init() != -1);
     for (int i = 0; i < 3; i++) {
         pubkey.emplace_back();
         privkey.emplace_back();
@@ -234,6 +235,7 @@ TEST_CASE("SN auth checks", "[sandwich][auth]") {
     std::string pubkey, privkey;
     pubkey.resize(crypto_box_PUBLICKEYBYTES);
     privkey.resize(crypto_box_SECRETKEYBYTES);
+    REQUIRE(sodium_init() != -1);
     crypto_box_keypair(reinterpret_cast<unsigned char*>(&pubkey[0]), reinterpret_cast<unsigned char*>(&privkey[0]));
     LokiMQ server{
         pubkey, privkey,

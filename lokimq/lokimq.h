@@ -29,8 +29,10 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <list>
 #include <queue>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <memory>
@@ -41,9 +43,10 @@
 #include <chrono>
 #include <atomic>
 #include <cassert>
+#include <cstdint>
 #include "zmq.hpp"
+#include "address.h"
 #include "bt_serialize.h"
-#include "string_view.h"
 #include "connections.h"
 #include "message.h"
 #include "auth.h"
@@ -69,22 +72,32 @@ template <typename R> class Batch;
  * use a longer keep-alive to a host call `connect()` first with the desired keep-alive time or pass
  * the send_option::keep_alive.
  */
-static constexpr auto DEFAULT_SEND_KEEP_ALIVE = 30s;
+inline constexpr auto DEFAULT_SEND_KEEP_ALIVE = 30s;
 
 // The default timeout for connect_remote()
-static constexpr auto REMOTE_CONNECT_TIMEOUT = 10s;
+inline constexpr auto REMOTE_CONNECT_TIMEOUT = 10s;
 
 // The amount of time we wait for a reply to a REQUEST before calling the callback with
 // `false` to signal a timeout.
-static constexpr auto DEFAULT_REQUEST_TIMEOUT = 15s;
+inline constexpr auto DEFAULT_REQUEST_TIMEOUT = 15s;
 
 /// Maximum length of a category
-static constexpr size_t MAX_CATEGORY_LENGTH = 50;
+inline constexpr size_t MAX_CATEGORY_LENGTH = 50;
 
 /// Maximum length of a command
-static constexpr size_t MAX_COMMAND_LENGTH = 200;
+inline constexpr size_t MAX_COMMAND_LENGTH = 200;
 
 class CatHelper;
+
+/// Opaque handle for a tagged thread constructed by add_tagged_thread(...).  Not directly
+/// constructible, but is safe (and cheap) to copy.
+struct TaggedThreadID {
+private:
+    int _id;
+    explicit constexpr TaggedThreadID(int id) : _id{id} {}
+    friend class LokiMQ;
+    template <typename R> friend class Batch;
+};
 
 /**
  * Class that handles LokiMQ listeners, connections, proxying, and workers.  An application
@@ -146,12 +159,12 @@ public:
     ///
     /// @returns an `AuthLevel` enum value indicating the default auth level for the incoming
     /// connection, or AuthLevel::denied if the connection should be refused.
-    using AllowFunc = std::function<AuthLevel(string_view address, string_view pubkey, bool service_node)>;
+    using AllowFunc = std::function<AuthLevel(std::string_view address, std::string_view pubkey, bool service_node)>;
 
     /// Callback that is invoked when we need to send a "strong" message to a SN that we aren't
     /// already connected to and need to establish a connection.  This callback returns the ZMQ
     /// connection string we should use which is typically a string such as `tcp://1.2.3.4:5678`.
-    using SNRemoteAddress = std::function<std::string(string_view pubkey)>;
+    using SNRemoteAddress = std::function<std::string(std::string_view pubkey)>;
 
     /// The callback type for registered commands.
     using CommandCallback = std::function<void(Message& message)>;
@@ -169,7 +182,7 @@ public:
     /// Callback for the success case of connect_remote()
     using ConnectSuccess = std::function<void(ConnectionID)>;
     /// Callback for the failure case of connect_remote()
-    using ConnectFailure = std::function<void(ConnectionID, string_view)>;
+    using ConnectFailure = std::function<void(ConnectionID, std::string_view)>;
 
     /// Explicitly non-copyable, non-movable because most things here aren't copyable, and a few
     /// things aren't movable, either.  If you need to pass the LokiMQ instance around, wrap it
@@ -246,6 +259,28 @@ public:
     /// Allows you to set options on the internal zmq context object.  For advanced use only.
     int set_zmq_context_option(int option, int value);
 
+    /** The umask to apply when constructing sockets (which affects any new ipc:// listening sockets
+     * that get created).  Does nothing if set to -1 (the default), and does nothing on Windows.
+     * Note that the umask is applied temporarily during `start()`, so may affect other threads that
+     * create files/directories at the same time as the start() call.
+     */
+    int STARTUP_UMASK = -1;
+
+    /** The gid that owns any sockets when constructed (same as umask)
+     */
+    int SOCKET_GID = -1;
+    /** The uid that owns any sockets when constructed (same as umask but requires root)
+     */
+    int SOCKET_UID = -1;
+
+    /// A special TaggedThreadID value that always refers to the proxy thread; the main use of this is
+    /// to direct very simple batch completion jobs to be executed directly in the proxy thread.
+    inline static constexpr TaggedThreadID run_in_proxy{-1};
+
+    /// Writes a message to the logging system; intended mostly for internal use.
+    template <typename... T>
+    void log(LogLevel lvl, const char* filename, int line, const T&... stuff);
+
 private:
 
     /// The lookup function that tells us where to connect to a peer, or empty if not found.
@@ -257,10 +292,6 @@ private:
 
     /// The callback to call with log messages
     Logger logger;
-
-    /// Logging implementation
-    template <typename... T>
-    void log_(LogLevel lvl, const char* filename, int line, const T&... stuff);
 
     ///////////////////////////////////////////////////////////////////////////////////
     /// NB: The following are all the domain of the proxy thread (once it is started)!
@@ -375,7 +406,8 @@ private:
 
     /// Timers.  TODO: once cppzmq adds an interface around the zmq C timers API then switch to it.
     struct TimersDeleter { void operator()(void* timers); };
-    std::unordered_map<int, std::tuple<std::function<void()>, bool, bool>> timer_jobs; // id => {func, squelch, running}
+    struct timer_data { std::function<void()> function; bool squelch; bool running; int thread; };
+    std::unordered_map<int, timer_data> timer_jobs;
     std::unique_ptr<void, TimersDeleter> timers;
 public:
     // This needs to be public because we have to be able to call it from a plain C function.
@@ -401,8 +433,8 @@ private:
     /// Number of active workers
     int active_workers() const { return workers.size() - idle_workers.size(); }
 
-    /// Worker thread loop
-    void worker_thread(unsigned int index);
+    /// Worker thread loop.  Tagged and start are provided for a tagged worker thread.
+    void worker_thread(unsigned int index, std::optional<std::string> tagged = std::nullopt, std::function<void()> start = nullptr);
 
     /// If set, skip polling for one proxy loop iteration (set when we know we have something
     /// processible without having to shove it onto a socket, such as scheduling an internal job).
@@ -458,7 +490,7 @@ private:
     // provided then the connection will be curve25519 encrypted and authenticate; otherwise it will
     // be unencrypted and unauthenticated.  Note that the remote end must be in the same mode (i.e.
     // either accepting curve connections, or not accepting curve).
-    void setup_outgoing_socket(zmq::socket_t& socket, string_view remote_pubkey = {});
+    void setup_outgoing_socket(zmq::socket_t& socket, std::string_view remote_pubkey = {});
 
     /// Common connection implementation used by proxy_connect/proxy_send.  Returns the socket and,
     /// if a routing prefix is needed, the required prefix (or an empty string if not needed).  For
@@ -474,7 +506,7 @@ private:
     /// @param keep_alive the keep alive for the connection, if we establish a new outgoing
     /// connection.  If we already have an outgoing connection then its keep-alive gets increased to
     /// this if currently less than this.
-    std::pair<zmq::socket_t*, std::string> proxy_connect_sn(string_view pubkey, string_view connect_hint,
+    std::pair<zmq::socket_t*, std::string> proxy_connect_sn(std::string_view pubkey, std::string_view connect_hint,
             bool optional, bool incoming_only, bool outgoing_only, std::chrono::milliseconds keep_alive);
 
     /// CONNECT_SN command telling us to connect to a new pubkey.  Returns the socket (which could
@@ -499,7 +531,8 @@ private:
 
     /// Currently active batch/reply jobs; this is the container that owns the Batch instances
     std::unordered_set<detail::Batch*> batches;
-    /// Individual batch jobs waiting to run
+    /// Individual batch jobs waiting to run; .second is the 0-n batch number or -1 for the
+    /// completion job
     using batch_job = std::pair<detail::Batch*, int>;
     std::queue<batch_job> batch_jobs, reply_jobs;
     int batch_jobs_active = 0;
@@ -519,7 +552,7 @@ private:
     void proxy_timer(bt_list_consumer timer_data);
 
     /// Same, but deserialized
-    void proxy_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch);
+    void proxy_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch, int thread);
 
     /// ZAP (https://rfc.zeromq.org/spec:27/ZAP/) authentication handler; this does non-blocking
     /// processing of any waiting authentication requests for new incoming connections.
@@ -571,31 +604,53 @@ private:
     bool proxy_check_auth(size_t conn_index, bool outgoing, const peer_info& peer,
             zmq::message_t& command, const cat_call_t& cat_call, std::vector<zmq::message_t>& data);
 
+    struct injected_task {
+        category& cat;
+        std::string command;
+        std::string remote;
+        std::function<void()> callback;
+    };
+
+    /// Injects a external callback to be handled by a worker; this is the proxy side of
+    /// inject_task().
+    void proxy_inject_task(injected_task task);
+
+
     /// Set of active service nodes.
     pubkey_set active_service_nodes;
 
     /// Resets or updates the stored set of active SN pubkeys
-    void proxy_set_active_sns(string_view data);
+    void proxy_set_active_sns(std::string_view data);
     void proxy_set_active_sns(pubkey_set pubkeys);
     void proxy_update_active_sns(bt_list_consumer data);
     void proxy_update_active_sns(pubkey_set added, pubkey_set removed);
     void proxy_update_active_sns_clean(pubkey_set added, pubkey_set removed);
 
     /// Details for a pending command; such a command already has authenticated access and is just
-    /// waiting for a thread to become available to handle it.
+    /// waiting for a thread to become available to handle it.  This also gets used (via the
+    /// `callback` variant) for injected external jobs to be able to integrate some external
+    /// interface with the lokimq job queue.
     struct pending_command {
         category& cat;
         std::string command;
         std::vector<zmq::message_t> data_parts;
-        const std::pair<CommandCallback, bool>* callback;
+        std::variant<
+            const std::pair<CommandCallback, bool>*, // Normal command callback
+            std::function<void()> // Injected external callback
+        > callback;
         ConnectionID conn;
         Access access;
         std::string remote;
 
+        // Normal ctor for an actual lmq command being processed
         pending_command(category& cat, std::string command, std::vector<zmq::message_t> data_parts,
                 const std::pair<CommandCallback, bool>* callback, ConnectionID conn, Access access, std::string remote)
             : cat{cat}, command{std::move(command)}, data_parts{std::move(data_parts)},
             callback{callback}, conn{std::move(conn)}, access{std::move(access)}, remote{std::move(remote)} {}
+
+        // Ctor for an injected external command.
+        pending_command(category& cat, std::string command, std::function<void()> callback, std::string remote)
+            : cat{cat}, command{std::move(command)}, callback{std::move(callback)}, remote{std::move(remote)} {}
     };
     std::list<pending_command> pending_commands;
 
@@ -609,9 +664,16 @@ private:
     struct run_info {
         bool is_batch_job = false;
         bool is_reply_job = false;
+        bool is_tagged_thread_job = false;
+        bool is_injected = false;
+
+        // resets the job type bools, above.
+        void reset() { is_batch_job = is_reply_job = is_tagged_thread_job = is_injected = false; }
 
         // If is_batch_job is false then these will be set appropriate (if is_batch_job is true then
-        // these shouldn't be accessed and likely contain stale data).
+        // these shouldn't be accessed and likely contain stale data).  Note that if the command is
+        // an external, injected command then conn, access, conn_route, and data_parts will be
+        // empty/default constructed.
         category *cat;
         std::string command;
         ConnectionID conn; // The connection (or SN pubkey) to reply on/to.
@@ -623,30 +685,42 @@ private:
         // If is_batch_job true then these are set (if is_batch_job false then don't access these!):
         int batch_jobno; // >= 0 for a job, -1 for the completion job
 
-        union {
-            const std::pair<CommandCallback, bool>* callback; // set if !is_batch_job
-            detail::Batch* batch;                             // set if is_batch_job
-        };
+        // The callback or batch job to run.  The first of these is for regular tasks, the second
+        // for batch jobs, the third for injected external tasks.
+        std::variant<
+            const std::pair<CommandCallback, bool>*,
+            detail::Batch*,
+            std::function<void()>
+        > to_run;
 
         // These belong to the proxy thread and must not be accessed by a worker:
         std::thread worker_thread;
-        size_t worker_id; // The index in `workers`
-        std::string worker_routing_id; // "w123" where 123 == worker_id
+        size_t worker_id; // The index in `workers` (0-n) or index+1 in `tagged_workers` (1-n)
+        std::string worker_routing_id; // "w123" where 123 == worker_id; "n123" for tagged threads.
 
         /// Loads the run info with an incoming command
         run_info& load(category* cat, std::string command, ConnectionID conn, Access access, std::string remote,
                 std::vector<zmq::message_t> data_parts, const std::pair<CommandCallback, bool>* callback);
 
+        /// Loads the run info with an injected external command
+        run_info& load(category* cat, std::string command, std::string remote, std::function<void()> callback);
+
         /// Loads the run info with a stored pending command
         run_info& load(pending_command&& pending);
+
         /// Loads the run info with a batch job
-        run_info& load(batch_job&& bj, bool reply_job = false);
+        run_info& load(batch_job&& bj, bool reply_job = false, int tagged_thread = 0);
     };
     /// Data passed to workers for the RUN command.  The proxy thread sets elements in this before
     /// sending RUN to a worker then the worker uses it to get call info, and only allocates it
     /// once, before starting any workers.  Workers may only access their own index and may not
     /// change it.
     std::vector<run_info> workers;
+
+    /// Workers that are reserved for tagged thread tasks (as created with add_tagged_thread).  The
+    /// queue here is similar to worker_jobs, but contains only the tagged thread's jobs.  The bool
+    /// is whether the worker is currently busy (true) or available (false).
+    std::vector<std::tuple<run_info, bool, std::queue<batch_job>>> tagged_workers;
 
 public:
     /**
@@ -786,6 +860,28 @@ public:
      */
     void add_command_alias(std::string from, std::string to);
 
+    /** Creates a "tagged thread" and starts it immediately.  A tagged thread is one that batches,
+     * jobs, and timer jobs can be sent to specifically, typically to perform coordination of some
+     * thread-unsafe work.
+     *
+     * Tagged threads will *only* process jobs sent specifically to them; they do not participate in
+     * the thread pool used for regular jobs.  Each tagged thread also has its own job queue
+     * completely separate from any other jobs.
+     *
+     * Tagged threads must be created *before* `start()` is called.  The name will be used to set the
+     * thread name in the process table (if supported on the OS).
+     *
+     * \param name - the name of the thread; will be used in log messages and (if supported by the
+     * OS) as the system thread name.
+     *
+     * \param start - an optional callback to invoke from the thread as soon as LokiMQ itself starts
+     * up (i.e. after a call to `start()`).
+     *
+     * \returns a TaggedThreadID object that can be passed to job(), batch(), or add_timer() to
+     * direct the task to the tagged thread.
+     */
+    TaggedThreadID add_tagged_thread(std::string name, std::function<void()> start = nullptr);
+
     /**
      * Sets the number of worker threads reserved for batch jobs.  If not explicitly called then
      * this defaults to half the general worker threads configured (rounded up).  This works exactly
@@ -895,7 +991,7 @@ public:
      * *don't* need to worry about this (and can just discard it): you can always simply pass the
      * pubkey as a string wherever a ConnectionID is called.
      */
-    ConnectionID connect_sn(string_view pubkey, std::chrono::milliseconds keep_alive = 5min, string_view hint = {});
+    ConnectionID connect_sn(std::string_view pubkey, std::chrono::milliseconds keep_alive = 5min, std::string_view hint = {});
 
     /**
      * Establish a connection to the given remote with callbacks invoked on a successful or failed
@@ -912,12 +1008,11 @@ public:
      * The `on_connect` and `on_failure` callbacks are invoked when a connection has been
      * established or failed to establish.
      *
-     * @param remote the remote connection address, such as `tcp://localhost:1234`.
+     * @param remote the remote connection address either as implicitly from a string or as a full
+     * lokimq::address object; see address.h for details.  This specifies both the connection
+     * address and whether curve encryption should be used.
      * @param on_connect called with the identifier after the connection has been established.
      * @param on_failure called with the identifier and failure message if we fail to connect.
-     * @param pubkey if non-empty then connect securely (using curve encryption) and verify that the
-     * remote's pubkey equals the given value.  Specifying this is similar to using connect_sn()
-     * except that we do not treat the remote as a SN for command authorization purposes.
      * @param auth_level determines the authentication level of the remote for issuing commands to
      * us.  The default is `AuthLevel::none`.
      * @param timeout how long to try before aborting the connection attempt and calling the
@@ -927,8 +1022,23 @@ public:
      * @param returns ConnectionID that uniquely identifies the connection to this remote node.  In
      * order to talk to it you will need the returned value (or a copy of it).
      */
-    ConnectionID connect_remote(string_view remote, ConnectSuccess on_connect, ConnectFailure on_failure,
-            string_view pubkey = {},
+    ConnectionID connect_remote(const address& remote, ConnectSuccess on_connect, ConnectFailure on_failure,
+            AuthLevel auth_level = AuthLevel::none, std::chrono::milliseconds timeout = REMOTE_CONNECT_TIMEOUT);
+
+    /// Same as the above, but takes the address as a string_view and constructs an `address` from
+    /// it.
+    ConnectionID connect_remote(std::string_view remote, ConnectSuccess on_connect, ConnectFailure on_failure,
+            AuthLevel auth_level = AuthLevel::none, std::chrono::milliseconds timeout = REMOTE_CONNECT_TIMEOUT) {
+        return connect_remote(address{remote}, std::move(on_connect), std::move(on_failure), auth_level, timeout);
+    }
+
+    /// Deprecated version of the above that takes the remote address and remote pubkey for curve
+    /// encryption as separate arguments.  New code should either use a pubkey-embedded address
+    /// string, or specify remote address and pubkey with an `address` object such as:
+    ///     connect_remote(address{remote, pubkey}, ...)
+    [[deprecated("use connect_remote() with a lokimq::address instead")]]
+    ConnectionID connect_remote(std::string_view remote, ConnectSuccess on_connect, ConnectFailure on_failure,
+            std::string_view pubkey,
             AuthLevel auth_level = AuthLevel::none,
             std::chrono::milliseconds timeout = REMOTE_CONNECT_TIMEOUT);
 
@@ -987,7 +1097,7 @@ public:
      * connection hint may be used rather than performing a connection address lookup on the pubkey.
      */
     template <typename... T>
-    void send(ConnectionID to, string_view cmd, const T&... opts);
+    void send(ConnectionID to, std::string_view cmd, const T&... opts);
 
     /** Send a command configured as a "REQUEST" command to a service node: the data parts will be
      * prefixed with a random identifier.  The remote is expected to reply with a ["REPLY",
@@ -1019,7 +1129,33 @@ public:
      *   not running as a service node.
      */
     template <typename... T>
-    void request(ConnectionID to, string_view cmd, ReplyCallback callback, const T&... opts);
+    void request(ConnectionID to, std::string_view cmd, ReplyCallback callback, const T&... opts);
+
+    /** Injects an external task into the lokimq command queue.  This is used to allow connecting
+     * non-LokiMQ requests into the LokiMQ thread pool as if they were ordinary requests, to be
+     * scheduled as commands of an individual category.  For example, you might support rpc requests
+     * via LokiMQ as `rpc.some_command` and *also* accept them over HTTP.  Using `inject_task()`
+     * allows you to handle processing the request in the same thread pool with the same priority as
+     * `rpc.*` commands.
+     *
+     * @param category - the category name that should handle the request for the purposes of
+     * scheduling the job.  The category must have been added using add_category().  The category
+     * can be an actual category with added commands, in which case the injected tasks are queued
+     * along with LMQ requests for that category, or can have no commands to set up a distinct
+     * category for the injected jobs.
+     *
+     * @param command - a command name; this is mainly used for debugging and does not need to
+     * actually exist (and, in fact, is often less confusing if it does not).  It is recommended for
+     * clarity purposes to use something that doesn't look like a typical command, for example
+     * "(http)".
+     *
+     * @param remote - some free-form identifier of the remote connection.  For example, this could
+     * be a remote IP address.  Can be blank if there is nothing suitable.
+     *
+     * @param callback - the function to call from a worker thread when the injected task is
+     * processed.  Takes no arguments.
+     */
+    void inject_task(const std::string& category, std::string command, std::string remote, std::function<void()> callback);
 
     /// The key pair this LokiMQ was created with; if empty keys were given during construction then
     /// this returns the generated keys.
@@ -1072,8 +1208,12 @@ public:
     /**
      * Queues a single job to be executed with no return value.  This is a shortcut for creating and
      * submitting a single-job, no-completion-function batch job.
+     *
+     * \param f the callback to invoke
+     * \param thread an optional tagged thread in which this job should run.  You may *not* pass the
+     * proxy thread here.
      */
-    void job(std::function<void()> f);
+    void job(std::function<void()> f, std::optional<TaggedThreadID> = std::nullopt);
 
     /**
      * Adds a timer that gets scheduled periodically in the job queue.  Normally jobs are not
@@ -1081,8 +1221,10 @@ public:
      * previously scheduled callback of the job has not yet completed.  If you want to override this
      * (so that, under heavy load or long jobs, there can be more than one of the same job scheduled
      * or running at a time) then specify `squelch` as `false`.
+     *
+     * \param thread specifies a thread (added with add_tagged_thread()) on which this timer must run.
      */
-    void add_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch = true);
+    void add_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch = true, std::optional<TaggedThreadID> = std::nullopt);
 };
 
 /// Helper class that slightly simplifies adding commands to a category.
@@ -1129,9 +1271,10 @@ struct data_parts_impl {
     data_parts_impl(InputIt begin, InputIt end) : begin{std::move(begin)}, end{std::move(end)} {}
 };
 
-/// Specifies an iterator pair of data options to send, for when the number of arguments to send()
-/// cannot be determined at compile time.
-template <typename InputIt>
+/// Specifies an iterator pair of data parts to send, for when the number of arguments to send()
+/// cannot be determined at compile time.  The iterator pair must be over strings or string_view (or
+/// something convertible to a string_view).
+template <typename InputIt, typename = std::enable_if_t<std::is_convertible_v<decltype(*std::declval<InputIt>()), std::string_view>>>
 data_parts_impl<InputIt> data_parts(InputIt begin, InputIt end) { return {std::move(begin), std::move(end)}; }
 
 /// Specifies a connection hint when passed in to send().  If there is no current connection to the
@@ -1250,10 +1393,10 @@ template <typename T> T deserialize_object(uintptr_t ptrval) {
 
 // Sends a control message to the given socket consisting of the command plus optional dict
 // data (only sent if the data is non-empty).
-void send_control(zmq::socket_t& sock, string_view cmd, std::string data = {});
+void send_control(zmq::socket_t& sock, std::string_view cmd, std::string data = {});
 
 /// Base case: takes a string-like value and appends it to the message parts
-inline void apply_send_option(bt_list& parts, bt_dict&, string_view arg) {
+inline void apply_send_option(bt_list& parts, bt_dict&, std::string_view arg) {
     parts.emplace_back(arg);
 }
 
@@ -1261,7 +1404,7 @@ inline void apply_send_option(bt_list& parts, bt_dict&, string_view arg) {
 template <typename InputIt>
 void apply_send_option(bt_list& parts, bt_dict&, const send_option::data_parts_impl<InputIt> data) {
     for (auto it = data.begin; it != data.end; ++it)
-        parts.push_back(lokimq::bt_deserialize(*it));
+        parts.emplace_back(*it);
 }
 
 /// `hint` specialization: sets the hint in the control data
@@ -1308,14 +1451,10 @@ inline void apply_send_option(bt_list&, bt_dict& control_data, send_option::queu
 std::pair<std::string, AuthLevel> extract_metadata(zmq::message_t& msg);
 
 template <typename... T>
-bt_dict build_send(ConnectionID to, string_view cmd, T&&... opts) {
+bt_dict build_send(ConnectionID to, std::string_view cmd, T&&... opts) {
     bt_dict control_data;
     bt_list parts{{cmd}};
-#ifdef __cpp_fold_expressions
     (detail::apply_send_option(parts, control_data, std::forward<T>(opts)),...);
-#else
-    (void) std::initializer_list<int>{(detail::apply_send_option(parts, control_data, std::forward<T>(opts)), 0)...};
-#endif
 
     if (to.sn())
         control_data["conn_pubkey"] = std::move(to.pk);
@@ -1332,7 +1471,7 @@ bt_dict build_send(ConnectionID to, string_view cmd, T&&... opts) {
 
 
 template <typename... T>
-void LokiMQ::send(ConnectionID to, string_view cmd, const T&... opts) {
+void LokiMQ::send(ConnectionID to, std::string_view cmd, const T&... opts) {
     detail::send_control(get_control_socket(), "SEND",
             bt_serialize(detail::build_send(std::move(to), cmd, opts...)));
 }
@@ -1340,17 +1479,17 @@ void LokiMQ::send(ConnectionID to, string_view cmd, const T&... opts) {
 std::string make_random_string(size_t size);
 
 template <typename... T>
-void LokiMQ::request(ConnectionID to, string_view cmd, ReplyCallback callback, const T &...opts) {
+void LokiMQ::request(ConnectionID to, std::string_view cmd, ReplyCallback callback, const T &...opts) {
     const auto reply_tag = make_random_string(15); // 15 random bytes is lots and should keep us in most stl implementations' small string optimization
     bt_dict control_data = detail::build_send(std::move(to), cmd, reply_tag, opts...);
     control_data["request"] = true;
     control_data["request_callback"] = detail::serialize_object(std::move(callback));
-    control_data["request_tag"] = string_view{reply_tag};
+    control_data["request_tag"] = std::string_view{reply_tag};
     detail::send_control(get_control_socket(), "SEND", bt_serialize(std::move(control_data)));
 }
 
 template <typename... Args>
-void Message::send_back(string_view command, Args&&... args) {
+void Message::send_back(std::string_view command, Args&&... args) {
     lokimq.send(conn, command, send_option::optional{!conn.sn()}, std::forward<Args>(args)...);
 }
 
@@ -1361,14 +1500,14 @@ void Message::send_reply(Args&&... args) {
 }
 
 template <typename Callback, typename... Args>
-void Message::send_request(string_view cmd, Callback&& callback, Args&&... args) {
+void Message::send_request(std::string_view cmd, Callback&& callback, Args&&... args) {
     lokimq.request(conn, cmd, std::forward<Callback>(callback),
             send_option::optional{!conn.sn()}, std::forward<Args>(args)...);
 }
 
 // When log messages are invoked we strip out anything before this in the filename:
-constexpr string_view LOG_PREFIX{"lokimq/", 7};
-inline string_view trim_log_filename(string_view local_file) {
+constexpr std::string_view LOG_PREFIX{"lokimq/", 7};
+inline std::string_view trim_log_filename(std::string_view local_file) {
     auto chop = local_file.rfind(LOG_PREFIX);
     if (chop != local_file.npos)
         local_file.remove_prefix(chop);
@@ -1376,16 +1515,12 @@ inline string_view trim_log_filename(string_view local_file) {
 }
 
 template <typename... T>
-void LokiMQ::log_(LogLevel lvl, const char* file, int line, const T&... stuff) {
+void LokiMQ::log(LogLevel lvl, const char* file, int line, const T&... stuff) {
     if (log_level() < lvl)
         return;
 
     std::ostringstream os;
-#ifdef __cpp_fold_expressions
     (os << ... << stuff);
-#else
-    (void) std::initializer_list<int>{(os << stuff, 0)...};
-#endif
     logger(lvl, trim_log_filename(file).data(), line, os.str());
 }
 

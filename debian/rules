@@ -20,7 +20,8 @@ include /usr/share/dpkg/pkg-info.mk
 
 override_dh_auto_configure:
 	debian/gen-liblokimq-install.sh $(DEB_VERSION_UPSTREAM)
-	dh_auto_configure -- -DLOKIMQ_INSTALL_MAPBOX_VARIANT=OFF -DLOKIMQ_INSTALL_CPPZMQ=ON
+	dh_auto_configure -- -DLOKIMQ_INSTALL_CPPZMQ=ON \
+		-DLOKIMQ_BUILD_TESTS=OFF
 
 # dh_make generated override targets
 # This is example for Cmake (See https://bugs.debian.org/641051 )
