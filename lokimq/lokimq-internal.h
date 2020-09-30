@@ -4,12 +4,11 @@
 // Inside some method:
 //     LMQ_LOG(warn, "bad ", 42, " stuff");
 //
-// (The "this->" is here to work around gcc 5 bugginess when called in a `this`-capturing lambda.)
-#define LMQ_LOG(level, ...) this->log_(LogLevel::level, __FILE__, __LINE__, __VA_ARGS__)
+#define LMQ_LOG(level, ...) log(LogLevel::level, __FILE__, __LINE__, __VA_ARGS__)
 
 #ifndef NDEBUG
 // Same as LMQ_LOG(trace, ...) when not doing a release build; nothing under a release build.
-#  define LMQ_TRACE(...) this->log_(LogLevel::trace, __FILE__, __LINE__, __VA_ARGS__)
+#  define LMQ_TRACE(...) log(LogLevel::trace, __FILE__, __LINE__, __VA_ARGS__)
 #else
 #  define LMQ_TRACE(...)
 #endif
@@ -33,7 +32,7 @@ inline zmq::message_t create_message(std::string&& data) {
 };
 
 /// Create a message copying from a string_view
-inline zmq::message_t create_message(string_view data) {
+inline zmq::message_t create_message(std::string_view data) {
     return zmq::message_t{data.begin(), data.end()};
 }
 
@@ -94,7 +93,7 @@ inline const char* peer_address(zmq::message_t& msg) {
 
 // Returns a string view of the given message data.  It's the caller's responsibility to keep the
 // referenced message alive.  If you want a std::string instead just call `m.to_string()`
-inline string_view view(const zmq::message_t& m) {
+inline std::string_view view(const zmq::message_t& m) {
     return {m.data<char>(), m.size()};
 }
 
@@ -108,7 +107,7 @@ inline std::string to_string(AuthLevel a) {
     }
 }
 
-inline AuthLevel auth_from_string(string_view a) {
+inline AuthLevel auth_from_string(std::string_view a) {
     if (a == "none") return AuthLevel::none;
     if (a == "basic") return AuthLevel::basic;
     if (a == "admin") return AuthLevel::admin;
@@ -116,7 +115,7 @@ inline AuthLevel auth_from_string(string_view a) {
 }
 
 // Extracts and builds the "send" part of a message for proxy_send/proxy_reply
-inline std::list<zmq::message_t> build_send_parts(bt_list_consumer send, string_view route) {
+inline std::list<zmq::message_t> build_send_parts(bt_list_consumer send, std::string_view route) {
     std::list<zmq::message_t> parts;
     if (!route.empty())
         parts.push_back(create_message(route));
@@ -128,7 +127,7 @@ inline std::list<zmq::message_t> build_send_parts(bt_list_consumer send, string_
 /// Sends a control message to a specific destination by prefixing the worker name (or identity)
 /// then appending the command and optional data (if non-empty).  (This is needed when sending the control message
 /// to a router socket, i.e. inside the proxy thread).
-inline void route_control(zmq::socket_t& sock, string_view identity, string_view cmd, const std::string& data = {}) {
+inline void route_control(zmq::socket_t& sock, std::string_view identity, std::string_view cmd, const std::string& data = {}) {
     sock.send(create_message(identity), zmq::send_flags::sndmore);
     detail::send_control(sock, cmd, data);
 }
