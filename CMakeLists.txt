@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.7)
 
+# Has to be set before `project()`, and ignored on non-macos:
+set(CMAKE_OSX_DEPLOYMENT_TARGET 10.14 CACHE STRING "macOS deployment target (Apple clang only)")
+
 project(liblokimq CXX C)
 
 include(GNUInstallDirs)
