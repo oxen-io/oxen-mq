@@ -6,7 +6,7 @@
 using namespace lokimq;
 
 TEST_CASE("basic commands", "[commands]") {
-    std::string listen = "tcp://127.0.0.1:4567";
+    std::string listen = random_localhost();
     LokiMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
@@ -76,7 +76,7 @@ TEST_CASE("basic commands", "[commands]") {
 }
 
 TEST_CASE("outgoing auth level", "[commands][auth]") {
-    std::string listen = "tcp://127.0.0.1:4567";
+    std::string listen = random_localhost();
     LokiMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
@@ -158,7 +158,7 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
     // Tests that the ConnectionID from a Message can be stored and reused later to contact the
     // original node.
 
-    std::string listen = "tcp://127.0.0.1:4567";
+    std::string listen = random_localhost();
     LokiMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
@@ -270,7 +270,7 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
 }
 
 TEST_CASE("send failure callbacks", "[commands][queue_full]") {
-    std::string listen = "tcp://127.0.0.1:4567";
+    std::string listen = random_localhost();
     LokiMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
@@ -364,7 +364,7 @@ TEST_CASE("send failure callbacks", "[commands][queue_full]") {
 }
 
 TEST_CASE("data parts", "[send][data_parts]") {
-    std::string listen = "tcp://127.0.0.1:4567";
+    std::string listen = random_localhost();
     LokiMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node

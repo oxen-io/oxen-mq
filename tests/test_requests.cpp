@@ -4,7 +4,7 @@
 using namespace lokimq;
 
 TEST_CASE("basic requests", "[requests]") {
-    std::string listen = "tcp://127.0.0.1:5678";
+    std::string listen = random_localhost();
     LokiMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
@@ -61,7 +61,7 @@ TEST_CASE("basic requests", "[requests]") {
 }
 
 TEST_CASE("request from server to client", "[requests]") {
-    std::string listen = "tcp://127.0.0.1:5678";
+    std::string listen = random_localhost();
     LokiMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
@@ -124,7 +124,7 @@ TEST_CASE("request from server to client", "[requests]") {
 }
 
 TEST_CASE("request timeouts", "[requests][timeout]") {
-    std::string listen = "tcp://127.0.0.1:5678";
+    std::string listen = random_localhost();
     LokiMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
