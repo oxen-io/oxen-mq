@@ -35,7 +35,7 @@
 #include <ostream>
 #include <string>
 #include <string_view>
-#include <variant>
+#include "variant.h"
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -428,8 +428,8 @@ struct bt_deserialize_try_variant_impl<std::enable_if_t<!is_bt_deserializable<T>
 // Serialization of a variant; all variant types must be bt-serializable.
 template <typename... Ts>
 struct bt_serialize<std::variant<Ts...>, std::void_t<bt_serialize<Ts>...>> {
-    void operator()(std::ostream &os, const std::variant<Ts...>& val) {
-        std::visit(
+    void operator()(std::ostream& os, const std::variant<Ts...>& val) {
+        var::visit(
                 [&os] (const auto& val) {
                     using T = std::remove_cv_t<std::remove_reference_t<decltype(val)>>;
                     bt_serialize<T>{}(os, val);
@@ -556,15 +556,14 @@ inline bt_value bt_get(std::string_view s) {
 ///     auto v = get_int<uint32_t>(val); // throws if the decoded value doesn't fit in a uint32_t
 template <typename IntType, std::enable_if_t<std::is_integral_v<IntType>, int> = 0>
 IntType get_int(const bt_value &v) {
-    if (std::holds_alternative<uint64_t>(v)) {
-        uint64_t value = std::get<uint64_t>(v);
+    if (auto* value = std::get_if<uint64_t>(&v)) {
         if constexpr (!std::is_same_v<IntType, uint64_t>)
-            if (value > static_cast<uint64_t>(std::numeric_limits<IntType>::max()))
+            if (*value > static_cast<uint64_t>(std::numeric_limits<IntType>::max()))
                 throw std::overflow_error("Unable to extract integer value: stored value is too large for the requested type");
-        return static_cast<IntType>(value);
+        return static_cast<IntType>(*value);
     }
 
-    int64_t value = std::get<int64_t>(v);
+    int64_t value = var::get<int64_t>(v); // throws if no int contained
     if constexpr (!std::is_same_v<IntType, int64_t>)
         if (value > static_cast<int64_t>(std::numeric_limits<IntType>::max())
                 || value < static_cast<int64_t>(std::numeric_limits<IntType>::min()))
@@ -589,7 +588,7 @@ Tuple get_tuple(const bt_list& x) {
 }
 template <typename Tuple>
 Tuple get_tuple(const bt_value& x) {
-    return get_tuple<Tuple>(std::get<bt_list>(static_cast<const bt_variant&>(x)));
+    return get_tuple<Tuple>(var::get<bt_list>(static_cast<const bt_variant&>(x)));
 }
 
 namespace detail {
@@ -601,15 +600,15 @@ void get_tuple_impl_one(T& t, It& it) {
     } else if constexpr (is_bt_tuple<T>) {
         if (std::holds_alternative<bt_list>(v))
             throw std::invalid_argument{"Unable to convert tuple: cannot create sub-tuple from non-bt_list"};
-        t = get_tuple<T>(std::get<bt_list>(v));
+        t = get_tuple<T>(var::get<bt_list>(v));
     } else if constexpr (std::is_same_v<std::string, T> || std::is_same_v<std::string_view, T>) {
         // If we request a string/string_view, we might have the other one and need to copy/view it.
         if (std::holds_alternative<std::string_view>(v))
-            t = std::get<std::string_view>(v);
+            t = var::get<std::string_view>(v);
         else
-            t = std::get<std::string>(v);
+            t = var::get<std::string>(v);
     } else {
-        t = std::get<T>(v);
+        t = var::get<T>(v);
     }
 }
 template <typename Tuple, size_t... Is>
