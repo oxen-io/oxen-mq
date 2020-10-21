@@ -6,6 +6,16 @@ using namespace lokimq;
 
 static auto startup = std::chrono::steady_clock::now();
 
+/// Returns a localhost connection string to listen on.  It can be considered random, though in
+/// practice in the current implementation is sequential starting at 4500.
+inline std::string random_localhost() {
+    static uint16_t last = 4499;
+    last++;
+    assert(last); // We should never call this enough to overflow
+    return "tcp://127.0.0.1:" + std::to_string(last);
+}
+
+
 /// Waits up to 100ms for something to happen.
 template <typename Func>
 inline void wait_for(Func f) {

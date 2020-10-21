@@ -99,7 +99,7 @@ void LokiMQ::worker_thread(unsigned int index, std::optional<std::string> tagged
 
         try {
             if (run.is_batch_job) {
-                auto* batch = std::get<detail::Batch*>(run.to_run);
+                auto* batch = var::get<detail::Batch*>(run.to_run);
                 if (run.batch_jobno >= 0) {
                     LMQ_TRACE("worker thread ", worker_id, " running batch ", batch, "#", run.batch_jobno);
                     batch->run_job(run.batch_jobno);
@@ -108,7 +108,7 @@ void LokiMQ::worker_thread(unsigned int index, std::optional<std::string> tagged
                     batch->job_completion();
                 }
             } else if (run.is_injected) {
-                auto& func = std::get<std::function<void()>>(run.to_run);
+                auto& func = var::get<std::function<void()>>(run.to_run);
                 LMQ_TRACE("worker thread ", worker_id, " invoking injected command ", run.command);
                 func();
                 func = nullptr;
@@ -120,7 +120,7 @@ void LokiMQ::worker_thread(unsigned int index, std::optional<std::string> tagged
 
                 LMQ_TRACE("Got incoming command from ", message.remote, "/", message.conn, message.conn.route.empty() ? " (outgoing)" : " (incoming)");
 
-                auto& [callback, is_request] = *std::get<const std::pair<CommandCallback, bool>*>(run.to_run);
+                auto& [callback, is_request] = *var::get<const std::pair<CommandCallback, bool>*>(run.to_run);
                 if (is_request) {
                     message.reply_tag = {run.data_parts[0].data<char>(), run.data_parts[0].size()};
                     for (auto it = run.data_parts.begin() + 1; it != run.data_parts.end(); ++it)
@@ -137,9 +137,11 @@ void LokiMQ::worker_thread(unsigned int index, std::optional<std::string> tagged
         catch (const bt_deserialize_invalid& e) {
             LMQ_LOG(warn, worker_id, " deserialization failed: ", e.what(), "; ignoring request");
         }
+#ifndef BROKEN_APPLE_VARIANT
         catch (const std::bad_variant_access& e) {
             LMQ_LOG(warn, worker_id, " deserialization failed: found unexpected serialized type (", e.what(), "); ignoring request");
         }
+#endif
         catch (const std::out_of_range& e) {
             LMQ_LOG(warn, worker_id, " deserialization failed: invalid data - required field missing (", e.what(), "); ignoring request");
         }
@@ -208,7 +210,7 @@ void LokiMQ::proxy_worker_message(std::vector<zmq::message_t>& parts) {
                 active--;
             }
             bool clear_job = false;
-            auto* batch = std::get<detail::Batch*>(run.to_run);
+            auto* batch = var::get<detail::Batch*>(run.to_run);
             if (run.batch_jobno == -1) {
                 // Returned from the completion function
                 clear_job = true;
