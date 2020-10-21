@@ -1,12 +1,15 @@
 cmake_minimum_required(VERSION 3.7)
 
+# Has to be set before `project()`, and ignored on non-macos:
+set(CMAKE_OSX_DEPLOYMENT_TARGET 10.12 CACHE STRING "macOS deployment target (Apple clang only)")
+
 project(liblokimq CXX C)
 
 include(GNUInstallDirs)
 
 set(LOKIMQ_VERSION_MAJOR 1)
 set(LOKIMQ_VERSION_MINOR 2)
-set(LOKIMQ_VERSION_PATCH 0)
+set(LOKIMQ_VERSION_PATCH 1)
 set(LOKIMQ_VERSION "${LOKIMQ_VERSION_MAJOR}.${LOKIMQ_VERSION_MINOR}.${LOKIMQ_VERSION_PATCH}")
 message(STATUS "lokimq v${LOKIMQ_VERSION}")
 
@@ -150,6 +153,7 @@ install(
           lokimq/lokimq.h
           lokimq/message.h
           lokimq/string_view.h
+          lokimq/variant.h
           ${CMAKE_CURRENT_BINARY_DIR}/lokimq/version.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq
 )
