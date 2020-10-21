@@ -1,3 +1,13 @@
+lokimq (1.2.1-1~ubuntu1804) bionic; urgency=medium
+
+  * Update macos build to use 10.14 compatibility
+  * macOS 10.12 compatibility
+  * Test suite: use different ports for each test
+  * Fix var::get<I> to return references
+  * Stable release bump
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Wed, 21 Oct 2020 00:22:41 -0300
+
 lokimq (1.2.0-1~ubuntu1804) bionic; urgency=medium
 
   1.2.0 release.
