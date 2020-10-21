@@ -3,7 +3,7 @@
 using namespace lokimq;
 
 TEST_CASE("injected external commands", "[injected]") {
-    std::string listen = "tcp://127.0.0.1:4567";
+    std::string listen = random_localhost();
     LokiMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
