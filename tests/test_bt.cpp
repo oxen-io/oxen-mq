@@ -125,10 +125,10 @@ TEST_CASE("bt_value serialization", "[bt][serialization][bt_value]") {
 TEST_CASE("bt_value deserialization", "[bt][deserialization][bt_value]") {
     auto dna1 = bt_deserialize<bt_value>("i42e");
     auto dna2 = bt_deserialize<bt_value>("i-42e");
-    REQUIRE( std::get<uint64_t>(dna1) == 42 );
-    REQUIRE( std::get<int64_t>(dna2) == -42 );
-    REQUIRE_THROWS( std::get<int64_t>(dna1) );
-    REQUIRE_THROWS( std::get<uint64_t>(dna2) );
+    REQUIRE( var::get<uint64_t>(dna1) == 42 );
+    REQUIRE( var::get<int64_t>(dna2) == -42 );
+    REQUIRE_THROWS( var::get<int64_t>(dna1) );
+    REQUIRE_THROWS( var::get<uint64_t>(dna2) );
     REQUIRE( lokimq::get_int<int>(dna1) == 42 );
     REQUIRE( lokimq::get_int<int>(dna2) == -42 );
     REQUIRE( lokimq::get_int<unsigned>(dna1) == 42 );
@@ -136,19 +136,19 @@ TEST_CASE("bt_value deserialization", "[bt][deserialization][bt_value]") {
 
     bt_value x = bt_deserialize<bt_value>("d3:barle3:foold1:ali1ei2ei3ee1:bleed1:cli-5ei4eeeee");
     REQUIRE( std::holds_alternative<bt_dict>(x) );
-    bt_dict& a = std::get<bt_dict>(x);
+    bt_dict& a = var::get<bt_dict>(x);
     REQUIRE( a.count("bar") );
     REQUIRE( a.count("foo") );
     REQUIRE( a.size() == 2 );
-    bt_list& foo = std::get<bt_list>(a["foo"]);
+    bt_list& foo = var::get<bt_list>(a["foo"]);
     REQUIRE( foo.size() == 2 );
-    bt_dict& foo1 = std::get<bt_dict>(foo.front());
-    bt_dict& foo2 = std::get<bt_dict>(foo.back());
+    bt_dict& foo1 = var::get<bt_dict>(foo.front());
+    bt_dict& foo2 = var::get<bt_dict>(foo.back());
     REQUIRE( foo1.size() == 2 );
     REQUIRE( foo2.size() == 1 );
-    bt_list& foo1a = std::get<bt_list>(foo1.at("a"));
-    bt_list& foo1b = std::get<bt_list>(foo1.at("b"));
-    bt_list& foo2c = std::get<bt_list>(foo2.at("c"));
+    bt_list& foo1a = var::get<bt_list>(foo1.at("a"));
+    bt_list& foo1b = var::get<bt_list>(foo1.at("b"));
+    bt_list& foo2c = var::get<bt_list>(foo2.at("c"));
     std::list<int> foo1a_vals, foo1b_vals, foo2c_vals;
     for (auto& v : foo1a) foo1a_vals.push_back(lokimq::get_int<int>(v));
     for (auto& v : foo1b) foo1b_vals.push_back(lokimq::get_int<int>(v));
@@ -157,7 +157,7 @@ TEST_CASE("bt_value deserialization", "[bt][deserialization][bt_value]") {
     REQUIRE( foo1b_vals == std::list<int>{} );
     REQUIRE( foo2c_vals == std::list{{-5, 4}} );
 
-    REQUIRE( std::get<bt_list>(a.at("bar")).empty() );
+    REQUIRE( var::get<bt_list>(a.at("bar")).empty() );
 }
 
 TEST_CASE("bt tuple serialization", "[bt][tuple][serialization]") {
