@@ -1,5 +1,6 @@
 #include "lokimq.h"
 #include "lokimq-internal.h"
+#include "zmq.hpp"
 #include <map>
 #include <random>
 #include <ostream>
@@ -74,8 +75,8 @@ std::pair<std::string, AuthLevel> extract_metadata(zmq::message_t& msg) {
 
 } // namespace detail
 
-int LokiMQ::set_zmq_context_option(int option, int value) {
-    return context.setctxopt(option, value);
+void LokiMQ::set_zmq_context_option(zmq::ctxopt option, int value) {
+    context.set(option, value);
 }
 
 void LokiMQ::log_level(LogLevel level) {
@@ -181,7 +182,7 @@ zmq::socket_t& LokiMQ::get_control_socket() {
     if (proxy_shutting_down)
         throw std::runtime_error("Unable to obtain LokiMQ control socket: proxy thread is shutting down");
     auto control = std::make_shared<zmq::socket_t>(context, zmq::socket_type::dealer);
-    control->setsockopt<int>(ZMQ_LINGER, 0);
+    control->set(zmq::sockopt::linger, 0);
     control->connect(SN_ADDR_COMMAND);
     thread_control_sockets.push_back(control);
     control_sockets.emplace(object_id, control);
@@ -243,9 +244,9 @@ void LokiMQ::start() {
 
     LMQ_LOG(info, "Initializing LokiMQ ", bind.empty() ? "remote-only" : "listener", " with pubkey ", to_hex(pubkey));
 
-    int zmq_socket_limit = context.getctxopt(ZMQ_SOCKET_LIMIT);
+    int zmq_socket_limit = context.get(zmq::ctxopt::socket_limit);
     if (MAX_SOCKETS > 1 && MAX_SOCKETS <= zmq_socket_limit)
-        context.setctxopt(ZMQ_MAX_SOCKETS, MAX_SOCKETS);
+        context.set(zmq::ctxopt::max_sockets, MAX_SOCKETS);
     else
         LMQ_LOG(error, "Not applying LokiMQ::MAX_SOCKETS setting: ", MAX_SOCKETS, " must be in [1, ", zmq_socket_limit, "]");
 
@@ -400,7 +401,7 @@ LokiMQ::~LokiMQ() {
             // proxy thread starts (and we're getting destructed here without a proxy thread).  So
             // we need to start listening on it here in the destructor so that we establish a
             // connection and send the QUITs to the tagged worker threads.
-            workers_socket.setsockopt<int>(ZMQ_ROUTER_MANDATORY, 1);
+            workers_socket.set(zmq::sockopt::router_mandatory, true);
             workers_socket.bind(SN_ADDR_WORKERS);
             for (auto& [run, busy, queue] : tagged_workers) {
                 while (true) {
