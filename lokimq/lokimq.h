@@ -131,18 +131,15 @@ private:
 
     /// We have one seldom-used mutex here: it is generally locked just once per thread (the first
     /// time the thread calls get_control_socket()) and once more by the proxy thread when it shuts
-    /// down, and so will not be a contention point.
+    /// down.
     std::mutex control_sockets_mutex;
 
     /// Called to obtain a "command" socket that attaches to `control` to send commands to the
     /// proxy thread from other threads.  This socket is unique per thread and LokiMQ instance.
     zmq::socket_t& get_control_socket();
 
-    /// Stores all of the sockets created in different threads via `get_control_socket`.  This is
-    /// only used during destruction to close all of those open sockets, and is protected by an
-    /// internal mutex which is only locked by new threads getting a control socket and the
-    /// destructor.
-    std::vector<std::shared_ptr<zmq::socket_t>> thread_control_sockets;
+    /// Per-thread control sockets used by lokimq threads to talk to this object's proxy thread.
+    std::unordered_map<std::thread::id, std::unique_ptr<zmq::socket_t>> control_sockets;
 
 public:
 

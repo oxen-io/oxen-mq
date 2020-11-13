@@ -4,6 +4,7 @@
 #include <map>
 #include <random>
 #include <ostream>
+#include <thread>
 
 extern "C" {
 #include <sodium/core.h>
@@ -162,33 +163,28 @@ std::atomic<int> next_id{1};
 zmq::socket_t& LokiMQ::get_control_socket() {
     assert(proxy_thread.joinable());
 
-    // Maps the LokiMQ unique ID to a local thread command socket.
-    static thread_local std::map<int, std::shared_ptr<zmq::socket_t>> control_sockets;
-    static thread_local std::pair<int, std::shared_ptr<zmq::socket_t>> last{-1, nullptr};
-
     // Optimize by caching the last value; LokiMQ is often a singleton and in that case we're
     // going to *always* hit this optimization.  Even if it isn't, we're probably likely to need the
     // same control socket from the same thread multiple times sequentially so this may still help.
-    if (object_id == last.first)
-        return *last.second;
-
-    auto it = control_sockets.find(object_id);
-    if (it != control_sockets.end()) {
-        last = *it;
-        return *last.second;
-    }
+    static thread_local int last_id = -1;
+    static thread_local zmq::socket_t* last_socket = nullptr;
+    if (object_id == last_id)
+        return *last_socket;
 
     std::lock_guard lock{control_sockets_mutex};
+
     if (proxy_shutting_down)
         throw std::runtime_error("Unable to obtain LokiMQ control socket: proxy thread is shutting down");
-    auto control = std::make_shared<zmq::socket_t>(context, zmq::socket_type::dealer);
-    control->set(zmq::sockopt::linger, 0);
-    control->connect(SN_ADDR_COMMAND);
-    thread_control_sockets.push_back(control);
-    control_sockets.emplace(object_id, control);
-    last.first = object_id;
-    last.second = std::move(control);
-    return *last.second;
+
+    auto& socket = control_sockets[std::this_thread::get_id()];
+    if (!socket) {
+        socket = std::make_unique<zmq::socket_t>(context, zmq::socket_type::dealer);
+        socket->set(zmq::sockopt::linger, 0);
+        socket->connect(SN_ADDR_COMMAND);
+    }
+    last_id = object_id;
+    last_socket = socket.get();
+    return *last_socket;
 }
 
 
