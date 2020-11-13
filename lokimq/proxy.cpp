@@ -29,8 +29,6 @@ void LokiMQ::proxy_quit() {
     command.close();
     {
         std::lock_guard lock{control_sockets_mutex};
-        for (auto &control : thread_control_sockets)
-            control->close();
         proxy_shutting_down = true; // To prevent threads from opening new control sockets
     }
     workers_socket.close();
