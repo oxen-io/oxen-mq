@@ -1,3 +1,13 @@
+lokimq (1.2.2-1~ubuntu2004) focal; urgency=medium
+
+  * Crank clang to 11
+  * cppzmq 4.7+ compatibility
+  * Move socket holding into LokiMQ instance
+  * Don't install when building as a static subdirectory
+  * Bump version for 1.2.2 release
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Tue, 17 Nov 2020 15:29:50 -0400
+
 lokimq (1.2.1-1~ubuntu2004) focal; urgency=medium
 
   * Update macos build to use 10.14 compatibility
