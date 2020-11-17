@@ -25,18 +25,16 @@ void LokiMQ::proxy_quit() {
     assert(std::none_of(workers.begin(), workers.end(), [](auto& worker) { return worker.worker_thread.joinable(); }));
     assert(std::none_of(tagged_workers.begin(), tagged_workers.end(), [](auto& worker) { return std::get<0>(worker).worker_thread.joinable(); }));
 
-    command.setsockopt<int>(ZMQ_LINGER, 0);
+    command.set(zmq::sockopt::linger, 0);
     command.close();
     {
         std::lock_guard lock{control_sockets_mutex};
-        for (auto &control : thread_control_sockets)
-            control->close();
         proxy_shutting_down = true; // To prevent threads from opening new control sockets
     }
     workers_socket.close();
     int linger = std::chrono::milliseconds{CLOSE_LINGER}.count();
     for (auto& s : connections)
-        s.setsockopt(ZMQ_LINGER, linger);
+        s.set(zmq::sockopt::linger, linger);
     connections.clear();
     peers.clear();
 
@@ -322,10 +320,10 @@ void LokiMQ::proxy_loop() {
     pthread_setname_np("lmq-proxy");
 #endif
 
-    zap_auth.setsockopt<int>(ZMQ_LINGER, 0);
+    zap_auth.set(zmq::sockopt::linger, 0);
     zap_auth.bind(ZMQ_ADDR_ZAP);
 
-    workers_socket.setsockopt<int>(ZMQ_ROUTER_MANDATORY, 1);
+    workers_socket.set(zmq::sockopt::router_mandatory, true);
     workers_socket.bind(SN_ADDR_WORKERS);
 
     assert(general_workers > 0);
@@ -362,16 +360,15 @@ void LokiMQ::proxy_loop() {
         auto& b = bind[i].second;
         zmq::socket_t listener{context, zmq::socket_type::router};
 
-        std::string auth_domain = bt_serialize(i);
         setup_external_socket(listener);
-        listener.setsockopt(ZMQ_ZAP_DOMAIN, auth_domain.c_str(), auth_domain.size());
+        listener.set(zmq::sockopt::zap_domain, bt_serialize(i));
         if (b.curve) {
-            listener.setsockopt<int>(ZMQ_CURVE_SERVER, 1);
-            listener.setsockopt(ZMQ_CURVE_PUBLICKEY, pubkey.data(), pubkey.size());
-            listener.setsockopt(ZMQ_CURVE_SECRETKEY, privkey.data(), privkey.size());
+            listener.set(zmq::sockopt::curve_server, true);
+            listener.set(zmq::sockopt::curve_publickey, pubkey);
+            listener.set(zmq::sockopt::curve_secretkey, privkey);
         }
-        listener.setsockopt<int>(ZMQ_ROUTER_HANDOVER, 1);
-        listener.setsockopt<int>(ZMQ_ROUTER_MANDATORY, 1);
+        listener.set(zmq::sockopt::router_handover, true);
+        listener.set(zmq::sockopt::router_mandatory, true);
 
         listener.bind(bind[i].first);
         LMQ_LOG(info, "LokiMQ listening on ", bind[i].first);
@@ -552,7 +549,7 @@ static bool is_error_response(std::string_view cmd) {
 // reason)
 bool LokiMQ::proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>& parts) {
     // Doubling as a bool and an offset:
-    size_t incoming = connections[conn_index].getsockopt<int>(ZMQ_TYPE) == ZMQ_ROUTER;
+    size_t incoming = connections[conn_index].get(zmq::sockopt::type) == ZMQ_ROUTER;
 
     std::string_view route, cmd;
     if (parts.size() < 1 + incoming) {
