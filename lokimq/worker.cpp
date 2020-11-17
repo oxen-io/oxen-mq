@@ -35,7 +35,7 @@ bool worker_wait_for(LokiMQ& lmq, zmq::socket_t& sock, std::vector<zmq::message_
         } else if (command == "QUIT"sv) {
             lmq.log(LogLevel::debug, __FILE__, __LINE__, "Worker ", worker_id, " received QUIT command, shutting down");
             detail::send_control(sock, "QUITTING");
-            sock.setsockopt<int>(ZMQ_LINGER, 1000);
+            sock.set(zmq::sockopt::linger, 1000);
             sock.close();
             return false;
         } else {
@@ -61,7 +61,7 @@ void LokiMQ::worker_thread(unsigned int index, std::optional<std::string> tagged
 #endif
 
     zmq::socket_t sock{context, zmq::socket_type::dealer};
-    sock.setsockopt(ZMQ_ROUTING_ID, routing_id.data(), routing_id.size());
+    sock.set(zmq::sockopt::routing_id, routing_id);
     LMQ_LOG(debug, "New worker thread ", worker_id, " (", routing_id, ") started");
     sock.connect(SN_ADDR_WORKERS);
     if (tagged)
@@ -276,7 +276,7 @@ void LokiMQ::proxy_run_worker(run_info& run) {
 }
 
 void LokiMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& parts) {
-    bool outgoing = connections[conn_index].getsockopt<int>(ZMQ_TYPE) == ZMQ_DEALER;
+    bool outgoing = connections[conn_index].get(zmq::sockopt::type) == ZMQ_DEALER;
 
     peer_info tmp_peer;
     tmp_peer.conn_index = conn_index;
