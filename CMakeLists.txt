@@ -16,8 +16,21 @@ message(STATUS "lokimq v${LOKIMQ_VERSION}")
 set(LOKIMQ_LIBVERSION 0)
 
 
-option(BUILD_SHARED_LIBS "Build shared libraries instead of static ones" ON)
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    set(lokimq_IS_TOPLEVEL_PROJECT TRUE)
+else()
+    set(lokimq_IS_TOPLEVEL_PROJECT FALSE)
+endif()
 
+
+option(BUILD_SHARED_LIBS "Build shared libraries instead of static ones" ON)
+set(lokimq_INSTALL_DEFAULT OFF)
+if(BUILD_SHARED_LIBS OR lokimq_IS_TOPLEVEL_PROJECT)
+    set(lokimq_INSTALL_DEFAULT ON)
+endif()
+option(LOKIMQ_BUILD_TESTS "Building and perform lokimq tests" ${lokimq_IS_TOPLEVEL_PROJECT})
+option(LOKIMQ_INSTALL "Add lokimq libraries and headers to cmake install target; defaults to ON if BUILD_SHARED_LIBS is enabled or we are the top-level project; OFF for a static subdirectory build" ${lokimq_INSTALL_DEFAULT})
+option(LOKIMQ_INSTALL_CPPZMQ "Install cppzmq header with lokimq/ headers (requires LOKIMQ_INSTALL)" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -95,7 +108,6 @@ set_target_properties(lokimq PROPERTIES
 function(link_dep_libs target linktype libdirs)
     foreach(lib ${ARGN})
         find_library(link_lib-${lib} NAMES ${lib} PATHS ${libdirs})
-        message(STATUS "FIND ${lib} FOUND ${link_lib-${lib}}")
         if(link_lib-${lib})
             target_link_libraries(${target} ${linktype} ${link_lib-${lib}})
         endif()
@@ -110,6 +122,7 @@ if(TARGET sodium)
         target_link_libraries(libzmq_vendor INTERFACE sodium)
     endif()
 else()
+    include(FindPkgConfig)
     pkg_check_modules(sodium REQUIRED libsodium IMPORTED_TARGET)
 
     if(BUILD_SHARED_LIBS)
@@ -134,52 +147,46 @@ export(
     NAMESPACE lokimq::
     FILE lokimqTargets.cmake
 )
-install(
-    TARGETS lokimq
-    EXPORT lokimqConfig
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}
-)
 
-install(
-    FILES lokimq/address.h
-          lokimq/auth.h
-          lokimq/base32z.h
-          lokimq/base64.h
-          lokimq/batch.h
-          lokimq/bt_serialize.h
-          lokimq/bt_value.h
-          lokimq/connections.h
-          lokimq/hex.h
-          lokimq/lokimq.h
-          lokimq/message.h
-          lokimq/string_view.h
-          lokimq/variant.h
-          ${CMAKE_CURRENT_BINARY_DIR}/lokimq/version.h
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq
-)
+if(LOKIMQ_INSTALL)
+    install(
+        TARGETS lokimq
+        EXPORT lokimqConfig
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        )
 
-option(LOKIMQ_INSTALL_CPPZMQ "Install cppzmq header with lokimq/ headers" ON)
-if(LOKIMQ_INSTALL_CPPZMQ)
-  install(
-    FILES cppzmq/zmq.hpp
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq
-  )
+    install(
+        FILES lokimq/address.h
+        lokimq/auth.h
+        lokimq/base32z.h
+        lokimq/base64.h
+        lokimq/batch.h
+        lokimq/bt_serialize.h
+        lokimq/bt_value.h
+        lokimq/connections.h
+        lokimq/hex.h
+        lokimq/lokimq.h
+        lokimq/message.h
+        lokimq/string_view.h
+        lokimq/variant.h
+        ${CMAKE_CURRENT_BINARY_DIR}/lokimq/version.h
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq
+        )
+
+    if(LOKIMQ_INSTALL_CPPZMQ)
+        install(
+            FILES cppzmq/zmq.hpp
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq
+            )
+    endif()
+
+
+    install(
+        FILES ${CMAKE_CURRENT_BINARY_DIR}/liblokimq.pc
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
+    )
 endif()
 
-
-install(
-    FILES ${CMAKE_CURRENT_BINARY_DIR}/liblokimq.pc
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
-)
-
-if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
-  set(lokimq_IS_TOPLEVEL_PROJECT TRUE)
-else()
-  set(lokimq_IS_TOPLEVEL_PROJECT FALSE)
-endif()
-
-option(LOKIMQ_BUILD_TESTS "Building and perform lokimq tests" ${lokimq_IS_TOPLEVEL_PROJECT})
 if(LOKIMQ_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
-
