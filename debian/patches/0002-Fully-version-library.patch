@@ -18,4 +18,4 @@ index 611ed6e..a52def8 100644
 +set(LOKIMQ_LIBVERSION ${LOKIMQ_VERSION})
  
  
- option(BUILD_SHARED_LIBS "Build shared libraries instead of static ones" ON)
+ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
