@@ -24,8 +24,15 @@ TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
 
     REQUIRE( lokimq::is_hex("1234567890abcdefABCDEF1234567890abcdefABCDEF") );
     REQUIRE_FALSE( lokimq::is_hex("1234567890abcdefABCDEF1234567890aGcdefABCDEF") );
+    //                                                              ^
     REQUIRE_FALSE( lokimq::is_hex("1234567890abcdefABCDEF1234567890agcdefABCDEF") );
+    //                                                              ^
     REQUIRE_FALSE( lokimq::is_hex("\x11\xff") );
+    constexpr auto odd_hex = "1234567890abcdefABCDEF1234567890abcdefABCDE"sv;
+    REQUIRE_FALSE( lokimq::is_hex(odd_hex) );
+    REQUIRE_FALSE( lokimq::is_hex("0") );
+
+    REQUIRE( std::all_of(odd_hex.begin(), odd_hex.end(), lokimq::is_hex_digit<char>) );
 
     REQUIRE( lokimq::from_hex(pk_hex) == pk );
     REQUIRE( lokimq::to_hex(pk) == pk_hex );

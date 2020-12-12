@@ -87,14 +87,31 @@ template <typename CharT>
 std::string to_hex(std::basic_string_view<CharT> s) { return to_hex(s.begin(), s.end()); }
 inline std::string to_hex(std::string_view s) { return to_hex<>(s); }
 
-/// Returns true if all elements in the range are hex characters
+/// Returns true if the given value is a valid hex digit.
+template <typename CharT>
+constexpr bool is_hex_digit(CharT c) {
+    static_assert(sizeof(CharT) == 1, "is_hex requires chars/bytes");
+    return detail::hex_lut.from_hex(static_cast<unsigned char>(c)) != 0 || static_cast<unsigned char>(c) == '0';
+}
+
+/// Returns true if all elements in the range are hex characters *and* the string length is a
+/// multiple of 2, and thus suitable to pass to from_hex().
 template <typename It>
 constexpr bool is_hex(It begin, It end) {
     static_assert(sizeof(decltype(*begin)) == 1, "is_hex requires chars/bytes");
+    constexpr bool ra = std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>;
+    if constexpr (ra)
+        if (std::distance(begin, end) % 2 != 0)
+            return false;
+
+    size_t count = 0;
     for (; begin != end; ++begin) {
-        if (detail::hex_lut.from_hex(static_cast<unsigned char>(*begin)) == 0 && static_cast<unsigned char>(*begin) != '0')
+        if constexpr (!ra) ++count;
+        if (!is_hex_digit(*begin))
             return false;
     }
+    if constexpr (!ra)
+        return count % 2 == 0;
     return true;
 }
 
@@ -112,12 +129,13 @@ constexpr char from_hex_digit(unsigned char x) noexcept {
 constexpr char from_hex_pair(unsigned char a, unsigned char b) noexcept { return (from_hex_digit(a) << 4) | from_hex_digit(b); }
 
 /// Converts a sequence of hex digits to bytes.  Undefined behaviour if any characters are not in
-/// [0-9a-fA-F] or if the input sequence length is not even.  It is permitted for the input and
-/// output ranges to overlap as long as out is no earlier than begin.
+/// [0-9a-fA-F] or if the input sequence length is not even: call `is_hex` first if you need to
+/// check.  It is permitted for the input and output ranges to overlap as long as out is no earlier
+/// than begin.
 template <typename InputIt, typename OutputIt>
 void from_hex(InputIt begin, InputIt end, OutputIt out) {
     using std::distance;
-    assert(distance(begin, end) % 2 == 0);
+    assert(is_hex(begin, end));
     while (begin != end) {
         auto a = *begin++;
         auto b = *begin++;
