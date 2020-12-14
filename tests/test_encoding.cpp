@@ -2,6 +2,7 @@
 #include "lokimq/base32z.h"
 #include "lokimq/base64.h"
 #include "common.h"
+#include <iterator>
 
 using namespace std::literals;
 
@@ -197,4 +198,43 @@ TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
     std::basic_string_view<std::byte> b64_bytes{bytes.data(), bytes.size()};
     REQUIRE( lokimq::is_base64(b64_bytes) );
     REQUIRE( lokimq::from_base64(b64_bytes) == "\xff\x00"sv );
+}
+
+TEST_CASE("std::byte decoding", "[decoding][hex][base32z][base64]") {
+    // Decoding to std::byte is a little trickier because you can't assign to a byte without an
+    // explicit cast, which means we have to properly detect that output is going to a std::byte
+    // output.
+
+    // hex
+    auto b_in = "ff42"s;
+    std::vector<std::byte> b_out;
+    lokimq::from_hex(b_in.begin(), b_in.end(), std::back_inserter(b_out));
+    REQUIRE( b_out == std::vector{std::byte{0xff}, std::byte{0x42}} );
+    b_out.emplace_back();
+    lokimq::from_hex(b_in.begin(), b_in.end(), b_out.begin() + 1);
+    REQUIRE( b_out == std::vector{std::byte{0xff}, std::byte{0xff}, std::byte{0x42}} );
+    lokimq::from_hex(b_in.begin(), b_in.end(), b_out.data());
+    REQUIRE( b_out == std::vector{std::byte{0xff}, std::byte{0x42}, std::byte{0x42}} );
+
+    // base32z
+    b_in = "yojky"s;
+    b_out.clear();
+    lokimq::from_base32z(b_in.begin(), b_in.end(), std::back_inserter(b_out));
+    REQUIRE( b_out == std::vector{std::byte{0x04}, std::byte{0x12}, std::byte{0xa0}} );
+    b_out.emplace_back();
+    lokimq::from_base32z(b_in.begin(), b_in.end(), b_out.begin() + 1);
+    REQUIRE( b_out == std::vector{std::byte{0x04}, std::byte{0x04}, std::byte{0x12}, std::byte{0xa0}} );
+    lokimq::from_base32z(b_in.begin(), b_in.end(), b_out.data());
+    REQUIRE( b_out == std::vector{std::byte{0x04}, std::byte{0x12}, std::byte{0xa0}, std::byte{0xa0}} );
+
+    // base64
+    b_in = "yojk"s;
+    b_out.clear();
+    lokimq::from_base64(b_in.begin(), b_in.end(), std::back_inserter(b_out));
+    REQUIRE( b_out == std::vector{std::byte{0xca}, std::byte{0x88}, std::byte{0xe4}} );
+    b_out.emplace_back();
+    lokimq::from_base64(b_in.begin(), b_in.end(), b_out.begin() + 1);
+    REQUIRE( b_out == std::vector{std::byte{0xca}, std::byte{0xca}, std::byte{0x88}, std::byte{0xe4}} );
+    lokimq::from_base64(b_in.begin(), b_in.end(), b_out.data());
+    REQUIRE( b_out == std::vector{std::byte{0xca}, std::byte{0x88}, std::byte{0xe4}, std::byte{0xe4}} );
 }

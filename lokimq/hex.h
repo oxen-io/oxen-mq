@@ -32,6 +32,7 @@
 #include <array>
 #include <iterator>
 #include <cassert>
+#include "byte_type.h"
 
 namespace lokimq {
 
@@ -139,7 +140,8 @@ void from_hex(InputIt begin, InputIt end, OutputIt out) {
     while (begin != end) {
         auto a = *begin++;
         auto b = *begin++;
-        *out++ = from_hex_pair(static_cast<unsigned char>(a), static_cast<unsigned char>(b));
+        *out++ = static_cast<detail::byte_type_t<OutputIt>>(
+                from_hex_pair(static_cast<unsigned char>(a), static_cast<unsigned char>(b)));
     }
 }
 
