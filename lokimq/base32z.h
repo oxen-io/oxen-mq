@@ -32,6 +32,7 @@
 #include <array>
 #include <iterator>
 #include <cassert>
+#include "byte_type.h"
 
 namespace lokimq {
 
@@ -153,7 +154,8 @@ void from_base32z(InputIt begin, InputIt end, OutputIt out) {
         curr = curr << 5 | detail::b32z_lut.from_b32z(static_cast<unsigned char>(*begin++));
         if (bits >= 3) {
             bits -= 3; // Added 5, removing 8
-            *out++ = static_cast<uint8_t>(curr >> bits);
+            *out++ = static_cast<detail::byte_type_t<OutputIt>>(
+                    static_cast<uint8_t>(curr >> bits));
             curr &= (1 << bits) - 1;
         } else {
             bits += 5;

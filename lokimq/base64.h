@@ -32,6 +32,7 @@
 #include <array>
 #include <iterator>
 #include <cassert>
+#include "byte_type.h"
 
 namespace lokimq {
 
@@ -190,7 +191,8 @@ void from_base64(InputIt begin, InputIt end, OutputIt out) {
             bits = 6;
         else {
             bits -= 2; // Added 6, removing 8
-            *out++ = static_cast<uint8_t>(curr >> bits);
+            *out++ = static_cast<detail::byte_type_t<OutputIt>>(
+                    static_cast<uint8_t>(curr >> bits));
             curr &= (1 << bits) - 1;
         }
     }
