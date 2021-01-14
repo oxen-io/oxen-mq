@@ -3,8 +3,8 @@ exec_prefix=${prefix}
 libdir=@CMAKE_INSTALL_FULL_LIBDIR@
 includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
 
-Name: liblokimq
-Description: ZeroMQ-based communication library (compatibility package for liboxenmq)
+Name: liboxenmq
+Description: ZeroMQ-based communication library
 Version: @OXENMQ_VERSION@
 
 Libs: -L${libdir} -loxenmq
