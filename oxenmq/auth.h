@@ -4,7 +4,7 @@
 #include <cstring>
 #include <unordered_set>
 
-namespace lokimq {
+namespace oxenmq {
 
 /// Authentication levels for command categories and connections
 enum class AuthLevel {
@@ -45,7 +45,7 @@ struct already_hashed {
 };
 
 /// std::unordered_set specialization for specifying pubkeys (used, in particular, by
-/// LokiMQ::set_active_sns and LokiMQ::update_active_sns); this is a std::string unordered_set that
+/// OxenMQ::set_active_sns and OxenMQ::update_active_sns); this is a std::string unordered_set that
 /// also uses a specialized trivial hash function that uses part of the value itself (i.e. the
 /// pubkey) directly as a hash value.  (This is nice and fast for uniformly distributed values like
 /// pubkeys and a terrible hash choice for anything else).

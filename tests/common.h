@@ -1,8 +1,8 @@
 #pragma once
-#include "lokimq/lokimq.h"
+#include "oxenmq/oxenmq.h"
 #include <catch2/catch.hpp>
 
-using namespace lokimq;
+using namespace oxenmq;
 
 static auto startup = std::chrono::steady_clock::now();
 
@@ -41,7 +41,7 @@ inline std::unique_lock<std::mutex> catch_lock() {
     return std::unique_lock<std::mutex>{mutex};
 }
 
-inline LokiMQ::Logger get_logger(std::string prefix = "") {
+inline OxenMQ::Logger get_logger(std::string prefix = "") {
     std::string me = "tests/common.h";
     std::string strip = __FILE__;
     if (strip.substr(strip.size() - me.size()) == me)

@@ -1,9 +1,9 @@
-#include "lokimq/batch.h"
+#include "oxenmq/batch.h"
 #include "common.h"
 #include <future>
 
 TEST_CASE("tagged thread start functions", "[tagged][start]") {
-    lokimq::LokiMQ lmq{get_logger(""), LogLevel::trace};
+    oxenmq::OxenMQ lmq{get_logger(""), LogLevel::trace};
 
     lmq.set_general_threads(2);
     lmq.set_batch_threads(2);
@@ -26,13 +26,13 @@ TEST_CASE("tagged thread start functions", "[tagged][start]") {
 }
 
 TEST_CASE("tagged threads quit-before-start", "[tagged][quit]") {
-    auto lmq = std::make_unique<lokimq::LokiMQ>(get_logger(""), LogLevel::trace);
+    auto lmq = std::make_unique<oxenmq::OxenMQ>(get_logger(""), LogLevel::trace);
     auto t_abc = lmq->add_tagged_thread("abc");
     REQUIRE_NOTHROW(lmq.reset());
 }
 
 TEST_CASE("batch jobs to tagged threads", "[tagged][batch]") {
-    lokimq::LokiMQ lmq{get_logger(""), LogLevel::trace};
+    oxenmq::OxenMQ lmq{get_logger(""), LogLevel::trace};
 
     lmq.set_general_threads(2);
     lmq.set_batch_threads(2);
@@ -111,7 +111,7 @@ TEST_CASE("batch jobs to tagged threads", "[tagged][batch]") {
 }
 
 TEST_CASE("batch job completion on tagged threads", "[tagged][batch-completion]") {
-    lokimq::LokiMQ lmq{get_logger(""), LogLevel::trace};
+    oxenmq::OxenMQ lmq{get_logger(""), LogLevel::trace};
 
     lmq.set_general_threads(4);
     lmq.set_batch_threads(4);
@@ -119,7 +119,7 @@ TEST_CASE("batch job completion on tagged threads", "[tagged][batch-completion]"
     auto t_abc = lmq.add_tagged_thread("abc", [&] { id_abc = std::this_thread::get_id(); });
     lmq.start();
 
-    lokimq::Batch<int> batch;
+    oxenmq::Batch<int> batch;
     for (int i = 1; i < 10; i++)
         batch.add_job([i, &id_abc]() { if (std::this_thread::get_id() == id_abc) return 0; return i; });
 
@@ -140,7 +140,7 @@ TEST_CASE("batch job completion on tagged threads", "[tagged][batch-completion]"
 
 
 TEST_CASE("timer job completion on tagged threads", "[tagged][timer]") {
-    lokimq::LokiMQ lmq{get_logger(""), LogLevel::trace};
+    oxenmq::OxenMQ lmq{get_logger(""), LogLevel::trace};
 
     lmq.set_general_threads(4);
     lmq.set_batch_threads(4);

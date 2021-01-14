@@ -3,63 +3,63 @@ cmake_minimum_required(VERSION 3.7)
 # Has to be set before `project()`, and ignored on non-macos:
 set(CMAKE_OSX_DEPLOYMENT_TARGET 10.12 CACHE STRING "macOS deployment target (Apple clang only)")
 
-project(liblokimq CXX C)
+project(liboxenmq CXX C)
 
 include(GNUInstallDirs)
 
-set(LOKIMQ_VERSION_MAJOR 1)
-set(LOKIMQ_VERSION_MINOR 2)
-set(LOKIMQ_VERSION_PATCH 3)
-set(LOKIMQ_VERSION "${LOKIMQ_VERSION_MAJOR}.${LOKIMQ_VERSION_MINOR}.${LOKIMQ_VERSION_PATCH}")
-message(STATUS "lokimq v${LOKIMQ_VERSION}")
+set(OXENMQ_VERSION_MAJOR 1)
+set(OXENMQ_VERSION_MINOR 2)
+set(OXENMQ_VERSION_PATCH 3)
+set(OXENMQ_VERSION "${OXENMQ_VERSION_MAJOR}.${OXENMQ_VERSION_MINOR}.${OXENMQ_VERSION_PATCH}")
+message(STATUS "oxenmq v${OXENMQ_VERSION}")
 
-set(LOKIMQ_LIBVERSION 0)
+set(OXENMQ_LIBVERSION 0)
 
 
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
-    set(lokimq_IS_TOPLEVEL_PROJECT TRUE)
+    set(oxenmq_IS_TOPLEVEL_PROJECT TRUE)
 else()
-    set(lokimq_IS_TOPLEVEL_PROJECT FALSE)
+    set(oxenmq_IS_TOPLEVEL_PROJECT FALSE)
 endif()
 
 
 option(BUILD_SHARED_LIBS "Build shared libraries instead of static ones" ON)
-set(lokimq_INSTALL_DEFAULT OFF)
-if(BUILD_SHARED_LIBS OR lokimq_IS_TOPLEVEL_PROJECT)
-    set(lokimq_INSTALL_DEFAULT ON)
+set(oxenmq_INSTALL_DEFAULT OFF)
+if(BUILD_SHARED_LIBS OR oxenmq_IS_TOPLEVEL_PROJECT)
+    set(oxenmq_INSTALL_DEFAULT ON)
 endif()
-option(LOKIMQ_BUILD_TESTS "Building and perform lokimq tests" ${lokimq_IS_TOPLEVEL_PROJECT})
-option(LOKIMQ_INSTALL "Add lokimq libraries and headers to cmake install target; defaults to ON if BUILD_SHARED_LIBS is enabled or we are the top-level project; OFF for a static subdirectory build" ${lokimq_INSTALL_DEFAULT})
-option(LOKIMQ_INSTALL_CPPZMQ "Install cppzmq header with lokimq/ headers (requires LOKIMQ_INSTALL)" ON)
+option(OXENMQ_BUILD_TESTS "Building and perform oxenmq tests" ${oxenmq_IS_TOPLEVEL_PROJECT})
+option(OXENMQ_INSTALL "Add oxenmq libraries and headers to cmake install target; defaults to ON if BUILD_SHARED_LIBS is enabled or we are the top-level project; OFF for a static subdirectory build" ${oxenmq_INSTALL_DEFAULT})
+option(OXENMQ_INSTALL_CPPZMQ "Install cppzmq header with oxenmq/ headers (requires OXENMQ_INSTALL)" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-configure_file(lokimq/version.h.in lokimq/version.h @ONLY)
-configure_file(liblokimq.pc.in liblokimq.pc @ONLY)
+configure_file(oxenmq/version.h.in oxenmq/version.h @ONLY)
+configure_file(liboxenmq.pc.in liboxenmq.pc @ONLY)
 
-add_library(lokimq
-    lokimq/address.cpp
-    lokimq/auth.cpp
-    lokimq/bt_serialize.cpp
-    lokimq/connections.cpp
-    lokimq/jobs.cpp
-    lokimq/lokimq.cpp
-    lokimq/proxy.cpp
-    lokimq/worker.cpp
+add_library(oxenmq
+    oxenmq/address.cpp
+    oxenmq/auth.cpp
+    oxenmq/bt_serialize.cpp
+    oxenmq/connections.cpp
+    oxenmq/jobs.cpp
+    oxenmq/oxenmq.cpp
+    oxenmq/proxy.cpp
+    oxenmq/worker.cpp
 )
-set_target_properties(lokimq PROPERTIES SOVERSION ${LOKIMQ_LIBVERSION})
+set_target_properties(oxenmq PROPERTIES SOVERSION ${OXENMQ_LIBVERSION})
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
-target_link_libraries(lokimq PRIVATE Threads::Threads)
+target_link_libraries(oxenmq PRIVATE Threads::Threads)
 
 # libzmq is nearly impossible to link statically from a system-installed static library: it depends
 # on a ton of other libraries, some of which are not all statically available.  If the caller wants
 # to mess with this, so be it: they can set up a libzmq target and we'll use it.  Otherwise if they
 # asked us to do things statically, don't even try to find a system lib and just build it.
-set(lokimq_build_static_libzmq OFF)
+set(oxenmq_build_static_libzmq OFF)
 if(TARGET libzmq)
-    target_link_libraries(lokimq PUBLIC libzmq)
+    target_link_libraries(oxenmq PUBLIC libzmq)
 elseif(BUILD_SHARED_LIBS)
     include(FindPkgConfig)
     pkg_check_modules(libzmq libzmq>=4.3 IMPORTED_TARGET)
@@ -75,30 +75,30 @@ elseif(BUILD_SHARED_LIBS)
           set_property(TARGET PkgConfig::libzmq PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${zmq_inc})
         endif()
 
-        target_link_libraries(lokimq PUBLIC PkgConfig::libzmq)
+        target_link_libraries(oxenmq PUBLIC PkgConfig::libzmq)
     else()
-        set(lokimq_build_static_libzmq ON)
+        set(oxenmq_build_static_libzmq ON)
     endif()
 else()
-    set(lokimq_build_static_libzmq ON)
+    set(oxenmq_build_static_libzmq ON)
 endif()
 
-if(lokimq_build_static_libzmq)
+if(oxenmq_build_static_libzmq)
     message(STATUS "libzmq >= 4.3 not found or static build requested, building bundled version")
     list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/local-libzmq")
     include(LocalLibzmq)
-    target_link_libraries(lokimq PUBLIC libzmq_vendor)
+    target_link_libraries(oxenmq PUBLIC libzmq_vendor)
 endif()
 
-target_include_directories(lokimq
+target_include_directories(oxenmq
     PUBLIC
         $<INSTALL_INTERFACE:>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cppzmq>
 )
 
-target_compile_options(lokimq PRIVATE -Wall -Wextra -Werror)
-set_target_properties(lokimq PROPERTIES
+target_compile_options(oxenmq PRIVATE -Wall -Wextra -Werror)
+set_target_properties(oxenmq PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
@@ -117,8 +117,8 @@ endfunction()
 # If the caller has already set up a sodium target then we will just link to it, otherwise we go
 # looking for it.
 if(TARGET sodium)
-    target_link_libraries(lokimq PUBLIC sodium)
-    if(lokimq_build_static_libzmq)
+    target_link_libraries(oxenmq PUBLIC sodium)
+    if(oxenmq_build_static_libzmq)
         target_link_libraries(libzmq_vendor INTERFACE sodium)
     endif()
 else()
@@ -126,67 +126,67 @@ else()
     pkg_check_modules(sodium REQUIRED libsodium IMPORTED_TARGET)
 
     if(BUILD_SHARED_LIBS)
-        target_link_libraries(lokimq PUBLIC PkgConfig::sodium)
-        if(lokimq_build_static_libzmq)
+        target_link_libraries(oxenmq PUBLIC PkgConfig::sodium)
+        if(oxenmq_build_static_libzmq)
             target_link_libraries(libzmq_vendor INTERFACE PkgConfig::sodium)
         endif()
     else()
-        link_dep_libs(lokimq PUBLIC "${sodium_STATIC_LIBRARY_DIRS}" ${sodium_STATIC_LIBRARIES})
-        target_include_directories(lokimq PUBLIC ${sodium_STATIC_INCLUDE_DIRS})
-        if(lokimq_build_static_libzmq)
+        link_dep_libs(oxenmq PUBLIC "${sodium_STATIC_LIBRARY_DIRS}" ${sodium_STATIC_LIBRARIES})
+        target_include_directories(oxenmq PUBLIC ${sodium_STATIC_INCLUDE_DIRS})
+        if(oxenmq_build_static_libzmq)
             link_dep_libs(libzmq_vendor INTERFACE "${sodium_STATIC_LIBRARY_DIRS}" ${sodium_STATIC_LIBRARIES})
             target_link_libraries(libzmq_vendor INTERFACE ${sodium_STATIC_INCLUDE_DIRS})
         endif()
     endif()
 endif()
 
-add_library(lokimq::lokimq ALIAS lokimq)
+add_library(oxenmq::oxenmq ALIAS oxenmq)
 
 export(
-    TARGETS lokimq
-    NAMESPACE lokimq::
-    FILE lokimqTargets.cmake
+    TARGETS oxenmq
+    NAMESPACE oxenmq::
+    FILE oxenmqTargets.cmake
 )
 
-if(LOKIMQ_INSTALL)
+if(OXENMQ_INSTALL)
     install(
-        TARGETS lokimq
-        EXPORT lokimqConfig
+        TARGETS oxenmq
+        EXPORT oxenmqConfig
         DESTINATION ${CMAKE_INSTALL_LIBDIR}
         )
 
     install(
-        FILES lokimq/address.h
-        lokimq/auth.h
-        lokimq/base32z.h
-        lokimq/base64.h
-        lokimq/batch.h
-        lokimq/bt_serialize.h
-        lokimq/bt_value.h
-        lokimq/connections.h
-        lokimq/hex.h
-        lokimq/lokimq.h
-        lokimq/message.h
-        lokimq/string_view.h
-        lokimq/variant.h
-        ${CMAKE_CURRENT_BINARY_DIR}/lokimq/version.h
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq
+        FILES oxenmq/address.h
+        oxenmq/auth.h
+        oxenmq/base32z.h
+        oxenmq/base64.h
+        oxenmq/batch.h
+        oxenmq/bt_serialize.h
+        oxenmq/bt_value.h
+        oxenmq/connections.h
+        oxenmq/hex.h
+        oxenmq/oxenmq.h
+        oxenmq/message.h
+        oxenmq/string_view.h
+        oxenmq/variant.h
+        ${CMAKE_CURRENT_BINARY_DIR}/oxenmq/version.h
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/oxenmq
         )
 
-    if(LOKIMQ_INSTALL_CPPZMQ)
+    if(OXENMQ_INSTALL_CPPZMQ)
         install(
             FILES cppzmq/zmq.hpp
-            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/oxenmq
             )
     endif()
 
 
     install(
-        FILES ${CMAKE_CURRENT_BINARY_DIR}/liblokimq.pc
+        FILES ${CMAKE_CURRENT_BINARY_DIR}/liboxenmq.pc
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
     )
 endif()
 
-if(LOKIMQ_BUILD_TESTS)
+if(OXENMQ_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
