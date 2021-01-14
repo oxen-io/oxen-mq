@@ -1,10 +1,10 @@
-#include "lokimq.h"
+#include "oxenmq.h"
 #include "batch.h"
-#include "lokimq-internal.h"
+#include "oxenmq-internal.h"
 
-namespace lokimq {
+namespace oxenmq {
 
-void LokiMQ::proxy_batch(detail::Batch* batch) {
+void OxenMQ::proxy_batch(detail::Batch* batch) {
     batches.insert(batch);
     const auto [jobs, tagged_threads] = batch->size();
     LMQ_TRACE("proxy queuing batch job with ", jobs, " jobs", tagged_threads ? " (job uses tagged thread(s))" : "");
@@ -26,7 +26,7 @@ void LokiMQ::proxy_batch(detail::Batch* batch) {
     proxy_skip_one_poll = true;
 }
 
-void LokiMQ::job(std::function<void()> f, std::optional<TaggedThreadID> thread) {
+void OxenMQ::job(std::function<void()> f, std::optional<TaggedThreadID> thread) {
     if (thread && thread->_id == -1)
         throw std::logic_error{"job() cannot be used to queue an in-proxy job"};
     auto* b = new Batch<void>;
@@ -35,7 +35,7 @@ void LokiMQ::job(std::function<void()> f, std::optional<TaggedThreadID> thread) 
     detail::send_control(get_control_socket(), "BATCH", bt_serialize(reinterpret_cast<uintptr_t>(baseptr)));
 }
 
-void LokiMQ::proxy_schedule_reply_job(std::function<void()> f) {
+void OxenMQ::proxy_schedule_reply_job(std::function<void()> f) {
     auto* b = new Batch<void>;
     b->add_job(std::move(f));
     batches.insert(b);
@@ -43,7 +43,7 @@ void LokiMQ::proxy_schedule_reply_job(std::function<void()> f) {
     proxy_skip_one_poll = true;
 }
 
-void LokiMQ::proxy_run_batch_jobs(std::queue<batch_job>& jobs, const int reserved, int& active, bool reply) {
+void OxenMQ::proxy_run_batch_jobs(std::queue<batch_job>& jobs, const int reserved, int& active, bool reply) {
     while (!jobs.empty() && active_workers() < max_workers &&
             (active < reserved || active_workers() < general_workers)) {
         proxy_run_worker(get_idle_worker().load(std::move(jobs.front()), reply));
@@ -54,20 +54,20 @@ void LokiMQ::proxy_run_batch_jobs(std::queue<batch_job>& jobs, const int reserve
 
 // Called either within the proxy thread, or before the proxy thread has been created; actually adds
 // the timer.  If the timer object hasn't been set up yet it gets set up here.
-void LokiMQ::proxy_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch, int thread) {
+void OxenMQ::proxy_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch, int thread) {
     if (!timers)
         timers.reset(zmq_timers_new());
 
     int timer_id = zmq_timers_add(timers.get(),
             interval.count(),
-            [](int timer_id, void* self) { static_cast<LokiMQ*>(self)->_queue_timer_job(timer_id); },
+            [](int timer_id, void* self) { static_cast<OxenMQ*>(self)->_queue_timer_job(timer_id); },
             this);
     if (timer_id == -1)
         throw zmq::error_t{};
     timer_jobs[timer_id] = { std::move(job), squelch, false, thread };
 }
 
-void LokiMQ::proxy_timer(bt_list_consumer timer_data) {
+void OxenMQ::proxy_timer(bt_list_consumer timer_data) {
     std::unique_ptr<std::function<void()>> func{reinterpret_cast<std::function<void()>*>(timer_data.consume_integer<uintptr_t>())};
     auto interval = std::chrono::milliseconds{timer_data.consume_integer<uint64_t>()};
     auto squelch = timer_data.consume_integer<bool>();
@@ -77,7 +77,7 @@ void LokiMQ::proxy_timer(bt_list_consumer timer_data) {
     proxy_timer(std::move(*func), interval, squelch, thread);
 }
 
-void LokiMQ::_queue_timer_job(int timer_id) {
+void OxenMQ::_queue_timer_job(int timer_id) {
     auto it = timer_jobs.find(timer_id);
     if (it == timer_jobs.end()) {
         LMQ_LOG(warn, "Could not find timer job ", timer_id);
@@ -107,7 +107,7 @@ void LokiMQ::_queue_timer_job(int timer_id) {
             auto it = timer_jobs.find(timer_id);
             if (it != timer_jobs.end())
                 it->second.running = false;
-        }, LokiMQ::run_in_proxy);
+        }, OxenMQ::run_in_proxy);
     }
     batches.insert(b);
     LMQ_TRACE("b: ", b->size().first, ", ", b->size().second, "; thread = ", thread);
@@ -118,7 +118,7 @@ void LokiMQ::_queue_timer_job(int timer_id) {
     queue.emplace(static_cast<detail::Batch*>(b), 0);
 }
 
-void LokiMQ::add_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch, std::optional<TaggedThreadID> thread) {
+void OxenMQ::add_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch, std::optional<TaggedThreadID> thread) {
     int th_id = thread ? thread->_id : 0;
     if (proxy_thread.joinable()) {
         detail::send_control(get_control_socket(), "TIMER", bt_serialize(bt_list{{
@@ -131,9 +131,9 @@ void LokiMQ::add_timer(std::function<void()> job, std::chrono::milliseconds inte
     }
 }
 
-void LokiMQ::TimersDeleter::operator()(void* timers) { zmq_timers_destroy(&timers); }
+void OxenMQ::TimersDeleter::operator()(void* timers) { zmq_timers_destroy(&timers); }
 
-TaggedThreadID LokiMQ::add_tagged_thread(std::string name, std::function<void()> start) {
+TaggedThreadID OxenMQ::add_tagged_thread(std::string name, std::function<void()> start) {
     if (proxy_thread.joinable())
         throw std::logic_error{"Cannot add tagged threads after calling `start()`"};
 
@@ -146,7 +146,7 @@ TaggedThreadID LokiMQ::add_tagged_thread(std::string name, std::function<void()>
     run.worker_routing_id = "t" + std::to_string(run.worker_id);
     LMQ_TRACE("Created new tagged thread ", name, " with routing id ", run.worker_routing_id);
 
-    run.worker_thread = std::thread{&LokiMQ::worker_thread, this, run.worker_id, name, std::move(start)};
+    run.worker_thread = std::thread{&OxenMQ::worker_thread, this, run.worker_id, name, std::move(start)};
 
     return TaggedThreadID{static_cast<int>(run.worker_id)};
 }

@@ -9,7 +9,7 @@
 #include "base32z.h"
 #include "base64.h"
 
-namespace lokimq {
+namespace oxenmq {
 
 constexpr size_t enc_length(address::encoding enc) {
     return enc == address::encoding::hex ? 64 :
@@ -23,13 +23,13 @@ constexpr size_t enc_length(address::encoding enc) {
 // given: for QR-friendly we only accept hex or base32z (since QR cannot handle base64's alphabet).
 std::string decode_pubkey(std::string_view& in, bool qr) {
     std::string pubkey;
-    if (in.size() >= 64 && lokimq::is_hex(in.substr(0, 64))) {
+    if (in.size() >= 64 && is_hex(in.substr(0, 64))) {
         pubkey = from_hex(in.substr(0, 64));
         in.remove_prefix(64);
-    } else if (in.size() >= 52 && lokimq::is_base32z(in.substr(0, 52))) {
+    } else if (in.size() >= 52 && is_base32z(in.substr(0, 52))) {
         pubkey = from_base32z(in.substr(0, 52));
         in.remove_prefix(52);
-    } else if (!qr && in.size() >= 43 && lokimq::is_base64(in.substr(0, 43))) {
+    } else if (!qr && in.size() >= 43 && is_base64(in.substr(0, 43))) {
         pubkey = from_base64(in.substr(0, 43));
         in.remove_prefix(43);
         if (!in.empty() && in.front() == '=')
