@@ -1,10 +1,10 @@
 #include "common.h"
 
-using namespace lokimq;
+using namespace oxenmq;
 
 TEST_CASE("injected external commands", "[injected]") {
     std::string listen = random_localhost();
-    LokiMQ server{
+    OxenMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
         [](auto) { return ""; },
@@ -24,16 +24,25 @@ TEST_CASE("injected external commands", "[injected]") {
 
     server.start();
 
-    LokiMQ client{get_logger("C» "), LogLevel::trace};
+    OxenMQ client{get_logger("C» "), LogLevel::trace};
     client.start();
 
     std::atomic<bool> got{false};
     bool success = false;
 
+// Deliberately using a deprecated command here, disable -Wdeprecated-declarations
+#ifdef __GNUG__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
     auto c = client.connect_remote(listen,
             [&](auto conn) { success = true; got = true; },
             [&](auto conn, std::string_view) { got = true; },
             server.get_pubkey());
+
+#ifdef __GNUG__
+#pragma GCC diagnostic pop
+#endif
 
     wait_for_conn(got);
     {
