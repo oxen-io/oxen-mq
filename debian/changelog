@@ -1,3 +1,18 @@
+oxenmq (1.2.3-1) unstable; urgency=medium
+
+  * Refresh .so versioning patch
+  * fix lib version
+  * Make lokimq::is_hex check for size being a multiple of 2
+  * Fix decoding into a std::byte
+  * Rename LokiMQ to OxenMQ
+  * Add lokimq compatibility headers
+  * Export compile commands and use ccache by default
+  * Remove deprecated string_view compat shim
+  * Rediff patches
+  * Rename package in control file
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Thu, 14 Jan 2021 15:49:08 -0400
+
 lokimq (1.2.2-1) unstable; urgency=medium
 
   * Crank clang to 11
