@@ -188,7 +188,6 @@ if(OXENMQ_INSTALL)
         oxenmq/hex.h
         oxenmq/oxenmq.h
         oxenmq/message.h
-        oxenmq/string_view.h
         oxenmq/variant.h
         ${CMAKE_CURRENT_BINARY_DIR}/oxenmq/version.h
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/oxenmq
@@ -220,7 +219,6 @@ if(OXENMQ_INSTALL)
             lokimq/hex.h
             lokimq/lokimq.h
             lokimq/message.h
-            lokimq/string_view.h
             lokimq/variant.h
             lokimq/version.h
             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq
