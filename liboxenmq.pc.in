@@ -3,11 +3,11 @@ exec_prefix=${prefix}
 libdir=@CMAKE_INSTALL_FULL_LIBDIR@
 includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
 
-Name: liblokimq
-Description: ZeroMQ-based communication library for Loki
-Version: @LOKIMQ_VERSION@
+Name: liboxenmq
+Description: ZeroMQ-based communication library
+Version: @OXENMQ_VERSION@
 
-Libs: -L${libdir} -llokimq
+Libs: -L${libdir} -loxenmq
 Libs.private: @PRIVATE_LIBS@
 Requires.private: libzmq libsodium
 Cflags: -I${includedir}

@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2020, The Loki Project
+// Copyright (c) 2019-2021, The Oxen Project
 //
 // All rights reserved.
 //
@@ -34,7 +34,7 @@
 #include <cassert>
 #include "byte_type.h"
 
-namespace lokimq {
+namespace oxenmq {
 
 namespace detail {
 

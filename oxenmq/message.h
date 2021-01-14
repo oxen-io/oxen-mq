@@ -2,16 +2,16 @@
 #include <vector>
 #include "connections.h"
 
-namespace lokimq {
+namespace oxenmq {
 
-class LokiMQ;
+class OxenMQ;
 
 /// Encapsulates an incoming message from a remote connection with message details plus extra
 /// info need to send a reply back through the proxy thread via the `reply()` method.  Note that
 /// this object gets reused: callbacks should use but not store any reference beyond the callback.
 class Message {
 public:
-    LokiMQ& lokimq; ///< The owning LokiMQ object
+    OxenMQ& oxenmq; ///< The owning OxenMQ object
     std::vector<std::string_view> data; ///< The provided command data parts, if any.
     ConnectionID conn; ///< The connection info for routing a reply; also contains the pubkey/sn status.
     std::string reply_tag; ///< If the invoked command is a request command this is the required reply tag that will be prepended by `send_reply()`.
@@ -19,8 +19,8 @@ public:
     std::string remote; ///< Some sort of remote address from which the request came.  Often "IP" for TCP connections and "localhost:UID:GID:PID" for UDP connections.
 
     /// Constructor
-    Message(LokiMQ& lmq, ConnectionID cid, Access access, std::string remote)
-        : lokimq{lmq}, conn{std::move(cid)}, access{std::move(access)}, remote{std::move(remote)} {}
+    Message(OxenMQ& lmq, ConnectionID cid, Access access, std::string remote)
+        : oxenmq{lmq}, conn{std::move(cid)}, access{std::move(access)}, remote{std::move(remote)} {}
 
     // Non-copyable
     Message(const Message&) = delete;

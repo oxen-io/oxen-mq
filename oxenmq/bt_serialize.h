@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2020, The Loki Project
+// Copyright (c) 2019-2020, The Oxen Project
 //
 // All rights reserved.
 //
@@ -46,12 +46,12 @@
 
 #include "bt_value.h"
 
-namespace lokimq {
+namespace oxenmq {
 
 using namespace std::literals;
 
 /** \file
- * LokiMQ serialization for internal commands is very simple: we support two primitive types,
+ * OxenMQ serialization for internal commands is very simple: we support two primitive types,
  * strings and integers, and two container types, lists and dicts with string keys.  On the wire
  * these go in BitTorrent byte encoding as described in BEP-0003
  * (https://www.bittorrent.org/beps/bep_0003.html#bencoding).
@@ -596,7 +596,7 @@ template <typename T, typename It>
 void get_tuple_impl_one(T& t, It& it) {
     const bt_variant& v = *it++;
     if constexpr (std::is_integral_v<T>) {
-        t = lokimq::get_int<T>(v);
+        t = oxenmq::get_int<T>(v);
     } else if constexpr (is_bt_tuple<T>) {
         if (std::holds_alternative<bt_list>(v))
             throw std::invalid_argument{"Unable to convert tuple: cannot create sub-tuple from non-bt_list"};
@@ -912,4 +912,4 @@ public:
 };
 
 
-} // namespace lokimq
+} // namespace oxenmq
