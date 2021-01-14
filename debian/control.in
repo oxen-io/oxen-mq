@@ -1,4 +1,4 @@
-Source: lokimq
+Source: oxenmq
 Priority: optional
 Maintainer: Jason Rhinelander <jason@imaginary.ca>
 Build-Depends: debhelper-compat (= 11), cmake (>= 3.5), g++-8, pkg-config, libzmq3-dev (>= 4.3), libsodium-dev, libpgm-dev
@@ -6,23 +6,23 @@ Standards-Version: 4.4.1
 Section: libs
 Homepage: https://github.com/loki-project/loki-mq
 
-Package: liblokimq-dev
+Package: liboxenmq-dev
 Section: libdevel
 Architecture: any
-Depends: liblokimq@LIB_VERSION@ (= ${binary:Version}), ${misc:Depends}, libzmq3-dev (>= 4.3)
+Depends: liboxenmq@LIB_VERSION@ (= ${binary:Version}), ${misc:Depends}, libzmq3-dev (>= 4.3)
 Description: zeromq-based Loki message passing library (headers)
  This C++17 library contains an abstraction layer around ZeroMQ to support
  integration with Loki authentication, RPC, and message passing.  It is
  designed to be usable as the underlying communication mechanism of SN-to-SN
  communication ("quorumnet"), the RPC interface used by wallets and local
- daemon commands, communication channels between lokid and auxiliary services
+ daemon commands, communication channels between oxend and auxiliary services
  (storage server, lokinet), and also provides a local multithreaded job
  scheduling within a process.
  .
  This package contains the library headers and other development files needed
- to build software using lokimq.
+ to build software using oxenmq.
 
-Package: liblokimq@LIB_VERSION@
+Package: liboxenmq@LIB_VERSION@
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: zeromq-based Loki message passing library
@@ -30,8 +30,19 @@ Description: zeromq-based Loki message passing library
  integration with Loki authentication, RPC, and message passing.  It is
  designed to be usable as the underlying communication mechanism of SN-to-SN
  communication ("quorumnet"), the RPC interface used by wallets and local
- daemon commands, communication channels between lokid and auxiliary services
+ daemon commands, communication channels between oxend and auxiliary services
  (storage server, lokinet), and also provides a local multithreaded job
  scheduling within a process.
  .
- This package contains the library file needed by software built using lokimq.
+ This package contains the library file needed by software built using oxenmq.
+
+Package: liblokimq-dev
+Section: libdevel
+Architecture: any
+Depends: liboxenmq-dev, ${misc:Depends}
+Description: transitional package
+ This is a transitional package that contains compatibility headers and
+ pkg-config data for applications still relying on the old lokimq API
+ namespace and package name.
+ .
+ It can be safely removed.

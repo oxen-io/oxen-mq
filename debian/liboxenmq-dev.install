@@ -1,0 +1,3 @@
+usr/include/oxenmq
+usr/lib/*/lib*.so
+usr/lib/*/pkgconfig/liboxenmq*
