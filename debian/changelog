@@ -1,3 +1,9 @@
+oxenmq (1.2.3-2~deb10) buster; urgency=medium
+
+  * Add missing header
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Thu, 14 Jan 2021 23:29:21 -0400
+
 oxenmq (1.2.3-1~deb10) buster; urgency=medium
 
   * Refresh .so versioning patch
