@@ -1489,15 +1489,29 @@ template <typename... Args>
 void Message::send_back(std::string_view command, Args&&... args) {
     oxenmq.send(conn, command, send_option::optional{!conn.sn()}, std::forward<Args>(args)...);
 }
+template <typename... Args>
+void Message::DeferredSend::back(std::string_view command, Args&&... args) const {
+    oxenmq.send(conn, command, send_option::optional{!conn.sn()}, std::forward<Args>(args)...);
+}
 
 template <typename... Args>
 void Message::send_reply(Args&&... args) {
     assert(!reply_tag.empty());
     oxenmq.send(conn, "REPLY", reply_tag, send_option::optional{!conn.sn()}, std::forward<Args>(args)...);
 }
+template <typename... Args>
+void Message::DeferredSend::reply(Args&&... args) const {
+    assert(!reply_tag.empty());
+    oxenmq.send(conn, "REPLY", reply_tag, send_option::optional{!conn.sn()}, std::forward<Args>(args)...);
+}
 
 template <typename Callback, typename... Args>
 void Message::send_request(std::string_view cmd, Callback&& callback, Args&&... args) {
+    oxenmq.request(conn, cmd, std::forward<Callback>(callback),
+            send_option::optional{!conn.sn()}, std::forward<Args>(args)...);
+}
+template <typename Callback, typename... Args>
+void Message::DeferredSend::request(std::string_view cmd, Callback&& callback, Args&&... args) const {
     oxenmq.request(conn, cmd, std::forward<Callback>(callback),
             send_option::optional{!conn.sn()}, std::forward<Args>(args)...);
 }
