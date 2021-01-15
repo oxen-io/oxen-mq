@@ -1,3 +1,9 @@
+oxenmq (1.2.3-2~ubuntu2004) focal; urgency=medium
+
+  * Add missing header
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Thu, 14 Jan 2021 23:29:26 -0400
+
 oxenmq (1.2.3-1~ubuntu2004) focal; urgency=medium
 
   * Refresh .so versioning patch
