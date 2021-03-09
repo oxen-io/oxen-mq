@@ -373,11 +373,11 @@ template <typename S, typename T>
 struct bt_deserialize<std::pair<S, T>> : bt_deserialize_tuple<std::pair, S, T> {};
 
 template <typename T>
-constexpr bool is_bt_tuple = false;
+inline constexpr bool is_bt_tuple = false;
 template <typename... T>
-constexpr bool is_bt_tuple<std::tuple<T...>> = true;
+inline constexpr bool is_bt_tuple<std::tuple<T...>> = true;
 template <typename S, typename T>
-constexpr bool is_bt_tuple<std::pair<S, T>> = true;
+inline constexpr bool is_bt_tuple<std::pair<S, T>> = true;
 
 
 template <typename T>

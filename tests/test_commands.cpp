@@ -437,3 +437,73 @@ TEST_CASE("data parts", "[send][data_parts]") {
         REQUIRE( r == expected );
     }
 }
+
+TEST_CASE("deferred replies", "[send][deferred]") {
+    std::string listen = random_localhost();
+    OxenMQ server{
+        "", "", // generate ephemeral keys
+        false, // not a service node
+        [](auto) { return ""; },
+    };
+    server.listen_curve(listen);
+
+    std::atomic<int> hellos{0}, his{0};
+
+    server.add_category("public", Access{AuthLevel::none});
+    server.add_request_command("public", "echo", [&](Message& m) {
+        std::string msg = m.data.empty() ? ""s : std::string{m.data.front()};
+        std::thread t{[send=m.send_later(), msg=std::move(msg)] {
+            { auto lock = catch_lock(); INFO("sleeping"); }
+            std::this_thread::sleep_for(50ms);
+            { auto lock = catch_lock(); INFO("sending"); }
+            send.reply(msg);
+        }};
+        t.detach();
+    });
+    server.set_general_threads(1);
+    server.start();
+
+    OxenMQ client(
+        [](LogLevel, const char* file, int line, std::string msg) { std::cerr << file << ":" << line << " --C-- " << msg << "\n"; }
+        );
+    //client.log_level(LogLevel::trace);
+
+    client.start();
+
+    std::atomic<bool> connected{false}, failed{false};
+    std::string pubkey;
+
+    auto c = client.connect_remote(address{listen, server.get_pubkey()},
+            [&](auto conn) { pubkey = conn.pubkey(); connected = true; },
+            [&](auto, auto) { failed = true; });
+
+    wait_for([&] { return connected || failed; });
+    {
+        auto lock = catch_lock();
+        REQUIRE( connected );
+        REQUIRE_FALSE( failed );
+        REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
+    }
+
+    std::unordered_set<std::string> replies;
+    std::mutex reply_mut;
+    std::vector<std::string> data;
+    for (auto str : {"hello", "world", "omg"})
+        client.request(c, "public.echo", [&](bool ok, std::vector<std::string> data_) {
+            std::lock_guard lock{reply_mut};
+            replies.insert(std::move(data_[0]));
+        }, str);
+
+    reply_sleep();
+    {
+        std::lock_guard lq{reply_mut};
+        auto lock = catch_lock();
+        REQUIRE( replies.size() == 0 ); // The server waits 50ms before sending, so we shouldn't have any reply yet
+    }
+    std::this_thread::sleep_for(60ms); // We're at least 70ms in now so the 50ms-delayed server responses should have arrived
+    {
+        std::lock_guard lq{reply_mut};
+        auto lock = catch_lock();
+        REQUIRE( replies == std::unordered_set<std::string>{{"hello", "world", "omg"}} );
+    }
+}

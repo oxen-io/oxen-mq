@@ -36,7 +36,7 @@ public:
     /// If you want to send a non-strong reply even when the remote is a service node then add
     /// an explicit `send_option::optional()` argument.
     template <typename... Args>
-    void send_back(std::string_view, Args&&... args);
+    void send_back(std::string_view command, Args&&... args);
 
     /// Sends a reply to a request.  This takes no command: the command is always the built-in
     /// "REPLY" command, followed by the unique reply tag, then any reply data parts.  All other
@@ -51,7 +51,47 @@ public:
     /// Sends a request back to whomever sent this message.  This is effectively a wrapper around
     /// lmq.request() that takes care of setting up the recipient arguments.
     template <typename ReplyCallback, typename... Args>
-    void send_request(std::string_view cmd, ReplyCallback&& callback, Args&&... args);
+    void send_request(std::string_view command, ReplyCallback&& callback, Args&&... args);
+
+    /** Class returned by `send_later()` that can be used to call `back()`, `reply()`, or
+     * `request()` beyond the lifetime of the Message instance as if calling `msg.send_back()`,
+     * `msg.send_reply()`, or `msg.send_request()`.  For example:
+     *
+     *     auto send = msg.send_later();
+     *     // ... later, perhaps in a lambda or scheduled job:
+     *     send.reply("content");
+     *
+     * is equivalent to
+     *
+     *     msg.send_reply("content");
+     *
+     * except that it is valid even if `msg` is no longer valid.
+     */
+    class DeferredSend {
+    public:
+        OxenMQ& oxenmq; ///< The owning OxenMQ object
+        ConnectionID conn; ///< The connection info for routing a reply; also contains the pubkey/sn status
+        std::string reply_tag; ///< If the invoked command is a request command this is the required reply tag that will be prepended by `reply()`.
+
+        explicit DeferredSend(Message& m) : oxenmq{m.oxenmq}, conn{m.conn}, reply_tag{m.reply_tag} {}
+
+        /// Equivalent to msg.send_back(...), but can be invoked later.
+        template <typename... Args>
+        void back(std::string_view command, Args&&... args) const;
+
+        /// Equivalent to msg.send_reply(...), but can be invoked later.
+        template <typename... Args>
+        void reply(Args&&... args) const;
+
+        /// Equivalent to msg.send_request(...), but can be invoked later.
+        template <typename ReplyCallback, typename... Args>
+        void request(std::string_view command, ReplyCallback&& callback, Args&&... args) const;
+    };
+
+    /// Returns a DeferredSend object that can be used to send replies to this message even if the
+    /// message expires.  Typically this is used when sending a reply requires waiting on another
+    /// task to complete without needing to block the handler thread.
+    DeferredSend send_later() { return DeferredSend{*this}; }
 };
 
 }
