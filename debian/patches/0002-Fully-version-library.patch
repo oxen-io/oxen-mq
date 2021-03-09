@@ -7,10 +7,10 @@ Subject: Fully version library
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 247a127..601137b 100644
+index 6c09cec..46a2e40 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -26,7 +26,7 @@ set(OXENMQ_VERSION_PATCH 3)
+@@ -26,7 +26,7 @@ set(OXENMQ_VERSION_PATCH 4)
  set(OXENMQ_VERSION "${OXENMQ_VERSION_MAJOR}.${OXENMQ_VERSION_MINOR}.${OXENMQ_VERSION_PATCH}")
  message(STATUS "oxenmq v${OXENMQ_VERSION}")
  
