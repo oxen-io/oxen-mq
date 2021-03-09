@@ -1,3 +1,14 @@
+oxenmq (1.2.4-1~ubuntu2010) groovy; urgency=medium
+
+  * Add missing header
+  * Fix debian/rules cmake variables
+  * Add better deferred reply capabilities to Message
+  * Make is_bt_tuple constexpr variables inline
+  * Bump version
+  * Rediff patches
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Tue, 09 Mar 2021 15:52:15 -0400
+
 oxenmq (1.2.3-2~ubuntu2010) groovy; urgency=medium
 
   * Add missing header
