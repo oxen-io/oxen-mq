@@ -67,6 +67,8 @@ add_library(oxenmq
 )
 set_target_properties(oxenmq PROPERTIES SOVERSION ${OXENMQ_LIBVERSION})
 
+target_compile_features(oxenmq PUBLIC cxx_std_17)
+
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 target_link_libraries(oxenmq PRIVATE Threads::Threads)
