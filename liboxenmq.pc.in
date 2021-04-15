@@ -5,7 +5,7 @@ includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
 
 Name: liboxenmq
 Description: ZeroMQ-based communication library
-Version: @OXENMQ_VERSION@
+Version: @PROJECT_VERSION@
 
 Libs: -L${libdir} -loxenmq
 Libs.private: @PRIVATE_LIBS@
