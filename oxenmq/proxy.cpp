@@ -176,7 +176,12 @@ void OxenMQ::proxy_send(bt_dict_consumer data) {
                 }
             }
             if (!retry) {
-                LMQ_LOG(warn, "Unable to send message to ", conn_id, ": ", e.what());
+                if (!conn_id.sn() && !conn_id.route.empty()) { // incoming non-SN connection
+                    LMQ_LOG(debug, "Unable to send message to incoming connection ", conn_id, ": ", e.what(),
+                            "; remote has probably disconnected");
+                } else {
+                    LMQ_LOG(warn, "Unable to send message to ", conn_id, ": ", e.what());
+                }
                 nowarn = true;
                 if (callback_nosend) {
                     job([callback = std::move(callback_nosend), error = e] { callback(&error); });
