@@ -74,6 +74,11 @@ template <typename R> class Batch;
  */
 inline constexpr auto DEFAULT_SEND_KEEP_ALIVE = 30s;
 
+/** Default keep-alive time for a connect_sn() (unless overridden via a connect_option::keep_alive
+ * argument).
+ */
+inline constexpr auto DEFAULT_CONNECT_SN_KEEP_ALIVE = 5min;
+
 // The default timeout for connect_remote()
 inline constexpr auto REMOTE_CONNECT_TIMEOUT = 10s;
 
@@ -193,15 +198,21 @@ public:
      * closing the connection.  Setting this only affects new outgoing connections. */
     std::chrono::milliseconds HANDSHAKE_TIME = 10s;
 
-    /** Whether to use a zmq routing ID based on the pubkey for new outgoing connections.  This is
-     * normally desirable as it allows the listener to recognize that the incoming connection is a
-     * reconnection from the same remote and handover routing to the new socket while closing off
-     * the (likely dead) old socket.  This, however, prevents a single OxenMQ instance from
-     * establishing multiple connections to the same listening OxenMQ, which is sometimes useful
-     * (for example when testing), and so this option can be overridden to `false` to use completely
-     * random zmq routing ids on outgoing connections (which will thus allow multiple connections).
+    /** Whether to use a random zmq routing ID, or one based on the pubkey for new outgoing
+     * connections.  Using the pubkey is desirable when connections between endpoints are unique as
+     * it allows the listener to recognize that the incoming connection is a reconnection from the
+     * same remote and handover routing to the new socket while closing off the (likely dead) old
+     * socket.  This, however, prevents a single OxenMQ instance (or multiple OxenMQ instances using
+     * the same keys) from establishing multiple connections to the same listening OxenMQ, which is
+     * sometimes useful (for example when testing, or when sharing an authentication key), and so
+     * this option can be overridden to `true` to use completely random zmq routing ids on outgoing
+     * connections (which will thus allow multiple connections).
+     *
+     * Note that this only affects the default for outgoing connections: you can override an
+     * individual connection by passing a connect_option::ephemeral_routing_id option into the
+     * connect_sn/connect_remote method.
      */
-    bool PUBKEY_BASED_ROUTING_ID = true;
+    bool EPHEMERAL_ROUTING_ID = false;
 
     /** Maximum incoming message size; if a remote tries sending a message larger than this they get
      * disconnected. -1 means no limit. */
@@ -487,7 +498,7 @@ private:
     // provided then the connection will be curve25519 encrypted and authenticate; otherwise it will
     // be unencrypted and unauthenticated.  Note that the remote end must be in the same mode (i.e.
     // either accepting curve connections, or not accepting curve).
-    void setup_outgoing_socket(zmq::socket_t& socket, std::string_view remote_pubkey = {});
+    void setup_outgoing_socket(zmq::socket_t& socket, std::string_view remote_pubkey, bool use_ephemeral_routing_id);
 
     /// Common connection implementation used by proxy_connect/proxy_send.  Returns the socket and,
     /// if a routing prefix is needed, the required prefix (or an empty string if not needed).  For
@@ -503,8 +514,10 @@ private:
     /// @param keep_alive the keep alive for the connection, if we establish a new outgoing
     /// connection.  If we already have an outgoing connection then its keep-alive gets increased to
     /// this if currently less than this.
-    std::pair<zmq::socket_t*, std::string> proxy_connect_sn(std::string_view pubkey, std::string_view connect_hint,
-            bool optional, bool incoming_only, bool outgoing_only, std::chrono::milliseconds keep_alive);
+    /// @param ephemeral_routing_id whether or not to use a random (true) or pubkey-based (false) routing id
+    std::pair<zmq::socket_t*, std::string> proxy_connect_sn(std::string_view pubkey,
+            std::string_view connect_hint, bool optional, bool incoming_only, bool outgoing_only,
+            bool ephemeral_routing_id, std::chrono::milliseconds keep_alive);
 
     /// CONNECT_SN command telling us to connect to a new pubkey.  Returns the socket (which could
     /// be existing or a new one).  This basically just unpacks arguments and passes them on to
@@ -974,21 +987,23 @@ public:
      * instructs the proxy thread that it should establish a connection.
      *
      * @param pubkey - the public key (32-byte binary string) of the service node to connect to
-     * @param keep_alive - the connection will be kept alive if there was valid activity within
-     *                     the past `keep_alive` milliseconds.  If an outgoing connection already
-     *                     exists, the longer of the existing and the given keep alive is used.
-     *                     (Note that the default applied here is much longer than the default for an
-     *                     implicit connect() by calling send() directly.)
-     * @param hint - if non-empty and a new outgoing connection needs to be made this hint value
-     *               may be used instead of calling the lookup function.  (Note that there is no
-     *               guarantee that the hint will be used; it is only usefully specified if the
-     *               connection address has already been incidentally determined).
+     * @param options - connection options; see the structs in `connect_option`, in particular:
+     *        - keep_alive -- how long the SN connection will be kept alive after valid activity
+     *        - remote_hint -- a remote address hint that may be used instead of doing a lookup
+     *        - ephemeral_routing_id -- allows you to override the EPHEMERAL_ROUTING_ID option for
+     *          this connection.
+     *
+     * For backwards compatibility you may also directly pass (as a `options` value):
+     * - a std::chrono::duration duration (equivalent to connect_option::keep_alive{duration})
+     * - a string or string_view hint (equivalent to connect_option::hint{hint})
+     * but these should be considered deprecated and the connection_option versions preferred.
      *
      * @returns a ConnectionID that identifies an connection with the given SN.  Typically you
      * *don't* need to worry about this (and can just discard it): you can always simply pass the
      * pubkey as a string wherever a ConnectionID is called.
      */
-    ConnectionID connect_sn(std::string_view pubkey, std::chrono::milliseconds keep_alive = 5min, std::string_view hint = {});
+    template <typename... Option>
+    ConnectionID connect_sn(std::string_view pubkey, const Option&... opts);
 
     /**
      * Establish a connection to the given remote with callbacks invoked on a successful or failed
@@ -1010,24 +1025,27 @@ public:
      * address and whether curve encryption should be used.
      * @param on_connect called with the identifier after the connection has been established.
      * @param on_failure called with the identifier and failure message if we fail to connect.
-     * @param auth_level determines the authentication level of the remote for issuing commands to
-     * us.  The default is `AuthLevel::none`.
-     * @param timeout how long to try before aborting the connection attempt and calling the
-     * on_failure callback.  Note that the connection can fail for various reasons before the
-     * timeout.
+     * @param options supports various connection options:
+     *        - passing an AuthLevel here sets the auth_level for incoming messages on this
+     *          connection (instead of AuthLevel::none).
+     *        - anything else should be one of the `oxenmq::connect_option` structs.
+     *        - passing a std::chrono::duration type is permitted (but deprecated) for backwards
+     *          compatibility; it is equivalent to `connection_option::timeout{duration}`.
      *
-     * @param returns ConnectionID that uniquely identifies the connection to this remote node.  In
-     * order to talk to it you will need the returned value (or a copy of it).
+     * @returns ConnectionID that uniquely identifies the connection to this remote node.  In order
+     * to talk to it you will need the returned value (or a copy of it).
      */
+    template <typename... Option>
     ConnectionID connect_remote(const address& remote, ConnectSuccess on_connect, ConnectFailure on_failure,
-            AuthLevel auth_level = AuthLevel::none, std::chrono::milliseconds timeout = REMOTE_CONNECT_TIMEOUT);
+            const Option&... options);
 
-    /// Same as the above, but takes the address as a string_view and constructs an `address` from
-    /// it.
+    /// Deprecated connect_remote variants that take the address as a string view.  The second
+    /// version also takes a pubkey (for a secure connection) as a separate argument.  Use of these
+    /// is deprecated and discouraged: use an address with connect_option::whatever arguments
+    /// instead.
+    [[deprecated("use connect_remote() with a oxenmq::address instead")]]
     ConnectionID connect_remote(std::string_view remote, ConnectSuccess on_connect, ConnectFailure on_failure,
-            AuthLevel auth_level = AuthLevel::none, std::chrono::milliseconds timeout = REMOTE_CONNECT_TIMEOUT) {
-        return connect_remote(address{remote}, std::move(on_connect), std::move(on_failure), auth_level, timeout);
-    }
+            AuthLevel auth_level = AuthLevel::none, std::chrono::milliseconds timeout = REMOTE_CONNECT_TIMEOUT);
 
     /// Deprecated version of the above that takes the remote address and remote pubkey for curve
     /// encryption as separate arguments.  New code should either use a pubkey-embedded address
@@ -1365,6 +1383,53 @@ struct queue_full {
 
 }
 
+/// Namespace for options to the connect_remote()/connect_sn() methods
+namespace connect_option {
+
+/// Specifies whether the connection should use pubkey-based routing for this connection, overriding
+/// the default (OxenMQ::EPHEMERAL_ROUTING_ID).  See OxenMQ::EPHEMERAL_ROUTING_ID for a description
+/// of this.
+///
+/// Typically use: `connect_options::ephemeral_routing_id{}` or `connect_options::ephemeral_routing_id{false}`.
+struct ephemeral_routing_id {
+    bool use_ephemeral_routing_id = true;
+    // Constructor; default construction gives you pubkey routing, but the bool parameter can be
+    // specified as false to explicitly disable the pubkey routing flag.
+    explicit ephemeral_routing_id(bool use = true) : use_ephemeral_routing_id{use} {}
+};
+
+/// Sets the connection timeout (instead of the default REMOTE_CONNECT_TIMEOUT).  Only applies to
+/// connect_remote(), not connect_sn().
+struct timeout {
+    std::chrono::milliseconds time;
+    explicit timeout(std::chrono::milliseconds time) : time{std::move(time)} {}
+};
+
+/// Sets the connection keep-alive (only applies to connect_sn(), not connect_remote()).  The
+/// connection will be kept alive if there was valid activity within the past `keep_alive`
+/// milliseconds.  If an outgoing connection already exists, the longer of the existing and the
+/// given keep alive is used.
+///
+/// Note that, if not specified, the default keep-alive for a connection established via
+/// connect_sn() is 5 minutes (which is much longer than the default for an implicit connect() by
+/// calling send() directly with a pubkey.)
+struct keep_alive {
+    std::chrono::milliseconds time;
+    explicit keep_alive(std::chrono::milliseconds time) : time{std::move(time)} {}
+};
+
+/// Sets a remote address hint for an outgoing SN connection (only applies to connect_sn()).  If a
+/// new outgoing connection needs to be made this hint value may be used instead of calling the
+/// lookup function.  (Note that there is no guarantee that the hint will be used; it is only
+/// usefully specified if the connection address has already been incidentally determined to save a
+/// potentially expensive lookup call).
+struct hint {
+    std::string address;
+    explicit hint(std::string_view address) : address{address} {}
+};
+
+}
+
 namespace detail {
 
 /// Takes an rvalue reference, moves it into a new instance then returns a uintptr_t value
@@ -1464,8 +1529,71 @@ bt_dict build_send(ConnectionID to, std::string_view cmd, T&&... opts) {
 
 }
 
+inline void apply_connect_option(OxenMQ& omq, bool remote, bt_dict& opts, const AuthLevel& auth) {
+    if (remote) opts["auth_level"] = static_cast<std::underlying_type_t<AuthLevel>>(auth);
+    else omq.log(LogLevel::warn, __FILE__, __LINE__, "AuthLevel ignored for connect_sn(...)");
+}
+inline void apply_connect_option(OxenMQ&, bool, bt_dict& opts, const connect_option::ephemeral_routing_id& er) {
+    opts["ephemeral_rid"] = er.use_ephemeral_routing_id;
+}
+inline void apply_connect_option(OxenMQ& omq, bool remote, bt_dict& opts, const connect_option::timeout& timeout) {
+    if (remote) opts["timeout"] = timeout.time.count();
+    else omq.log(LogLevel::warn, __FILE__, __LINE__, "connect_option::timeout ignored for connect_sn(...)");
+}
+inline void apply_connect_option(OxenMQ& omq, bool remote, bt_dict& opts, const connect_option::keep_alive& ka) {
+    if (!remote) opts["keep_alive"] = ka.time.count();
+    else omq.log(LogLevel::warn, __FILE__, __LINE__, "connect_option::keep_alive ignored for connect_remote(...)");
+}
+inline void apply_connect_option(OxenMQ& omq, bool remote, bt_dict& opts, const connect_option::hint& hint) {
+    if (!remote) opts["hint"] = hint.address;
+    else omq.log(LogLevel::warn, __FILE__, __LINE__, "connect_option::hint ignored for connect_remote(...)");
+}
+[[deprecated("use oxenmq::connect_option::keep_alive or ::timeout instead")]]
+inline void apply_connect_option(OxenMQ&, bool remote, bt_dict& opts, std::chrono::milliseconds time) {
+    if (remote) opts["timeout"] = time.count();
+    else opts["keep_alive"] = time.count();
+}
+[[deprecated("use oxenmq::connect_option::hint{hint} instead of a direct string argument")]]
+inline void apply_connect_option(OxenMQ& omq, bool remote, bt_dict& opts, std::string_view hint) {
+    if (!remote) opts["hint"] = hint;
+    else omq.log(LogLevel::warn, __FILE__, __LINE__, "string argument ignored for connect_remote(...)");
+}
+
 } // namespace detail
 
+template <typename... Option>
+ConnectionID OxenMQ::connect_remote(const address& remote, ConnectSuccess on_connect, ConnectFailure on_failure,
+            const Option&... options) {
+    bt_dict opts;
+    (detail::apply_connect_option(*this, true, opts, options), ...);
+
+    auto id = next_conn_id++;
+    opts["conn_id"] = id;
+    opts["connect"] = detail::serialize_object(std::move(on_connect));
+    opts["failure"] = detail::serialize_object(std::move(on_failure));
+    if (remote.curve()) opts["pubkey"] = remote.pubkey;
+    opts["remote"] = remote.zmq_address();
+
+    detail::send_control(get_control_socket(), "CONNECT_REMOTE", bt_serialize(opts));
+
+    return id;
+}
+
+template <typename... Option>
+ConnectionID OxenMQ::connect_sn(std::string_view pubkey, const Option&... options) {
+    bt_dict opts{
+        {"keep_alive", std::chrono::microseconds{DEFAULT_CONNECT_SN_KEEP_ALIVE}.count()},
+        {"ephemeral_rid", EPHEMERAL_ROUTING_ID},
+    };
+
+    (detail::apply_connect_option(*this, false, opts, options), ...);
+
+    opts["pubkey"] = pubkey;
+
+    detail::send_control(get_control_socket(), "CONNECT_SN", bt_serialize(opts));
+
+    return pubkey;
+}
 
 template <typename... T>
 void OxenMQ::send(ConnectionID to, std::string_view cmd, const T&... opts) {
