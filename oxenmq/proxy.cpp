@@ -116,7 +116,7 @@ void OxenMQ::proxy_send(bt_dict_consumer data) {
         retry = false;
         zmq::socket_t *send_to;
         if (conn_id.sn()) {
-            auto sock_route = proxy_connect_sn(conn_id.pk, hint, optional, incoming, outgoing, PUBKEY_BASED_ROUTING_ID, keep_alive);
+            auto sock_route = proxy_connect_sn(conn_id.pk, hint, optional, incoming, outgoing, EPHEMERAL_ROUTING_ID, keep_alive);
             if (!sock_route.first) {
                 nowarn = true;
                 if (optional)

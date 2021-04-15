@@ -47,7 +47,7 @@ void OxenMQ::setup_external_socket(zmq::socket_t& socket) {
     }
 }
 
-void OxenMQ::setup_outgoing_socket(zmq::socket_t& socket, std::string_view remote_pubkey, bool use_pubkey_routing_id) {
+void OxenMQ::setup_outgoing_socket(zmq::socket_t& socket, std::string_view remote_pubkey, bool use_ephemeral_routing_id) {
 
     setup_external_socket(socket);
 
@@ -57,7 +57,7 @@ void OxenMQ::setup_outgoing_socket(zmq::socket_t& socket, std::string_view remot
         socket.set(zmq::sockopt::curve_secretkey, privkey);
     }
 
-    if (use_pubkey_routing_id) {
+    if (!use_ephemeral_routing_id) {
         std::string routing_id;
         routing_id.reserve(33);
         routing_id += 'L'; // Prefix because routing id's starting with \0 are reserved by zmq (and our pubkey might start with \0)
@@ -90,7 +90,7 @@ void OxenMQ::disconnect(ConnectionID id, std::chrono::milliseconds linger) {
 }
 
 std::pair<zmq::socket_t *, std::string>
-OxenMQ::proxy_connect_sn(std::string_view remote, std::string_view connect_hint, bool optional, bool incoming_only, bool outgoing_only, bool use_pubkey_routing_id, std::chrono::milliseconds keep_alive) {
+OxenMQ::proxy_connect_sn(std::string_view remote, std::string_view connect_hint, bool optional, bool incoming_only, bool outgoing_only, bool use_ephemeral_routing_id, std::chrono::milliseconds keep_alive) {
     ConnectionID remote_cid{remote};
     auto its = peers.equal_range(remote_cid);
     peer_info* peer = nullptr;
@@ -142,7 +142,7 @@ OxenMQ::proxy_connect_sn(std::string_view remote, std::string_view connect_hint,
 
     LMQ_LOG(debug, to_hex(pubkey), " (me) connecting to ", addr, " to reach ", to_hex(remote));
     zmq::socket_t socket{context, zmq::socket_type::dealer};
-    setup_outgoing_socket(socket, remote, use_pubkey_routing_id);
+    setup_outgoing_socket(socket, remote, use_ephemeral_routing_id);
     try {
         socket.connect(addr);
     } catch (const zmq::error_t& e) {
@@ -168,9 +168,11 @@ OxenMQ::proxy_connect_sn(std::string_view remote, std::string_view connect_hint,
 std::pair<zmq::socket_t *, std::string> OxenMQ::proxy_connect_sn(bt_dict_consumer data) {
     std::string_view hint, remote_pk;
     std::chrono::milliseconds keep_alive;
-    bool optional = false, incoming_only = false, outgoing_only = false, pubkey_routing = PUBKEY_BASED_ROUTING_ID;
+    bool optional = false, incoming_only = false, outgoing_only = false, ephemeral_rid = EPHEMERAL_ROUTING_ID;
 
     // Alphabetical order
+    if (data.skip_until("ephemeral_rid"))
+        ephemeral_rid = data.consume_integer<bool>();
     if (data.skip_until("hint"))
         hint = data.consume_string_view();
     if (data.skip_until("incoming"))
@@ -184,10 +186,8 @@ std::pair<zmq::socket_t *, std::string> OxenMQ::proxy_connect_sn(bt_dict_consume
     if (!data.skip_until("pubkey"))
         throw std::runtime_error("Internal error: Invalid proxy_connect_sn command; pubkey missing");
     remote_pk = data.consume_string_view();
-    if (data.skip_until("pubkey_routing"))
-        pubkey_routing = data.consume_integer<bool>();
 
-    return proxy_connect_sn(remote_pk, hint, optional, incoming_only, outgoing_only, pubkey_routing, keep_alive);
+    return proxy_connect_sn(remote_pk, hint, optional, incoming_only, outgoing_only, ephemeral_rid, keep_alive);
 }
 
 template <typename Container, typename AccessIndex>
@@ -296,24 +296,22 @@ void OxenMQ::proxy_connect_remote(bt_dict_consumer data) {
     std::string remote;
     std::string remote_pubkey;
     std::chrono::milliseconds timeout = REMOTE_CONNECT_TIMEOUT;
-    bool pubkey_routing = PUBKEY_BASED_ROUTING_ID;
+    bool ephemeral_rid = EPHEMERAL_ROUTING_ID;
 
     if (data.skip_until("auth_level"))
         auth_level = static_cast<AuthLevel>(data.consume_integer<std::underlying_type_t<AuthLevel>>());
     if (data.skip_until("conn_id"))
         conn_id = data.consume_integer<long long>();
-    if (data.skip_until("connect")) {
+    if (data.skip_until("connect"))
         on_connect = detail::deserialize_object<ConnectSuccess>(data.consume_integer<uintptr_t>());
-    }
-    if (data.skip_until("failure")) {
+    if (data.skip_until("ephemeral_rid"))
+        ephemeral_rid = data.consume_integer<bool>();
+    if (data.skip_until("failure"))
         on_failure = detail::deserialize_object<ConnectFailure>(data.consume_integer<uintptr_t>());
-    }
     if (data.skip_until("pubkey")) {
         remote_pubkey = data.consume_string();
         assert(remote_pubkey.size() == 32 || remote_pubkey.empty());
     }
-    if (data.skip_until("pubkey_routing"))
-        pubkey_routing = data.consume_integer<bool>();
     if (data.skip_until("remote"))
         remote = data.consume_string();
     if (data.skip_until("timeout"))
@@ -328,7 +326,7 @@ void OxenMQ::proxy_connect_remote(bt_dict_consumer data) {
 
     zmq::socket_t sock{context, zmq::socket_type::dealer};
     try {
-        setup_outgoing_socket(sock, remote_pubkey, pubkey_routing);
+        setup_outgoing_socket(sock, remote_pubkey, ephemeral_rid);
         sock.connect(remote);
     } catch (const zmq::error_t &e) {
         proxy_schedule_reply_job([conn_id, on_failure=std::move(on_failure), what="connect() failed: "s+e.what()] {

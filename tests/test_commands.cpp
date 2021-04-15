@@ -104,7 +104,7 @@ TEST_CASE("outgoing auth level", "[commands][auth]") {
     client.add_command("admin", "hi", [&](auto&) { admin_hi++; });
     client.start();
 
-    client.PUBKEY_BASED_ROUTING_ID = false; // establishing multiple connections below, so we need unique routing ids
+    client.EPHEMERAL_ROUTING_ID = true; // establishing multiple connections below, so we need unique routing ids
 
     address server_addr{listen, server.get_pubkey()};
     auto public_c = client.connect_remote(server_addr, [](auto&&...) {}, [](auto&&...) {});
