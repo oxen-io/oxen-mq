@@ -1094,7 +1094,9 @@ public:
      *                 call connect() first).
      * @param cmd - the first data frame value which is almost always the remote "category.command" name
      * @param opts - any number of std::string (or string_views) and send options.  Each send option
-     *               affects how the send works; each string becomes a message part.
+     *               affects how the send works; each string becomes a message part.  May also
+     *               contain std::optional<T> values: the value will be applied as a string or send
+     *               option if set and skipped if null.
      *
      * Example:
      *
@@ -1460,6 +1462,13 @@ void send_control(zmq::socket_t& sock, std::string_view cmd, std::string data = 
 /// Base case: takes a string-like value and appends it to the message parts
 inline void apply_send_option(bt_list& parts, bt_dict&, std::string_view arg) {
     parts.emplace_back(arg);
+}
+
+/// std::optional<T>: if the optional is set, we unwrap it and apply as a send_option, otherwise we
+/// ignore it.
+template <typename T>
+inline void apply_send_option(bt_list& parts, bt_dict& control_data, const std::optional<T>& opt) {
+    if (opt) apply_send_option(parts, control_data, *opt);
 }
 
 /// `data_parts` specialization: appends a range of serialized data parts to the parts to send
