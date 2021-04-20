@@ -116,7 +116,7 @@ void OxenMQ::proxy_send(bt_dict_consumer data) {
         retry = false;
         zmq::socket_t *send_to;
         if (conn_id.sn()) {
-            auto sock_route = proxy_connect_sn(conn_id.pk, hint, optional, incoming, outgoing, keep_alive);
+            auto sock_route = proxy_connect_sn(conn_id.pk, hint, optional, incoming, outgoing, EPHEMERAL_ROUTING_ID, keep_alive);
             if (!sock_route.first) {
                 nowarn = true;
                 if (optional)
@@ -176,7 +176,12 @@ void OxenMQ::proxy_send(bt_dict_consumer data) {
                 }
             }
             if (!retry) {
-                LMQ_LOG(warn, "Unable to send message to ", conn_id, ": ", e.what());
+                if (!conn_id.sn() && !conn_id.route.empty()) { // incoming non-SN connection
+                    LMQ_LOG(debug, "Unable to send message to incoming connection ", conn_id, ": ", e.what(),
+                            "; remote has probably disconnected");
+                } else {
+                    LMQ_LOG(warn, "Unable to send message to ", conn_id, ": ", e.what());
+                }
                 nowarn = true;
                 if (callback_nosend) {
                     job([callback = std::move(callback_nosend), error = e] { callback(&error); });
