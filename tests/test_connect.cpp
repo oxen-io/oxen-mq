@@ -107,7 +107,7 @@ TEST_CASE("plain-text connections", "[plaintext][connect]") {
 
     std::atomic<bool> got{false};
     bool success = false;
-    auto c = client.connect_remote(listen,
+    auto c = client.connect_remote(address{listen},
             [&](auto conn) { success = true; got = true; },
             [&](auto conn, std::string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); got = true; }
             );
@@ -149,11 +149,11 @@ TEST_CASE("unique connection IDs", "[connect][id]") {
     client2.start();
 
     std::atomic<bool> good1{false}, good2{false};
-    auto r1 = client1.connect_remote(listen,
+    auto r1 = client1.connect_remote(address{listen},
             [&](auto conn) { good1 = true; },
             [&](auto conn, std::string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); }
             );
-    auto r2 = client2.connect_remote(listen,
+    auto r2 = client2.connect_remote(address{listen},
             [&](auto conn) { good2 = true; },
             [&](auto conn, std::string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); }
             );
@@ -370,7 +370,7 @@ TEST_CASE("SN single worker test", "[connect][worker]") {
 
     OxenMQ client{get_logger("B» "), LogLevel::trace};
     client.start();
-    auto conn = client.connect_remote(listen, [](auto) {}, [](auto, auto) {});
+    auto conn = client.connect_remote(address{listen}, [](auto) {}, [](auto, auto) {});
 
     std::atomic<int> got{0};
     std::atomic<int> success{0};
