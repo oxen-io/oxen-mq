@@ -7,7 +7,7 @@ Subject: Fully version library
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 68926f8..56c84bd 100644
+index 68926f8..51f5fc2 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -24,7 +24,7 @@ include(GNUInstallDirs)
@@ -15,7 +15,7 @@ index 68926f8..56c84bd 100644
  message(STATUS "oxenmq v${PROJECT_VERSION}")
  
 -set(OXENMQ_LIBVERSION 0)
-+set(OXENMQ_LIBVERSION ${OXENMQ_VERSION})
++set(OXENMQ_LIBVERSION ${PROJECT_VERSION})
  
  
  if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
