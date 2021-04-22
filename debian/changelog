@@ -1,3 +1,9 @@
+oxenmq (1.2.5-1~ubuntu2104) hirsute; urgency=medium
+
+  * Add Ubuntu hirsute (21.04) deb
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Thu, 22 Apr 2021 13:32:53 -0300
+
 oxenmq (1.2.5-1~ubuntu2010) groovy; urgency=medium
 
   * Add connect_option::*; allow per-connection pubkey-based routing setting
