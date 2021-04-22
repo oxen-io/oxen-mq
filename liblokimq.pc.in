@@ -5,7 +5,7 @@ includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
 
 Name: liblokimq
 Description: ZeroMQ-based communication library (compatibility package for liboxenmq)
-Version: @OXENMQ_VERSION@
+Version: @PROJECT_VERSION@
 
 Libs: -L${libdir} -loxenmq
 Libs.private: @PRIVATE_LIBS@
