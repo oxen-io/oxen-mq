@@ -16,15 +16,13 @@ cmake_minimum_required(VERSION 3.7)
 # Has to be set before `project()`, and ignored on non-macos:
 set(CMAKE_OSX_DEPLOYMENT_TARGET 10.12 CACHE STRING "macOS deployment target (Apple clang only)")
 
-project(liboxenmq CXX C)
+project(liboxenmq
+    VERSION 1.2.5
+    LANGUAGES CXX C)
 
 include(GNUInstallDirs)
 
-set(OXENMQ_VERSION_MAJOR 1)
-set(OXENMQ_VERSION_MINOR 2)
-set(OXENMQ_VERSION_PATCH 4)
-set(OXENMQ_VERSION "${OXENMQ_VERSION_MAJOR}.${OXENMQ_VERSION_MINOR}.${OXENMQ_VERSION_PATCH}")
-message(STATUS "oxenmq v${OXENMQ_VERSION}")
+message(STATUS "oxenmq v${PROJECT_VERSION}")
 
 set(OXENMQ_LIBVERSION 0)
 

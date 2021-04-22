@@ -104,7 +104,7 @@ TEST_CASE("outgoing auth level", "[commands][auth]") {
     client.add_command("admin", "hi", [&](auto&) { admin_hi++; });
     client.start();
 
-    client.PUBKEY_BASED_ROUTING_ID = false; // establishing multiple connections below, so we need unique routing ids
+    client.EPHEMERAL_ROUTING_ID = true; // establishing multiple connections below, so we need unique routing ids
 
     address server_addr{listen, server.get_pubkey()};
     auto public_c = client.connect_remote(server_addr, [](auto&&...) {}, [](auto&&...) {});
@@ -415,13 +415,19 @@ TEST_CASE("data parts", "[send][data_parts]") {
         r.clear();
     }
 
+    std::optional<std::string_view> opt1, opt2;
+    std::optional<std::string> opt3, opt4;
+    opt1 = "o1"sv;
+    opt4 = "o4"s;
     std::vector some_data2{{"a"sv, "b"sv, "\0"sv}};
     client.send(c, "public.hello",
             "hi",
             oxenmq::send_option::data_parts(some_data2.begin(), some_data2.end()),
             "another",
             "string"sv,
-            oxenmq::send_option::data_parts(some_data.begin(), some_data.end()));
+            oxenmq::send_option::data_parts(some_data.begin(), some_data.end()),
+            opt1, opt2, opt3, opt4
+            );
 
     std::vector<std::string> expected;
     expected.push_back("hi");
@@ -429,6 +435,8 @@ TEST_CASE("data parts", "[send][data_parts]") {
     expected.push_back("another");
     expected.push_back("string");
     expected.insert(expected.end(), some_data.begin(), some_data.end());
+    expected.push_back("o1");
+    expected.push_back("o4");
 
     reply_sleep();
     {
