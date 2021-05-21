@@ -104,6 +104,16 @@ private:
     template <typename R> friend class Batch;
 };
 
+/// Opaque handler for a timer constructed by add_timer(...).  Not directly constructible, but is
+/// safe (and cheap) to copy.  The only real use of this is to pass it in to cancel_timer() to
+/// cancel a timer.
+struct TimerID {
+private:
+    int _id;
+    explicit constexpr TimerID(int id) : _id{id} {}
+    friend class OxenMQ;
+};
+
 /**
  * Class that handles OxenMQ listeners, connections, proxying, and workers.  An application
  * typically has just one instance of this class.
@@ -415,8 +425,13 @@ private:
     /// Timers.  TODO: once cppzmq adds an interface around the zmq C timers API then switch to it.
     struct TimersDeleter { void operator()(void* timers); };
     struct timer_data { std::function<void()> function; bool squelch; bool running; int thread; };
-    std::unordered_map<int, timer_data> timer_jobs;
+    std::unordered_map<int, timer_data> timer_jobs; // keys are zmq timer ids
     std::unique_ptr<void, TimersDeleter> timers;
+    // The next internal timer id (returned opaquely via TimerID return from add_timer)
+    std::atomic<int> next_timer_id = 1;
+    // Maps our internal timer id values (returned by add_timer) to zmq timer ids; used for
+    // delete_timer().
+    std::unordered_map<int, int> timer_zmq_id;
 public:
     // This needs to be public because we have to be able to call it from a plain C function.
     // Nothing external may call it!
@@ -556,13 +571,16 @@ private:
     /// take over and queue batch jobs.
     void proxy_batch(detail::Batch* batch);
 
-    /// TIMER command.  Called with a serialized list containing: function pointer to assume
-    /// ownership of, an interval count (in ms), and whether or not jobs should be squelched (see
-    /// `add_timer()`).
+    /// TIMER command.  Called with a serialized list containing: our local timer_id, function
+    /// pointer to assume ownership of, an interval count (in ms), and whether or not jobs should be
+    /// squelched (see `add_timer()`).
     void proxy_timer(bt_list_consumer timer_data);
 
     /// Same, but deserialized
-    void proxy_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch, int thread);
+    void proxy_timer(int timer_id, std::function<void()> job, std::chrono::milliseconds interval, bool squelch, int thread);
+
+    /// TIMER_DEL command.  Called with a timer_id to delete an active timer.
+    void proxy_timer_del(int timer_id);
 
     /// ZAP (https://rfc.zeromq.org/spec:27/ZAP/) authentication handler; this does non-blocking
     /// processing of any waiting authentication requests for new incoming connections.
@@ -1239,9 +1257,22 @@ public:
      * (so that, under heavy load or long jobs, there can be more than one of the same job scheduled
      * or running at a time) then specify `squelch` as `false`.
      *
+     * The returned value can be kept and later passed into `cancel_timer()` if you want to be able
+     * to cancel a timer.
+     *
      * \param thread specifies a thread (added with add_tagged_thread()) on which this timer must run.
      */
-    void add_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch = true, std::optional<TaggedThreadID> = std::nullopt);
+    TimerID add_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch = true, std::optional<TaggedThreadID> = std::nullopt);
+
+    /**
+     * Cancels a running timer.  Note that an existing timer job (or multiple, if the timer disabled
+     * squelch) that have already been scheduled may still be executed after cancel_timer is called.
+     *
+     * It is safe (though does nothing) to call this more than once with the same TimerID value.
+     *
+     * \param timer a TimerID value as returned by add_timer.
+     */
+    void cancel_timer(TimerID timer);
 };
 
 /// Helper class that slightly simplifies adding commands to a category.

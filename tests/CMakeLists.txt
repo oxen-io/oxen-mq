@@ -13,6 +13,7 @@ set(LMQ_TEST_SRC
     test_inject.cpp
     test_requests.cpp
     test_tagged_threads.cpp
+    test_timer.cpp
     )
 
 add_executable(tests ${LMQ_TEST_SRC})
