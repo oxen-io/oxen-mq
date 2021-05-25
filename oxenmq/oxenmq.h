@@ -104,10 +104,11 @@ private:
     template <typename R> friend class Batch;
 };
 
-/// Opaque handler for a timer constructed by add_timer(...).  Not directly constructible, but is
-/// safe (and cheap) to copy.  The only real use of this is to pass it in to cancel_timer() to
-/// cancel a timer.
+/// Opaque handler for a timer constructed by add_timer(...).  Safe (and cheap) to copy.  The only
+/// real use of this is to pass it in to cancel_timer() to cancel a timer.
 struct TimerID {
+    // Default construction; creates an object with a non-timer internal id value.
+    TimerID() : _id{0} {}
 private:
     int _id;
     explicit constexpr TimerID(int id) : _id{id} {}
@@ -1263,6 +1264,25 @@ public:
      * \param thread specifies a thread (added with add_tagged_thread()) on which this timer must run.
      */
     TimerID add_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch = true, std::optional<TaggedThreadID> = std::nullopt);
+
+    /** Same as add_timer, above, except that it sets `timer` directly before adding the timer
+     * rather than returning it.
+     *
+     * This is recommended over the above in cases where the timer is extremely fast *and*
+     * cancellation will occur inside the job itself.  This version of the method guarantees that
+     * `timer` will be assigned to before the job is added to the job schedule so as to guarantee
+     * that `job` can safely use `timer` without needing to synchronize the assignment with the
+     * thread creating the timer.
+     *
+     * If in doubt and you need to cancel a job from within the job itself, use this method.
+     *
+     * Example usage:
+     *
+     *     auto timer = std::make_shared<TimerID>();
+     *     auto& timer_ref = *timer; // Get reference before we move away the shared_ptr
+     *     omq.add_timer(timer_ref, [timer=std::move(timer)] { ...; cancel_timer(*timer); });
+     */
+    void add_timer(TimerID& timer, std::function<void()> job, std::chrono::milliseconds interval, bool squelch = true, std::optional<TaggedThreadID> = std::nullopt);
 
     /**
      * Cancels a running timer.  Note that an existing timer job (or multiple, if the timer disabled
