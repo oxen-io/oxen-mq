@@ -120,20 +120,25 @@ void OxenMQ::_queue_timer_job(int timer_id) {
     queue.emplace(static_cast<detail::Batch*>(b), 0);
 }
 
-TimerID OxenMQ::add_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch, std::optional<TaggedThreadID> thread) {
-    int id = next_timer_id++;
+void OxenMQ::add_timer(TimerID& timer, std::function<void()> job, std::chrono::milliseconds interval, bool squelch, std::optional<TaggedThreadID> thread) {
     int th_id = thread ? thread->_id : 0;
+    timer._id = next_timer_id++;
     if (proxy_thread.joinable()) {
         detail::send_control(get_control_socket(), "TIMER", bt_serialize(bt_list{{
-                    id,
+                    timer._id,
                     detail::serialize_object(std::move(job)),
                     interval.count(),
                     squelch,
                     th_id}}));
     } else {
-        proxy_timer(id, std::move(job), interval, squelch, th_id);
+        proxy_timer(timer._id, std::move(job), interval, squelch, th_id);
     }
-    return TimerID{id};
+}
+
+TimerID OxenMQ::add_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch, std::optional<TaggedThreadID> thread) {
+    TimerID tid;
+    add_timer(tid, std::move(job), interval, squelch, std::move(thread));
+    return tid;
 }
 
 void OxenMQ::proxy_timer_del(int id) {

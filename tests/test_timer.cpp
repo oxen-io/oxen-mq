@@ -97,5 +97,35 @@ TEST_CASE("timer cancel", "[timer][cancel]") {
         auto lock = catch_lock();
         REQUIRE( ticks.load() == 3 );
     }
+
+    // Test the alternative taking an lvalue reference instead of returning by value (see oxenmq.h
+    // for why this is sometimes needed).
+    std::atomic<int> ticks3 = 0;
+    std::weak_ptr<TimerID> w_timer3;
+    {
+        auto timer3 = std::make_shared<TimerID>();
+        auto& t3ref = *timer3; // Get this reference *before* we move the shared pointer into the lambda
+        omq.add_timer(t3ref, [&ticks3, &omq, timer3=std::move(timer3)] {
+            if (ticks3 == 0)
+                ticks3++;
+            else if (ticks3 > 1) {
+                omq.cancel_timer(*timer3);
+                ticks3++;
+            }
+        }, 1ms);
+    }
+
+    wait_for([&] { return ticks3.load() >= 1; });
+    {
+        auto lock = catch_lock();
+        REQUIRE( ticks3.load() == 1 );
+    }
+    ticks3++;
+    wait_for([&] { return ticks3.load() >= 3 && w_timer3.expired(); });
+    {
+        auto lock = catch_lock();
+        REQUIRE( ticks3.load() == 3 );
+        REQUIRE( w_timer3.expired() );
+    }
 }
 
