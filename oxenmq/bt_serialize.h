@@ -622,6 +622,7 @@ void get_tuple_impl(Tuple& t, const bt_list& l, std::index_sequence<Is...>) {
 
 
 
+class bt_dict_consumer;
 
 /// Class that allows you to walk through a bt-encoded list in memory without copying or allocating
 /// memory.  It accesses existing memory directly and so the caller must ensure that the referenced
@@ -649,6 +650,8 @@ public:
     bool is_integer() const { return data.front() == 'i'; }
     /// Returns true if the next element looks like an encoded negative integer
     bool is_negative_integer() const { return is_integer() && data.size() >= 2 && data[1] == '-'; }
+    /// Returns true if the next element looks like an encoded non-negative integer
+    bool is_unsigned_integer() const { return is_integer() && data.size() >= 2 && data[1] >= '0' && data[1] <= '9'; }
     /// Returns true if the next element looks like an encoded list
     bool is_list() const { return data.front() == 'l'; }
     /// Returns true if the next element looks like an encoded dict
@@ -724,6 +727,11 @@ public:
     /// inefficient for large, nested structures (unless the values only need to be skipped but
     /// aren't separately needed).  This, however, does not require dynamic memory allocation.
     std::string_view consume_dict_data();
+
+    /// Shortcut for wrapping `consume_list_data()` in a new list consumer
+    bt_list_consumer consume_list_consumer() { return consume_list_data(); }
+    /// Shortcut for wrapping `consume_dict_data()` in a new dict consumer
+    bt_dict_consumer consume_dict_consumer();
 };
 
 
@@ -765,6 +773,8 @@ public:
     bool is_integer() { return consume_key() && data.front() == 'i'; }
     /// Returns true if the next element looks like an encoded negative integer
     bool is_negative_integer() { return is_integer() && data.size() >= 2 && data[1] == '-'; }
+    /// Returns true if the next element looks like an encoded non-negative integer
+    bool is_unsigned_integer() { return is_integer() && data.size() >= 2 && data[1] >= '0' && data[1] <= '9'; }
     /// Returns true if the next element looks like an encoded list
     bool is_list() { return consume_key() && data.front() == 'l'; }
     /// Returns true if the next element looks like an encoded dict
@@ -907,9 +917,13 @@ public:
     std::string_view consume_list_data() { return next_list_data().second; }
     std::string_view consume_dict_data() { return next_dict_data().second; }
 
+    /// Shortcut for wrapping `consume_list_data()` in a new list consumer
     bt_list_consumer consume_list_consumer() { return consume_list_data(); }
+    /// Shortcut for wrapping `consume_dict_data()` in a new dict consumer
     bt_dict_consumer consume_dict_consumer() { return consume_dict_data(); }
 };
+
+inline bt_dict_consumer bt_list_consumer::consume_dict_consumer() { return consume_dict_data(); }
 
 
 } // namespace oxenmq
