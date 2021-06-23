@@ -293,6 +293,11 @@ void OxenMQ::proxy_control_message(std::vector<zmq::message_t>& parts) {
             return proxy_timer(data);
         } else if (cmd == "TIMER_DEL") {
             return proxy_timer_del(bt_deserialize<int>(data));
+        } else if (cmd == "BIND") {
+            auto b = detail::deserialize_object<bind_data>(bt_deserialize<uintptr_t>(data));
+            if (proxy_bind(b, bind.size()))
+                bind.push_back(std::move(b));
+            return;
         }
     } else if (parts.size() == 2) {
         if (cmd == "START") {
@@ -315,6 +320,38 @@ void OxenMQ::proxy_control_message(std::vector<zmq::message_t>& parts) {
     }
     throw std::runtime_error("OxenMQ bug: Proxy received invalid control command: " +
             std::string{cmd} + " (" + std::to_string(parts.size()) + ")");
+}
+
+bool OxenMQ::proxy_bind(bind_data& b, size_t index) {
+    zmq::socket_t listener{context, zmq::socket_type::router};
+    setup_incoming_socket(listener, b.curve, pubkey, privkey, index);
+
+    bool good = true;
+    try {
+        listener.bind(b.address);
+    } catch (const zmq::error_t&) {
+        good = false;
+    }
+    if (b.on_bind) {
+        b.on_bind(good);
+        b.on_bind = nullptr;
+    }
+    if (!good) {
+        LMQ_LOG(warn, "OxenMQ failed to listen on ", b.address);
+        return false;
+    }
+
+    LMQ_LOG(info, "OxenMQ listening on ", b.address);
+
+    connections.push_back(std::move(listener));
+    auto conn_id = next_conn_id++;
+    conn_index_to_id.push_back(conn_id);
+    incoming_conn_index[conn_id] = connections.size() - 1;
+    b.index = connections.size() - 1;
+
+    pollitems_stale = true;
+
+    return true;
 }
 
 void OxenMQ::proxy_loop() {
@@ -364,27 +401,10 @@ void OxenMQ::proxy_loop() {
 #endif
 
     for (size_t i = 0; i < bind.size(); i++) {
-        auto& b = bind[i].second;
-        zmq::socket_t listener{context, zmq::socket_type::router};
-
-        setup_external_socket(listener);
-        listener.set(zmq::sockopt::zap_domain, bt_serialize(i));
-        if (b.curve) {
-            listener.set(zmq::sockopt::curve_server, true);
-            listener.set(zmq::sockopt::curve_publickey, pubkey);
-            listener.set(zmq::sockopt::curve_secretkey, privkey);
+        if (!proxy_bind(bind[i], i)) {
+            LMQ_LOG(warn, "OxenMQ failed to listen on ", bind[i].address);
+            throw zmq::error_t{};
         }
-        listener.set(zmq::sockopt::router_handover, true);
-        listener.set(zmq::sockopt::router_mandatory, true);
-
-        listener.bind(bind[i].first);
-        LMQ_LOG(info, "OxenMQ listening on ", bind[i].first);
-
-        connections.push_back(std::move(listener));
-        auto conn_id = next_conn_id++;
-        conn_index_to_id.push_back(conn_id);
-        incoming_conn_index[conn_id] = connections.size() - 1;
-        b.index = connections.size() - 1;
     }
 
 #ifndef _WIN32
@@ -393,13 +413,11 @@ void OxenMQ::proxy_loop() {
 
     // set socket gid / uid if it is provided
     if (SOCKET_GID != -1 or SOCKET_UID != -1) {
-        for(size_t i = 0; i < bind.size(); i++) {
-            const address addr(bind[i].first);
-            if(addr.ipc()) {
-                if(chown(addr.socket.c_str(), SOCKET_UID, SOCKET_GID) == -1) {
+        for (auto& b : bind) {
+            const address addr(b.address);
+            if (addr.ipc())
+                if (chown(addr.socket.c_str(), SOCKET_UID, SOCKET_GID) == -1)
                     throw std::runtime_error("cannot set group on " + addr.socket + ": " + strerror(errno));
-                }
-            }
         }
     }
 #endif

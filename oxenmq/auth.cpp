@@ -256,14 +256,14 @@ void OxenMQ::process_zap_requests() {
                 LMQ_LOG(error, "Bad ZAP authentication request: invalid auth domain '", auth_domain, "'");
                 status_code = "400";
                 status_text = "Unknown authentication domain: " + std::string{auth_domain};
-            } else if (bind[bind_id].second.curve
+            } else if (bind[bind_id].curve
                     ? !(frames.size() == 7 && view(frames[5]) == "CURVE")
                     : !(frames.size() == 6 && view(frames[5]) == "NULL")) {
                 LMQ_LOG(error, "Bad ZAP authentication request: invalid ",
-                        bind[bind_id].second.curve ? "CURVE" : "NULL", " authentication request");
+                        bind[bind_id].curve ? "CURVE" : "NULL", " authentication request");
                 status_code = "500";
                 status_text = "Invalid authentication request mechanism";
-            } else if (bind[bind_id].second.curve && frames[6].size() != 32) {
+            } else if (bind[bind_id].curve && frames[6].size() != 32) {
                 LMQ_LOG(error, "Bad ZAP authentication request: invalid request pubkey");
                 status_code = "500";
                 status_text = "Invalid public key size for CURVE authentication";
@@ -271,13 +271,13 @@ void OxenMQ::process_zap_requests() {
                 auto ip = view(frames[3]);
                 std::string_view pubkey;
                 bool sn = false;
-                if (bind[bind_id].second.curve) {
+                if (bind[bind_id].curve) {
                     pubkey = view(frames[6]);
                     sn = active_service_nodes.count(std::string{pubkey});
                 }
-                auto auth = bind[bind_id].second.allow(ip, pubkey, sn);
+                auto auth = bind[bind_id].allow(ip, pubkey, sn);
                 auto& user_id = response_vals[4];
-                if (bind[bind_id].second.curve) {
+                if (bind[bind_id].curve) {
                     user_id.reserve(64);
                     to_hex(pubkey.begin(), pubkey.end(), std::back_inserter(user_id));
                 }

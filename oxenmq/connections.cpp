@@ -67,6 +67,21 @@ void OxenMQ::setup_outgoing_socket(zmq::socket_t& socket, std::string_view remot
     // else let ZMQ pick a random one
 }
 
+
+void OxenMQ::setup_incoming_socket(zmq::socket_t& listener, bool curve, std::string_view pubkey, std::string_view privkey, size_t bind_index) {
+
+    setup_external_socket(listener);
+
+    listener.set(zmq::sockopt::zap_domain, bt_serialize(bind_index));
+    if (curve) {
+        listener.set(zmq::sockopt::curve_server, true);
+        listener.set(zmq::sockopt::curve_publickey, pubkey);
+        listener.set(zmq::sockopt::curve_secretkey, privkey);
+    }
+    listener.set(zmq::sockopt::router_handover, true);
+    listener.set(zmq::sockopt::router_mandatory, true);
+}
+
 // Deprecated versions:
 ConnectionID OxenMQ::connect_remote(std::string_view remote, ConnectSuccess on_connect,
         ConnectFailure on_failure, AuthLevel auth_level, std::chrono::milliseconds timeout) {
@@ -218,7 +233,7 @@ void OxenMQ::proxy_close_connection(size_t index, std::chrono::milliseconds ling
     update_connection_indices(pending_connects, index,
             [](auto& pc) -> size_t& { return std::get<size_t>(pc); });
     update_connection_indices(bind, index,
-            [](auto& b) -> size_t& { return b.second.index; });
+            [](auto& b) -> size_t& { return b.index; });
     update_connection_indices(incoming_conn_index, index,
             [](auto& oci) -> size_t& { return oci.second; });
     assert(index < conn_index_to_id.size());
