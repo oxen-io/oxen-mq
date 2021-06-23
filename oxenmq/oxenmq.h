@@ -345,10 +345,6 @@ private:
         /// SNs (since we know their pubkey -- we'll fail to connect if it doesn't match).
         bool service_node = false;
 
-        /// Set to true if we get an error while attempting to send to an outgoing peer to close the
-        /// connection the next time we prune idle/dead connections.
-        bool dead = false;
-
         /// The auth level of this peer, as returned by the AllowFunc for incoming connections or
         /// specified during outgoing connections.
         AuthLevel auth_level = AuthLevel::none;
