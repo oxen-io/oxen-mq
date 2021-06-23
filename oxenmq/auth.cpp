@@ -31,7 +31,7 @@ std::string zmtp_metadata(std::string_view key, std::string_view value) {
 }
 
 
-bool OxenMQ::proxy_check_auth(size_t conn_index, bool outgoing, const peer_info& peer,
+bool OxenMQ::proxy_check_auth(int64_t conn_id, bool outgoing, const peer_info& peer,
         zmq::message_t& cmd, const cat_call_t& cat_call, std::vector<zmq::message_t>& data) {
     auto command = view(cmd);
     std::string reply;
@@ -72,7 +72,7 @@ bool OxenMQ::proxy_check_auth(size_t conn_index, bool outgoing, const peer_info&
     }
 
     try {
-        send_message_parts(connections[conn_index], msgs);
+        send_message_parts(connections.at(conn_id), msgs);
     } catch (const zmq::error_t& err) {
         /* can't send: possibly already disconnected.  Ignore. */
         LMQ_LOG(debug, "Couldn't send auth failure message ", reply, " to peer [", to_hex(peer.pubkey), "]/", peer_address(cmd), ": ", err.what());
@@ -178,11 +178,11 @@ void OxenMQ::proxy_update_active_sns_clean(pubkey_set added, pubkey_set removed)
         auto range = peers.equal_range(c);
         for (auto it = range.first; it != range.second; ) {
             bool outgoing = it->second.outgoing();
-            size_t conn_index = it->second.conn_index;
+            auto conn_id = it->second.conn_id;
             it = peers.erase(it);
             if (outgoing) {
                 LMQ_LOG(debug, "Closing outgoing connection to ", c);
-                proxy_close_connection(conn_index, CLOSE_LINGER);
+                proxy_close_connection(conn_id, CLOSE_LINGER);
             }
         }
     }
