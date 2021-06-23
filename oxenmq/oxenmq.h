@@ -322,11 +322,11 @@ private:
     struct bind_data {
         std::string address;
         bool curve;
-        size_t index;
+        int64_t conn_id;
         AllowFunc allow;
         std::function<void(bool)> on_bind;
         bind_data(std::string addr, bool curve, AllowFunc allow, std::function<void(bool)> on_bind)
-            : address{std::move(addr)}, curve{curve}, index{0}, allow{std::move(allow)}, on_bind{std::move(on_bind)} {}
+            : address{std::move(addr)}, curve{curve}, conn_id{0}, allow{std::move(allow)}, on_bind{std::move(on_bind)} {}
     };
 
     /// Addresses on which we are listening (or, before start(), on which we will listen).
@@ -349,8 +349,8 @@ private:
         /// specified during outgoing connections.
         AuthLevel auth_level = AuthLevel::none;
 
-        /// The actual internal socket index through which this connection is established
-        size_t conn_index;
+        /// The socket id through which this connection is established
+        int64_t conn_id;
 
         /// Will be set to a non-empty routing prefix *if* one is necessary on the connection.  This
         /// is used only for SN peers (non-SN incoming connections don't have a peer_info record,
@@ -378,23 +378,15 @@ private:
     /// SN pubkey string.
     std::unordered_multimap<ConnectionID, peer_info> peers;
 
-    /// Maps connection indices (which can change) to ConnectionID values (which are permanent).
-    /// This is primarily for outgoing sockets, but incoming sockets are here too (with empty-route
-    /// (and thus unroutable) ConnectionIDs).
-    std::vector<ConnectionID> conn_index_to_id;
-
-    /// Maps listening socket ConnectionIDs to connection index values (these don't have peers
-    /// entries).  The keys here have empty routes (and thus aren't actually routable).
-    std::unordered_map<ConnectionID, size_t> incoming_conn_index;
-
-    /// The next ConnectionID value we should use (for non-SN connections).
-    std::atomic<long long> next_conn_id{1};
+    /// The next ConnectionID value we should use (for outgoing, non-SN connections).
+    std::atomic<int64_t> next_conn_id{1};
 
     /// Remotes we are still trying to connect to (via connect_remote(), not connect_sn()); when
     /// we pass handshaking we move them out of here and (if set) trigger the on_connect callback.
     /// Unlike regular node-to-node peers, these have an extra "HI"/"HELLO" sequence that we used
     /// before we consider ourselves connected to the remote.
-    std::list<std::tuple<size_t /*conn_index*/, long long /*conn_id*/, std::chrono::steady_clock::time_point, ConnectSuccess, ConnectFailure>> pending_connects;
+    std::list<std::tuple<int64_t /*conn_id*/, std::chrono::steady_clock::time_point, ConnectSuccess, ConnectFailure>>
+        pending_connects;
 
     /// Pending requests that have been sent out but not yet received a matching "REPLY".  The value
     /// is the timeout timestamp.
@@ -404,20 +396,18 @@ private:
     /// different polling sockets the proxy handler polls: this always contains some internal
     /// sockets for inter-thread communication followed by a pollitem for every connection (both
     /// incoming and outgoing) in `connections`.  We rebuild this from `connections` whenever
-    /// `pollitems_stale` is set to true.
+    /// `connections_updated` is set to true.
     std::vector<zmq::pollitem_t> pollitems;
-
-    /// If set then rebuild pollitems before the next poll (set when establishing new connections or
-    /// closing existing ones).
-    bool pollitems_stale = true;
 
     /// Rebuilds pollitems to include the internal sockets + all incoming/outgoing sockets.
     void rebuild_pollitems();
 
-    /// The connections to/from remotes we currently have open, both listening and outgoing.  Each
-    /// element [i] here corresponds to an the pollitem_t at pollitems[i+1+poll_internal_size].
-    /// (Ideally we'd use one structure, but zmq requires the pollitems be in contiguous storage).
-    std::vector<zmq::socket_t> connections;
+    /// The connections to/from remotes we currently have open, both listening and outgoing.
+    std::map<int64_t, zmq::socket_t> connections;
+
+    /// If set then it indicates a change in `connections` which means we need to rebuild pollitems
+    /// and stop using existing connections iterators.
+    bool connections_updated = true;
 
     /// Socket we listen on to receive control messages in the proxy thread. Each thread has its own
     /// internal "control" connection (returned by `get_control_socket()`) to this socket used to
@@ -477,17 +467,17 @@ private:
 
     void proxy_schedule_reply_job(std::function<void()> f);
 
-    /// Looks up a peers element given a connect index (for outgoing connections where we already
+    /// Looks up a peers element given a connect id (for outgoing connections where we already
     /// knew the pubkey and SN status) or an incoming zmq message (which has the pubkey and sn
     /// status metadata set during initial connection authentication), creating a new peer element
     /// if required.
-    decltype(peers)::iterator proxy_lookup_peer(int conn_index, zmq::message_t& msg);
+    decltype(peers)::iterator proxy_lookup_peer(int64_t conn_id, zmq::message_t& msg);
 
     /// Handles built-in primitive commands in the proxy thread for things like "BYE" that have to
     /// be done in the proxy thread anyway (if we forwarded to a worker the worker would just have
     /// to send an instruction back to the proxy to do it).  Returns true if one was handled, false
     /// to continue with sending to a worker.
-    bool proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>& parts);
+    bool proxy_handle_builtin(int64_t conn_id, zmq::socket_t& sock, std::vector<zmq::message_t>& parts);
 
     struct run_info;
     /// Gets an idle worker's run_info and removes the worker from the idle worker list.  If there
@@ -502,7 +492,7 @@ private:
     void proxy_run_worker(run_info& run);
 
     /// Sets up a job for a worker then signals the worker (or starts a worker thread)
-    void proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& parts);
+    void proxy_to_worker(int64_t conn_id, zmq::socket_t& sock, std::vector<zmq::message_t>& parts);
 
     /// proxy thread command handlers for commands sent from the outer object QUIT.  This doesn't
     /// get called immediately on a QUIT command: the QUIT commands tells workers to quit, then this
@@ -510,7 +500,7 @@ private:
     void proxy_quit();
 
     /// proxy handler for binding to addresses given via listen_*().
-    bool proxy_bind(bind_data& bind, size_t index);
+    bool proxy_bind(bind_data& bind, size_t bind_index);
 
     // Common setup code for setting up an external (incoming or outgoing) socket.
     void setup_external_socket(zmq::socket_t& socket);
@@ -603,7 +593,7 @@ private:
     void proxy_expire_idle_peers();
 
     /// Helper method to actually close a remote connection and update the stuff that needs updating.
-    void proxy_close_connection(size_t removed, std::chrono::milliseconds linger);
+    void proxy_close_connection(int64_t removed, std::chrono::milliseconds linger);
 
     /// Closes an outgoing connection immediately, updates internal variables appropriately.
     /// Returns the next iterator (the original may or may not be removed from peers, depending on
@@ -638,7 +628,7 @@ private:
 
     /// Checks a peer's authentication level.  Returns true if allowed, warns and returns false if
     /// not.
-    bool proxy_check_auth(size_t conn_index, bool outgoing, const peer_info& peer,
+    bool proxy_check_auth(int64_t conn_id, bool outgoing, const peer_info& peer,
             zmq::message_t& command, const cat_call_t& cat_call, std::vector<zmq::message_t>& data);
 
     struct injected_task {
