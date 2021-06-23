@@ -320,15 +320,17 @@ private:
     zmq::socket_t zap_auth{context, zmq::socket_type::rep};
 
     struct bind_data {
+        std::string address;
         bool curve;
         size_t index;
         AllowFunc allow;
-        bind_data(bool curve, AllowFunc allow)
-            : curve{curve}, index{0}, allow{std::move(allow)} {}
+        std::function<void(bool)> on_bind;
+        bind_data(std::string addr, bool curve, AllowFunc allow, std::function<void(bool)> on_bind)
+            : address{std::move(addr)}, curve{curve}, index{0}, allow{std::move(allow)}, on_bind{std::move(on_bind)} {}
     };
 
     /// Addresses on which we are listening (or, before start(), on which we will listen).
-    std::vector<std::pair<std::string, bind_data>> bind;
+    std::vector<bind_data> bind;
 
     /// Info about a peer's established connection with us.  Note that "established" means both
     /// connected and authenticated.  Note that we only store peer info data for SN connections (in
@@ -507,6 +509,9 @@ private:
     /// gets called after all works have done so.
     void proxy_quit();
 
+    /// proxy handler for binding to addresses given via listen_*().
+    bool proxy_bind(bind_data& bind, size_t index);
+
     // Common setup code for setting up an external (incoming or outgoing) socket.
     void setup_external_socket(zmq::socket_t& socket);
 
@@ -515,6 +520,9 @@ private:
     // be unencrypted and unauthenticated.  Note that the remote end must be in the same mode (i.e.
     // either accepting curve connections, or not accepting curve).
     void setup_outgoing_socket(zmq::socket_t& socket, std::string_view remote_pubkey, bool use_ephemeral_routing_id);
+
+    /// Sets the various properties on an listening socket prior to binding.
+    void setup_incoming_socket(zmq::socket_t& socket, bool curve, std::string_view pubkey, std::string_view privkey, size_t bind_index);
 
     /// Common connection implementation used by proxy_connect/proxy_send.  Returns the socket and,
     /// if a routing prefix is needed, the required prefix (or an empty string if not needed).  For
@@ -971,14 +979,26 @@ public:
      * will be encrypted.  `allow_connection` is invoked for any incoming connections on this
      * address to determine the incoming remote's access and authentication level.
      *
+     * If called before `start()` then the given bind address is mandatory and start() will throw if
+     * the bind fails.  If called after `start()` then the bind may fail (in which case the callback
+     * will be used to notify of the failure).
+     *
      * @param bind address - can be any string zmq supports; typically a tcp IP/port combination
      * such as: "tcp://\*:4567" or "tcp://1.2.3.4:5678".
      *
      * @param allow_connection function to call to determine whether to allow the connection and, if
-     * so, the authentication level it receives.  If omitted the default returns AuthLevel::none
-     * access.
+     * so, the authentication level it receives.  If omitted (or null) the default returns
+     * AuthLevel::none access for all connections.
+     *
+     * @param on_bind function to call when the port has been successfully opened or failed to
+     * open.  For addresses set up before .start() this will be called during `start()` itself; for
+     * post-start listens this will be called from the proxy thread when it opens the new port.
+     * Note that this function must is called directly from the proxy thread and so should be fast
+     * and non-blocking.
      */
-    void listen_curve(std::string bind, AllowFunc allow_connection = [](auto, auto, auto) { return AuthLevel::none; });
+    void listen_curve(std::string bind,
+            AllowFunc allow_connection = nullptr,
+            std::function<void(bool success)> on_bind = nullptr);
 
     /** Start listening on the given bind address in unauthenticated plain text mode.  Incoming
      * connections can come from anywhere.  `allow_connection` is invoked for any incoming
@@ -989,10 +1009,14 @@ public:
      * such as: "tcp://\*:4567" or "tcp://1.2.3.4:5678".
      *
      * @param allow_connection function to call to determine whether to allow the connection and, if
-     * so, the authentication level it receives.  If omitted the default returns AuthLevel::none
-     * access.
+     * so, the authentication level it receives.  If omitted (or null) the default returns
+     * AuthLevel::none access for all connections.
+     *
+     * @param on_result called after binding with the result; see `listen_curve` for details.
      */
-    void listen_plain(std::string bind, AllowFunc allow_connection = [](auto, auto, auto) { return AuthLevel::none; });
+    void listen_plain(std::string bind,
+            AllowFunc allow_connection = nullptr,
+            std::function<void(bool success)> on_bind = nullptr);
 
     /**
      * Try to initiate a connection to the given SN in anticipation of needing a connection in the
@@ -1446,8 +1470,8 @@ namespace connect_option {
 /// Typically use: `connect_options::ephemeral_routing_id{}` or `connect_options::ephemeral_routing_id{false}`.
 struct ephemeral_routing_id {
     bool use_ephemeral_routing_id = true;
-    // Constructor; default construction gives you pubkey routing, but the bool parameter can be
-    // specified as false to explicitly disable the pubkey routing flag.
+    // Constructor; default construction gives you ephemeral routing id, but the bool parameter can
+    // be specified as false to use pubkey routing flag.
     explicit ephemeral_routing_id(bool use = true) : use_ephemeral_routing_id{use} {}
 };
 
