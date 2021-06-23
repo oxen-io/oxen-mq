@@ -134,7 +134,7 @@ TEST_CASE("post-start listening", "[connect][listen]") {
     server.add_category("x", AuthLevel::none)
         .add_request_command("y", [&](Message& m) { m.send_reply("hi", m.data[0]); });
     server.start();
-    std::atomic<int> listens;
+    std::atomic<int> listens = 0;
     auto listen_curve = random_localhost();
     server.listen_curve(listen_curve, nullptr, [&](bool success) { if (success) listens++; });
     auto listen_plain = random_localhost();
