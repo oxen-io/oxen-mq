@@ -563,10 +563,8 @@ void OxenMQ::proxy_loop() {
                 continue;
             }
 
-            if (!proxy_handle_builtin(id, sock, parts)) {
-                LMQ_LOG(warn, "proxying to worker from connection ", id);
+            if (!proxy_handle_builtin(id, sock, parts))
                 proxy_to_worker(id, sock, parts);
-            }
 
             if (connections_updated) {
                 // If connections got updated then our points are stale, to restart the proxy loop;
