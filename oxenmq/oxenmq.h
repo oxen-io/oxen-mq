@@ -1364,6 +1364,10 @@ struct data_parts_impl {
 template <typename InputIt, typename = std::enable_if_t<std::is_convertible_v<decltype(*std::declval<InputIt>()), std::string_view>>>
 data_parts_impl<InputIt> data_parts(InputIt begin, InputIt end) { return {std::move(begin), std::move(end)}; }
 
+/// Shortcut for send_option::data_parts(container.begin(), container.end())
+template <typename Container>
+auto data_parts(const Container& c) { return data_parts(c.begin(), c.end()); }
+
 /// Specifies a connection hint when passed in to send().  If there is no current connection to the
 /// peer then the hint is used to save a call to the SNRemoteAddress to get the connection location.
 /// (Note that there is no guarantee that the given hint will be used or that a SNRemoteAddress call
