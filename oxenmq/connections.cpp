@@ -174,6 +174,7 @@ OxenMQ::proxy_connect_sn(std::string_view remote, std::string_view connect_hint,
     p.idle_expiry = keep_alive;
     p.activity();
     connections_updated = true;
+    outgoing_sn_conns.emplace_hint(outgoing_sn_conns.end(), p.conn_id, ConnectionID{remote});
     auto it = connections.emplace_hint(connections.end(), p.conn_id, std::move(socket));
 
     return {&it->second, ""s};
@@ -217,6 +218,8 @@ void OxenMQ::proxy_close_connection(int64_t id, std::chrono::milliseconds linger
     it->second.set(zmq::sockopt::linger, linger > 0ms ? (int) linger.count() : 0);
     connections.erase(it);
     connections_updated = true;
+
+    outgoing_sn_conns.erase(id);
 }
 
 void OxenMQ::proxy_expire_idle_peers() {

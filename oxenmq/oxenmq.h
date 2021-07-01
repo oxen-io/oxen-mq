@@ -378,6 +378,11 @@ private:
     /// SN pubkey string.
     std::unordered_multimap<ConnectionID, peer_info> peers;
 
+    /// For outgoing connections to service nodes `peers` contains the service node connection id,
+    /// but we sometimes need to be able to get the peer info from a numeric connection id (for
+    /// example, for incoming messages on a connection we made); this map lets us do that.
+    std::map<int64_t, ConnectionID> outgoing_sn_conns;
+
     /// The next ConnectionID value we should use (for outgoing, non-SN connections).
     std::atomic<int64_t> next_conn_id{1};
 
@@ -1358,6 +1363,10 @@ struct data_parts_impl {
 /// something convertible to a string_view).
 template <typename InputIt, typename = std::enable_if_t<std::is_convertible_v<decltype(*std::declval<InputIt>()), std::string_view>>>
 data_parts_impl<InputIt> data_parts(InputIt begin, InputIt end) { return {std::move(begin), std::move(end)}; }
+
+/// Shortcut for send_option::data_parts(container.begin(), container.end())
+template <typename Container>
+auto data_parts(const Container& c) { return data_parts(c.begin(), c.end()); }
 
 /// Specifies a connection hint when passed in to send().  If there is no current connection to the
 /// peer then the hint is used to save a call to the SNRemoteAddress to get the connection location.
