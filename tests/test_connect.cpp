@@ -446,3 +446,61 @@ TEST_CASE("SN single worker test", "[connect][worker]") {
     }
 
 }
+
+TEST_CASE("SN backchatter", "[connect][sn]") {
+    // When we have a SN connection A -> B and then B sends a message to A on that existing
+    // connection, A should see it as coming from B.
+    std::vector<std::unique_ptr<OxenMQ>> omq;
+    std::vector<std::string> pubkey, privkey;
+    std::unordered_map<std::string, std::string> conn;
+    REQUIRE(sodium_init() != -1);
+    for (int i = 0; i < 2; i++) {
+        pubkey.emplace_back();
+        privkey.emplace_back();
+        pubkey[i].resize(crypto_box_PUBLICKEYBYTES);
+        privkey[i].resize(crypto_box_SECRETKEYBYTES);
+        crypto_box_keypair(reinterpret_cast<unsigned char*>(&pubkey[i][0]), reinterpret_cast<unsigned char*>(&privkey[i][0]));
+        conn.emplace(pubkey[i], random_localhost());
+    }
+
+    for (int i = 0; i < pubkey.size(); i++) {
+        omq.push_back(std::make_unique<OxenMQ>(
+            pubkey[i], privkey[i], true,
+            [conn](auto pk) { auto it = conn.find((std::string) pk); if (it != conn.end()) return it->second; return ""s; },
+            get_logger("S" + std::to_string(i) + "» "),
+            LogLevel::trace
+        ));
+        auto& server = *omq.back();
+
+        server.listen_curve(conn[pubkey[i]]);
+        server.set_active_sns({pubkey.begin(), pubkey.end()});
+    }
+    std::string f;
+    omq[0]->add_category("a", Access{AuthLevel::none, true})
+        .add_command("a", [&](Message& m) {
+            m.oxenmq.send(m.conn, "b.b", "abc");
+            //m.send_back("b.b", "abc");
+        })
+        .add_command("z", [&](Message& m) {
+            auto lock = catch_lock();
+            f = m.data[0];
+        });
+    omq[1]->add_category("b", Access{AuthLevel::none, true})
+        .add_command("b", [&](Message& m) {
+            {
+                auto lock = catch_lock();
+                UNSCOPED_INFO("b.b from conn " << m.conn);
+            }
+            m.send_back("a.z", m.data[0]);
+        });
+
+    for (auto& server : omq)
+        server->start();
+
+    auto c = omq[1]->connect_sn(pubkey[0]);
+    omq[1]->send(c, "a.a");
+    std::this_thread::sleep_for(50ms);
+
+    auto lock = catch_lock();
+    REQUIRE(f == "abc");
+}

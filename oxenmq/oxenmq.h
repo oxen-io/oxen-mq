@@ -378,6 +378,11 @@ private:
     /// SN pubkey string.
     std::unordered_multimap<ConnectionID, peer_info> peers;
 
+    /// For outgoing connections to service nodes `peers` contains the service node connection id,
+    /// but we sometimes need to be able to get the peer info from a numeric connection id (for
+    /// example, for incoming messages on a connection we made); this map lets us do that.
+    std::map<int64_t, ConnectionID> outgoing_sn_conns;
+
     /// The next ConnectionID value we should use (for outgoing, non-SN connections).
     std::atomic<int64_t> next_conn_id{1};
 

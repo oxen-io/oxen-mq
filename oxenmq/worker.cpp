@@ -283,7 +283,11 @@ void OxenMQ::proxy_to_worker(int64_t conn_id, zmq::socket_t& sock, std::vector<z
     if (!outgoing) tmp_peer.route = parts[0].to_string();
     peer_info* peer = nullptr;
     if (outgoing) {
-        auto it = peers.find(conn_id);
+        auto snit = outgoing_sn_conns.find(conn_id);
+        auto it = snit != outgoing_sn_conns.end()
+            ? peers.find(snit->second)
+            : peers.find(conn_id);
+
         if (it == peers.end()) {
             LMQ_LOG(warn, "Internal error: connection id ", conn_id, " not found");
             return;
