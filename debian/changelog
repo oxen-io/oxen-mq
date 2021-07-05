@@ -1,3 +1,25 @@
+oxenmq (1.2.6-1~deb10) buster; urgency=medium
+
+  * Rediff patches
+  * update lib version
+  * Rediff patches
+  * Update gbp main branch name to stable
+  * Add timer cancellation & timer tests
+  * Bump project version in dev branch (for next release)
+  * Add thread-safe timerid assignment version of add_timer()
+  * Minor doc fix
+  * Add `is_unsigned_integer` to bt_{dict,list}_consumer
+  * Loki->Oxen rebrand the README
+  * Add support for listening after startup
+  * Miscellaneous small test suite fixes/improvements
+  * Fix uninitialized value in post-start listen test
+  * Simplify conn index handling (#41)
+  * Fix messages coming back on an outgoing connection
+  * Add a single container version of `send_option::data_parts`
+  * Remove debug
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Mon, 05 Jul 2021 18:11:08 -0300
+
 oxenmq (1.2.5-1~deb10) buster; urgency=medium
 
   * Add connect_option::*; allow per-connection pubkey-based routing setting
