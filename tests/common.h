@@ -1,6 +1,7 @@
 #pragma once
 #include "oxenmq/oxenmq.h"
 #include <catch2/catch.hpp>
+#include <chrono>
 
 using namespace oxenmq;
 
@@ -16,14 +17,23 @@ inline std::string random_localhost() {
 }
 
 
-/// Waits up to 100ms for something to happen.
+// Catch2 macros aren't thread safe, so guard with a mutex
+inline std::unique_lock<std::mutex> catch_lock() {
+    static std::mutex mutex;
+    return std::unique_lock<std::mutex>{mutex};
+}
+
+/// Waits up to 200ms for something to happen.
 template <typename Func>
 inline void wait_for(Func f) {
-    for (int i = 0; i < 10; i++) {
+    auto start = std::chrono::steady_clock::now();
+    for (int i = 0; i < 20; i++) {
         if (f())
             break;
         std::this_thread::sleep_for(10ms);
     }
+    auto lock = catch_lock();
+    UNSCOPED_INFO("done waiting after " << (std::chrono::steady_clock::now() - start).count() << "ns");
 }
 
 /// Waits on an atomic bool for up to 100ms for an initial connection, which is more than enough
@@ -34,12 +44,6 @@ inline void wait_for_conn(std::atomic<bool> &c) {
 
 /// Waits enough time for us to receive a reply from a localhost remote.
 inline void reply_sleep() { std::this_thread::sleep_for(10ms); }
-
-// Catch2 macros aren't thread safe, so guard with a mutex
-inline std::unique_lock<std::mutex> catch_lock() {
-    static std::mutex mutex;
-    return std::unique_lock<std::mutex>{mutex};
-}
 
 inline OxenMQ::Logger get_logger(std::string prefix = "") {
     std::string me = "tests/common.h";
