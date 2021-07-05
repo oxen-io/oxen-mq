@@ -30,9 +30,9 @@ void OxenMQ::rebuild_pollitems() {
     add_pollitem(pollitems, workers_socket);
     add_pollitem(pollitems, zap_auth);
 
-    for (auto& s : connections)
+    for (auto& [id, s] : connections)
         add_pollitem(pollitems, s);
-    pollitems_stale = false;
+    connections_updated = false;
 }
 
 void OxenMQ::setup_external_socket(zmq::socket_t& socket) {
@@ -65,6 +65,21 @@ void OxenMQ::setup_outgoing_socket(zmq::socket_t& socket, std::string_view remot
         socket.set(zmq::sockopt::routing_id, routing_id);
     }
     // else let ZMQ pick a random one
+}
+
+
+void OxenMQ::setup_incoming_socket(zmq::socket_t& listener, bool curve, std::string_view pubkey, std::string_view privkey, size_t bind_index) {
+
+    setup_external_socket(listener);
+
+    listener.set(zmq::sockopt::zap_domain, bt_serialize(bind_index));
+    if (curve) {
+        listener.set(zmq::sockopt::curve_server, true);
+        listener.set(zmq::sockopt::curve_publickey, pubkey);
+        listener.set(zmq::sockopt::curve_secretkey, privkey);
+    }
+    listener.set(zmq::sockopt::router_handover, true);
+    listener.set(zmq::sockopt::router_mandatory, true);
 }
 
 // Deprecated versions:
@@ -113,7 +128,7 @@ OxenMQ::proxy_connect_sn(std::string_view remote, std::string_view connect_hint,
             }
             peer->activity();
         }
-        return {&connections[peer->conn_index], peer->route};
+        return {&connections[peer->conn_id], peer->route};
     } else if (optional || incoming_only) {
         LMQ_LOG(debug, "proxy asked for optional or incoming connection, but no appropriate connection exists so aborting connection attempt");
         return {nullptr, ""s};
@@ -151,18 +166,18 @@ OxenMQ::proxy_connect_sn(std::string_view remote, std::string_view connect_hint,
         LMQ_LOG(error, "Outgoing connection to ", addr, " failed: ", e.what());
         return {nullptr, ""s};
     }
-    peer_info p{};
+
+    auto& p = peers.emplace(std::move(remote_cid), peer_info{})->second;
     p.service_node = true;
     p.pubkey = std::string{remote};
-    p.conn_index = connections.size();
+    p.conn_id = next_conn_id++;
     p.idle_expiry = keep_alive;
     p.activity();
-    conn_index_to_id.push_back(remote_cid);
-    peers.emplace(std::move(remote_cid), std::move(p));
-    connections.push_back(std::move(socket));
-    pollitems_stale = true;
+    connections_updated = true;
+    outgoing_sn_conns.emplace_hint(outgoing_sn_conns.end(), p.conn_id, ConnectionID{remote});
+    auto it = connections.emplace_hint(connections.end(), p.conn_id, std::move(socket));
 
-    return {&connections.back(), ""s};
+    return {&it->second, ""s};
 }
 
 std::pair<zmq::socket_t *, std::string> OxenMQ::proxy_connect_sn(bt_dict_consumer data) {
@@ -190,39 +205,21 @@ std::pair<zmq::socket_t *, std::string> OxenMQ::proxy_connect_sn(bt_dict_consume
     return proxy_connect_sn(remote_pk, hint, optional, incoming_only, outgoing_only, ephemeral_rid, keep_alive);
 }
 
-template <typename Container, typename AccessIndex>
-void update_connection_indices(Container& c, size_t index, AccessIndex get_index) {
-    for (auto it = c.begin(); it != c.end(); ) {
-        size_t& i = get_index(*it);
-        if (index == i) {
-            it = c.erase(it);
-            continue;
-        }
-        if (i > index)
-            --i;
-        ++it;
-    }
-}
-
 /// Closes outgoing connections and removes all references.  Note that this will call `erase()`
 /// which can invalidate iterators on the various connection containers - if you don't want that,
 /// delete it first so that the container won't contain the element being deleted.
-void OxenMQ::proxy_close_connection(size_t index, std::chrono::milliseconds linger) {
-    connections[index].set(zmq::sockopt::linger, linger > 0ms ? (int) linger.count() : 0);
-    pollitems_stale = true;
-    connections.erase(connections.begin() + index);
+void OxenMQ::proxy_close_connection(int64_t id, std::chrono::milliseconds linger) {
+    auto it = connections.find(id);
+    if (it == connections.end()) {
+        LMQ_LOG(warn, "internal error: connection to close (", id, ") doesn't exist!");
+        return;
+    }
+    LMQ_LOG(debug, "Closing conn ", id);
+    it->second.set(zmq::sockopt::linger, linger > 0ms ? (int) linger.count() : 0);
+    connections.erase(it);
+    connections_updated = true;
 
-    LMQ_LOG(debug, "Closing conn index ", index);
-    update_connection_indices(peers, index,
-            [](auto& p) -> size_t& { return p.second.conn_index; });
-    update_connection_indices(pending_connects, index,
-            [](auto& pc) -> size_t& { return std::get<size_t>(pc); });
-    update_connection_indices(bind, index,
-            [](auto& b) -> size_t& { return b.second.index; });
-    update_connection_indices(incoming_conn_index, index,
-            [](auto& oci) -> size_t& { return oci.second; });
-    assert(index < conn_index_to_id.size());
-    conn_index_to_id.erase(conn_index_to_id.begin() + index);
+    outgoing_sn_conns.erase(id);
 }
 
 void OxenMQ::proxy_expire_idle_peers() {
@@ -234,8 +231,8 @@ void OxenMQ::proxy_expire_idle_peers() {
                 LMQ_LOG(debug, "Closing outgoing connection to ", it->first, ": idle time (",
                         std::chrono::duration_cast<std::chrono::milliseconds>(idle).count(), "ms) reached connection timeout (",
                         info.idle_expiry.count(), "ms)");
-                ++it; // The below is going to delete our current element
-                proxy_close_connection(info.conn_index, CLOSE_LINGER);
+                proxy_close_connection(info.conn_id, CLOSE_LINGER);
+                it = peers.erase(it);
             } else {
                 LMQ_LOG(trace, "Not closing ", it->first, ": ", std::chrono::duration_cast<std::chrono::milliseconds>(idle).count(),
                         "ms <= ", info.idle_expiry.count(), "ms");
@@ -264,9 +261,10 @@ void OxenMQ::proxy_conn_cleanup() {
     for (auto it = pending_connects.begin(); it != pending_connects.end(); ) {
         auto& pc = *it;
         if (std::get<std::chrono::steady_clock::time_point>(pc) < now) {
-            job([cid = ConnectionID{std::get<long long>(pc)}, callback = std::move(std::get<ConnectFailure>(pc))] { callback(cid, "connection attempt timed out"); });
+            auto id = std::get<int64_t>(pc);
+            job([cid = ConnectionID{id}, callback = std::move(std::get<ConnectFailure>(pc))] { callback(cid, "connection attempt timed out"); });
             it = pending_connects.erase(it); // Don't let the below erase it (because it invalidates iterators)
-            proxy_close_connection(std::get<size_t>(pc), CLOSE_LINGER);
+            proxy_close_connection(id, CLOSE_LINGER);
         } else {
             ++it;
         }
@@ -322,8 +320,6 @@ void OxenMQ::proxy_connect_remote(bt_dict_consumer data) {
 
     LMQ_LOG(debug, "Establishing remote connection to ", remote, remote_pubkey.empty() ? " (NULL auth)" : " via CURVE expecting pubkey " + to_hex(remote_pubkey));
 
-    assert(conn_index_to_id.size() == connections.size());
-
     zmq::socket_t sock{context, zmq::socket_type::dealer};
     try {
         setup_outgoing_socket(sock, remote_pubkey, ephemeral_rid);
@@ -335,23 +331,19 @@ void OxenMQ::proxy_connect_remote(bt_dict_consumer data) {
         return;
     }
 
-    connections.push_back(std::move(sock));
-    pollitems_stale = true;
+    auto &s = connections.emplace_hint(connections.end(), conn_id, std::move(sock))->second;
+    connections_updated = true;
     LMQ_LOG(debug, "Opened new zmq socket to ", remote, ", conn_id ", conn_id, "; sending HI");
-    send_direct_message(connections.back(), "HI");
-    pending_connects.emplace_back(connections.size()-1, conn_id, std::chrono::steady_clock::now() + timeout,
+    send_direct_message(s, "HI");
+    pending_connects.emplace_back(conn_id, std::chrono::steady_clock::now() + timeout,
             std::move(on_connect), std::move(on_failure));
-    peer_info peer;
+    auto& peer = peers.emplace(ConnectionID{conn_id, remote_pubkey}, peer_info{})->second;
     peer.pubkey = std::move(remote_pubkey);
     peer.service_node = false;
     peer.auth_level = auth_level;
-    peer.conn_index = connections.size() - 1;
-    ConnectionID conn{conn_id, peer.pubkey};
-    conn_index_to_id.push_back(conn);
-    assert(connections.size() == conn_index_to_id.size());
+    peer.conn_id = conn_id;
     peer.idle_expiry = 24h * 10 * 365; // "forever"
     peer.activity();
-    peers.emplace(std::move(conn), std::move(peer));
 }
 
 void OxenMQ::proxy_disconnect(bt_dict_consumer data) {
@@ -377,7 +369,8 @@ void OxenMQ::proxy_disconnect(ConnectionID conn, std::chrono::milliseconds linge
         auto& peer = it->second;
         if (peer.outgoing()) {
             LMQ_LOG(debug, "Closing outgoing connection to ", conn);
-            proxy_close_connection(peer.conn_index, linger);
+            proxy_close_connection(peer.conn_id, linger);
+            peers.erase(it);
             return;
         }
     }

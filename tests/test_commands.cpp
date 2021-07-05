@@ -173,18 +173,26 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
 
     server.add_category("hey google", Access{AuthLevel::none});
     server.add_request_command("hey google", "remember", [&](Message& m) {
-            auto l = catch_lock();
-            subscribers.emplace_back(m.conn, std::string{m.data[0]});
+            bool bd;
+            {
+                auto l = catch_lock();
+                subscribers.emplace_back(m.conn, std::string{m.data[0]});
+                bd = (bool) backdoor;
+            }
             m.send_reply("Okay, I'll remember that.");
 
-            if (backdoor)
+            if (bd)
                 m.oxenmq.send(backdoor, "backdoor.data", m.data[0]);
     });
     server.add_command("hey google", "recall", [&](Message& m) {
-            auto l = catch_lock();
-            for (auto& s : subscribers) {
-                server.send(s.first, "personal.detail", s.second);
+            decltype(subscribers) subs;
+            {
+                auto l = catch_lock();
+                subs = subscribers;
             }
+
+            for (auto& s : subs)
+                server.send(s.first, "personal.detail", s.second);
     });
     server.add_command("hey google", "install backdoor", [&](Message& m) {
             auto l = catch_lock();
@@ -363,7 +371,7 @@ TEST_CASE("send failure callbacks", "[commands][queue_full]") {
     }
 }
 
-TEST_CASE("data parts", "[send][data_parts]") {
+TEST_CASE("data parts", "[commands][send][data_parts]") {
     std::string listen = random_localhost();
     OxenMQ server{
         "", "", // generate ephemeral keys
@@ -446,7 +454,7 @@ TEST_CASE("data parts", "[send][data_parts]") {
     }
 }
 
-TEST_CASE("deferred replies", "[send][deferred]") {
+TEST_CASE("deferred replies", "[commands][send][deferred]") {
     std::string listen = random_localhost();
     OxenMQ server{
         "", "", // generate ephemeral keys
@@ -461,9 +469,9 @@ TEST_CASE("deferred replies", "[send][deferred]") {
     server.add_request_command("public", "echo", [&](Message& m) {
         std::string msg = m.data.empty() ? ""s : std::string{m.data.front()};
         std::thread t{[send=m.send_later(), msg=std::move(msg)] {
-            { auto lock = catch_lock(); INFO("sleeping"); }
+            { auto lock = catch_lock(); UNSCOPED_INFO("sleeping"); }
             std::this_thread::sleep_for(50ms);
-            { auto lock = catch_lock(); INFO("sending"); }
+            { auto lock = catch_lock(); UNSCOPED_INFO("sending"); }
             send.reply(msg);
         }};
         t.detach();
@@ -472,8 +480,8 @@ TEST_CASE("deferred replies", "[send][deferred]") {
     server.start();
 
     OxenMQ client(
-        [](LogLevel, const char* file, int line, std::string msg) { std::cerr << file << ":" << line << " --C-- " << msg << "\n"; }
-        );
+        get_logger("C» "),
+        LogLevel::trace);
     //client.log_level(LogLevel::trace);
 
     client.start();
