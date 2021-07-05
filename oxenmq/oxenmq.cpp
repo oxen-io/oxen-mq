@@ -232,12 +232,6 @@ void OxenMQ::start() {
     if (proxy_thread.joinable())
         throw std::logic_error("Cannot call start() multiple times!");
 
-    // If we're not binding to anything then we don't listen, i.e. we can only establish outbound
-    // connections.  Don't allow this if we are in service_node mode because, if we aren't
-    // listening, we are useless as a service node.
-    if (bind.empty() && local_service_node)
-        throw std::invalid_argument{"Cannot create a service node listener with no address(es) to bind"};
-
     LMQ_LOG(info, "Initializing OxenMQ ", bind.empty() ? "remote-only" : "listener", " with pubkey ", to_hex(pubkey));
 
     int zmq_socket_limit = context.get(zmq::ctxopt::socket_limit);
@@ -267,20 +261,22 @@ void OxenMQ::start() {
     LMQ_LOG(debug, "Proxy thread is ready");
 }
 
-void OxenMQ::listen_curve(std::string bind_addr, AllowFunc allow_connection) {
-    // TODO: there's no particular reason we can't start listening after starting up; just needs to
-    // be implemented.  (But if we can start we'll probably also want to be able to stop, so it's
-    // more than just binding that needs implementing).
-    check_not_started(proxy_thread, "start listening");
-
-    bind.emplace_back(std::move(bind_addr), bind_data{true, std::move(allow_connection)});
+void OxenMQ::listen_curve(std::string bind_addr, AllowFunc allow_connection, std::function<void(bool)> on_bind) {
+    if (!allow_connection) allow_connection = [](auto, auto, auto) { return AuthLevel::none; };
+    bind_data d{std::move(bind_addr), true, std::move(allow_connection), std::move(on_bind)};
+    if (proxy_thread.joinable())
+        detail::send_control(get_control_socket(), "BIND", bt_serialize(detail::serialize_object(std::move(d))));
+    else
+        bind.push_back(std::move(d));
 }
 
-void OxenMQ::listen_plain(std::string bind_addr, AllowFunc allow_connection) {
-    // TODO: As above.
-    check_not_started(proxy_thread, "start listening");
-
-    bind.emplace_back(std::move(bind_addr), bind_data{false, std::move(allow_connection)});
+void OxenMQ::listen_plain(std::string bind_addr, AllowFunc allow_connection, std::function<void(bool)> on_bind) {
+    if (!allow_connection) allow_connection = [](auto, auto, auto) { return AuthLevel::none; };
+    bind_data d{std::move(bind_addr), false, std::move(allow_connection), std::move(on_bind)};
+    if (proxy_thread.joinable())
+        detail::send_control(get_control_socket(), "BIND", bt_serialize(detail::serialize_object(std::move(d))));
+    else
+        bind.push_back(std::move(d));
 }
 
 

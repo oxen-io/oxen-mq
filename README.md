@@ -1,14 +1,15 @@
-# LokiMQ - zeromq-based message passing for Loki projects
+# OxenMQ - high-level zeromq-based message passing for network-based projects
 
-This C++17 library contains an abstraction layer around ZeroMQ to support integration with Loki
-authentication, RPC, and message passing.  It is designed to be usable as the underlying
-communication mechanism of SN-to-SN communication ("quorumnet"), the RPC interface used by wallets
-and local daemon commands, communication channels between lokid and auxiliary services (storage
-server, lokinet), and also provides a local multithreaded job scheduling within a process.
+This C++17 library contains an abstraction layer around ZeroMQ to provide a high-level interface to
+authentication, RPC, and message passing.  It is used extensively within Oxen projects (hence the
+name) as the underlying communication mechanism of SN-to-SN communication ("quorumnet"), the RPC
+interface used by wallets and local daemon commands, communication channels between oxend and
+auxiliary services (storage server, lokinet), and also provides local multithreaded job scheduling
+within a process.
 
 Messages channels can be encrypted (using x25519) or not -- however opening an encrypted channel
-requires knowing the server pubkey.  All SN-to-SN traffic is encrypted, and other traffic can be
-encrypted as needed.
+requires knowing the server pubkey.  Within Oxen, all SN-to-SN traffic is encrypted, and other
+traffic can be encrypted as needed.
 
 This library makes minimal use of mutexes, and none in the hot paths of the code, instead mostly
 relying on ZMQ sockets for synchronization; for more information on this (and why this is generally
@@ -16,20 +17,20 @@ much better performing and more scalable) see the ZMQ guide documentation on the
 
 ## Basic message structure
 
-LokiMQ messages come in two fundamental forms: "commands", consisting of a command named and
+OxenMQ messages come in two fundamental forms: "commands", consisting of a command named and
 optional arguments, and "requests", consisting of a request name, a request tag, and optional
 arguments.
 
 All channels are capable of bidirectional communication, and multiple messages can be in transit in
-either direction at any time.  LokiMQ sets up a "listener" and "client" connections, but these only
+either direction at any time.  OxenMQ sets up a "listener" and "client" connections, but these only
 determine how connections are established: once established, commands can be issued by either party.
 
 The command/request string is one of two types:
 
-`category.command` - for commands/requests registered by the LokiMQ caller (e.g. lokid).  Here
+`category.command` - for commands/requests registered by the OxenMQ caller (e.g. oxend).  Here
 `category` must be at least one character not containing a `.` and `command` may be anything.  These
 categories and commands are registered according to general function and authentication level (more
-on this below).  For example, for lokid categories are:
+on this below).  For example, for oxend categories are:
 
 - `system` - is for RPC commands related to the system administration such as mining, getting
   sensitive statistics, accessing SN private keys, remote shutdown, etc.
@@ -42,14 +43,14 @@ on this below).  For example, for lokid categories are:
 The difference between a request and a command is that a request includes an additional opaque tag
 value which is used to identify a reply.  For example you could register a `general.backwards`
 request that takes a string that receives a reply containing that string reversed.  When invoking
-the request via LokiMQ you provide a callback to be invoked when the reply arrives.  On the wire
+the request via OxenMQ you provide a callback to be invoked when the reply arrives.  On the wire
 this looks like:
 
     <<< [general.backwards] [v71.&a] [hello world]
     >>> [REPLY] [v71.&a] [dlrow olleh]
 
 where each [] denotes a message part and `v71.&a` is a unique randomly generated identifier handled
-by LokiMQ (both the invoker and the recipient code only see the `hello world`/`dlrow olleh` message
+by OxenMQ (both the invoker and the recipient code only see the `hello world`/`dlrow olleh` message
 parts).
 
 In contrast, regular registered commands have no identifier or expected reply callback.  For example
@@ -92,7 +93,7 @@ handled for you transparently.
 
 ## Command arguments
 
-Optional command/request arguments are always strings on the wire.  The LokiMQ-using developer is
+Optional command/request arguments are always strings on the wire.  The OxenMQ-using developer is
 free to create whatever encoding she wants, and these can vary across commands.  For example
 `wallet.tx` might be a request that returns a transaction in binary, while `wallet.tx_info` might
 return tx metadata in JSON, and `p2p.send_tx` might encode tx data and metadata in a bt-encoded
@@ -101,8 +102,8 @@ data string.
 No structure at all is imposed on message data to allow maximum flexibility; it is entirely up to
 the calling code to handle all encoding/decoding duties.
 
-Internal commands passed between LokiMQ-managed threads use either plain strings or bt-encoded
-dictionaries.  See `lokimq/bt_serialize.h` if you want a bt serializer/deserializer.
+Internal commands passed between OxenMQ-managed threads use either plain strings or bt-encoded
+dictionaries.  See `oxenmq/bt_serialize.h` if you want a bt serializer/deserializer.
 
 ## Sending commands
 
@@ -115,9 +116,9 @@ Sending a command to a peer is done by using a connection ID, and generally fall
 
 The connection ID generally has two possible values:
 
-- a string containing a service node pubkey.  In this mode LokiMQ will look for the given SN in
+- a string containing a service node pubkey.  In this mode OxenMQ will look for the given SN in
   already-established connections, reusing a connection if one exists.  If no connection already
-  exists, a new connection to the given SN is attempted (this requires constructing the LokiMQ
+  exists, a new connection to the given SN is attempted (this requires constructing the OxenMQ
   object with a callback to determine SN remote addresses).
 - a ConnectionID object, typically returned by the `connect_remote` method (although there are other
   places to get one, such as from the `Message` object passed to a command: see the following
@@ -143,7 +144,7 @@ The connection ID generally has two possible values:
 ## Command invocation
 
 The application registers categories and registers commands within these categories with callbacks.
-The callbacks are passed a LokiMQ::Message object from which the message (plus various connection
+The callbacks are passed a OxenMQ::Message object from which the message (plus various connection
 information) can be obtained.  There is no structure imposed at all on the data passed in subsequent
 message parts: it is up to the command itself to deserialize however it wishes (e.g. JSON,
 bt-encoded, or any other encoding).
@@ -151,13 +152,13 @@ bt-encoded, or any other encoding).
 The Message object also provides methods for replying to the caller.  Simple replies queue a reply
 if the client is still connected.  Replies to service nodes can also be "strong" replies: when
 replying to a SN that has closed connection with a strong reply we will attempt to reestablish a
-connection to deliver the message.  In order for this to work the LokiMQ caller must provide a
+connection to deliver the message.  In order for this to work the OxenMQ caller must provide a
 lookup function to retrieve the remote address given a SN x25519 pubkey.
 
 ### Callbacks
 
-Invoked command functions are always invoked with exactly one arguments: a non-const LokiMQ::Message
-reference from which the connection info, LokiMQ object, and message data can be obtained.
+Invoked command functions are always invoked with exactly one arguments: a non-const OxenMQ::Message
+reference from which the connection info, OxenMQ object, and message data can be obtained.
 
 The Message object also contains a `ConnectionID` object as the public `conn` member; it is safe to
 take a copy of this and then use it later to send commands to this peer.  (For example, a wallet
@@ -187,7 +188,7 @@ logins.
 Configuration defaults allows controlling the default access for an incoming connection based on its
 remote address.  Typically this is used to allow connections from localhost (or a unix domain
 socket) to automatically be an Admin connection without requiring explicit authentication.  This
-also allows configuration of how public connections should be treated: for example, a lokid running
+also allows configuration of how public connections should be treated: for example, an oxend running
 as a public RPC server would do so by granting Basic access to all incoming connections.
 
 Explicit logins allow the daemon to specify username/passwords with mapping to Basic or Admin
@@ -196,7 +197,7 @@ authentication levels.
 Thus, for example, a daemon could be configured to be allow Basic remote access with authentication
 (i.e. requiring a username/password login given out to people who should be able to access).
 
-For example, in lokid the categories described above have authentication levels of:
+For example, in oxend the categories described above have authentication levels of:
 
 - `system` - Admin
 - `sn` - ServiceNode
@@ -205,7 +206,7 @@ For example, in lokid the categories described above have authentication levels 
 
 ### Service Node authentication
 
-In order to handle ServiceNode authentication, LokiMQ uses an Allow callback invoked during
+In order to handle ServiceNode authentication, OxenMQ uses an Allow callback invoked during
 connection to determine both whether to allow the connection, and to determine whether the incoming
 connection is an active service node.
 
@@ -226,7 +227,7 @@ such aliases be used only temporarily for version transitions.
 
 ## Threads
 
-LokiMQ operates a pool of worker threads to handle jobs.  The simplest use just allocates new jobs
+OxenMQ operates a pool of worker threads to handle jobs.  The simplest use just allocates new jobs
 to a free worker thread, and we have a "general threads" value to configure how many such threads
 are available.
 
@@ -241,7 +242,7 @@ Note that these actual reserved threads are not exclusive: reserving M of N tota
 category simply ensures that no more than (N-M) threads are being used for other categories at any
 given time, but the actual jobs may run on any worker thread.
 
-As mentioned above, LokiMQ tries to avoid exceeding the configured general threads value (G)
+As mentioned above, OxenMQ tries to avoid exceeding the configured general threads value (G)
 whenever possible: the only time we will dispatch a job to a worker thread when we have >= G threads
 already running is when a new command arrives, the category reserves M threads, and the thread pool
 is currently processing fewer than M jobs for that category.
@@ -277,7 +278,7 @@ when a command with reserve threads arrived.
 A common pattern is one where a single thread suddenly has some work that can be be parallelized.
 You could employ some blocking, locking, mutex + condition variable monstrosity, but you shouldn't.
 
-Instead LokiMQ provides a mechanism for this by allowing you to submit a batch of jobs with a
+Instead OxenMQ provides a mechanism for this by allowing you to submit a batch of jobs with a
 completion callback.  All jobs will be queued and, when the last one finishes, the finalization
 callback will be queued to continue with the task.
 
@@ -302,7 +303,7 @@ double do_my_task(int input) {
     return 3.0 * input;
 }
 
-void continue_big_task(std::vector<lokimq::job_result<double>> results) {
+void continue_big_task(std::vector<oxenmq::job_result<double>> results) {
     double sum = 0;
     for (auto& r : results) {
         try {
@@ -323,7 +324,7 @@ void continue_big_task(std::vector<lokimq::job_result<double>> results) {
 void start_big_task() {
     size_t num_jobs = 32;
 
-    lokimq::Batch<double /*return type*/> batch;
+    oxenmq::Batch<double /*return type*/> batch;
     batch.reserve(num_jobs);
 
     for (size_t i = 0; i < num_jobs; i++)
@@ -341,7 +342,7 @@ void start_big_task() {
 
 This code deliberately does not support blocking to wait for the tasks to finish: if you want such a
 poor design (which is a recipe for deadlocks: imagine jobs that queuing other jobs that can end up
-exhausting the worker threads with waiting jobs) then you can implement it yourself; LokiMQ isn't
+exhausting the worker threads with waiting jobs) then you can implement it yourself; OxenMQ isn't
 going to help you hurt yourself like that.
 
 ### Single-job queuing
@@ -358,7 +359,7 @@ either using your own thread or a periodic timer (see below) to shepherd those o
 
 ## Timers
 
-LokiMQ supports scheduling periodic tasks via the `add_timer()` function.  These timers have an
+OxenMQ supports scheduling periodic tasks via the `add_timer()` function.  These timers have an
 interval and are scheduled as (single-job) batches when the timer fires.  They also support
 "squelching" (enabled by default) that supresses the job being scheduled if a previously scheduled
 job is already scheduled or running.
