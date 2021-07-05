@@ -275,17 +275,21 @@ void OxenMQ::proxy_run_worker(run_info& run) {
         send_routed_message(workers_socket, run.worker_routing_id, "RUN");
 }
 
-void OxenMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& parts) {
-    bool outgoing = connections[conn_index].get(zmq::sockopt::type) == ZMQ_DEALER;
+void OxenMQ::proxy_to_worker(int64_t conn_id, zmq::socket_t& sock, std::vector<zmq::message_t>& parts) {
+    bool outgoing = sock.get(zmq::sockopt::type) == ZMQ_DEALER;
 
     peer_info tmp_peer;
-    tmp_peer.conn_index = conn_index;
+    tmp_peer.conn_id = conn_id;
     if (!outgoing) tmp_peer.route = parts[0].to_string();
     peer_info* peer = nullptr;
     if (outgoing) {
-        auto it = peers.find(conn_index_to_id[conn_index]);
+        auto snit = outgoing_sn_conns.find(conn_id);
+        auto it = snit != outgoing_sn_conns.end()
+            ? peers.find(snit->second)
+            : peers.find(conn_id);
+
         if (it == peers.end()) {
-            LMQ_LOG(warn, "Internal error: connection index ", conn_index, " not found");
+            LMQ_LOG(warn, "Internal error: connection id ", conn_id, " not found");
             return;
         }
         peer = &it->second;
@@ -298,7 +302,7 @@ void OxenMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
             // the same route, and if not, add one.
             auto pr = peers.equal_range(tmp_peer.pubkey);
             for (auto it = pr.first; it != pr.second; ++it) {
-                if (it->second.conn_index == tmp_peer.conn_index && it->second.route == tmp_peer.route) {
+                if (it->second.conn_id == tmp_peer.conn_id && it->second.route == tmp_peer.route) {
                     peer = &it->second;
                     // Update the stored auth level just in case the peer reconnected
                     peer->auth_level = tmp_peer.auth_level;
@@ -330,7 +334,7 @@ void OxenMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
     auto cat_call = get_command(command);
 
     // Check that command is valid, that we have permission, etc.
-    if (!proxy_check_auth(conn_index, outgoing, *peer, parts[command_part_index], cat_call, data_parts))
+    if (!proxy_check_auth(conn_id, outgoing, *peer, parts[command_part_index], cat_call, data_parts))
         return;
 
     auto& category = *cat_call.first;
@@ -345,7 +349,7 @@ void OxenMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
         }
 
         LMQ_LOG(debug, "No available free workers, queuing ", command, " for later");
-        ConnectionID conn{peer->service_node ? ConnectionID::SN_ID : conn_index_to_id[conn_index].id, peer->pubkey, std::move(tmp_peer.route)};
+        ConnectionID conn{peer->service_node ? ConnectionID::SN_ID : conn_id, peer->pubkey, std::move(tmp_peer.route)};
         pending_commands.emplace_back(category, std::move(command), std::move(data_parts), cat_call.second,
                 std::move(conn), std::move(access), peer_address(parts[command_part_index]));
         category.queued++;
@@ -359,7 +363,7 @@ void OxenMQ::proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& par
 
     auto& run = get_idle_worker();
     {
-        ConnectionID c{peer->service_node ? ConnectionID::SN_ID : conn_index_to_id[conn_index].id, peer->pubkey};
+        ConnectionID c{peer->service_node ? ConnectionID::SN_ID : conn_id, peer->pubkey};
         c.route = std::move(tmp_peer.route);
         if (outgoing || peer->service_node)
             tmp_peer.route.clear();
