@@ -69,12 +69,12 @@ struct ConnectionID {
     ConnectionID unrouted() { return ConnectionID{id, pk, ""}; }
 
 private:
-    ConnectionID(long long id) : id{id} {}
-    ConnectionID(long long id, std::string pubkey, std::string route = "")
+    ConnectionID(int64_t id) : id{id} {}
+    ConnectionID(int64_t id, std::string pubkey, std::string route = "")
         : id{id}, pk{std::move(pubkey)}, route{std::move(route)} {}
 
-    constexpr static long long SN_ID = -1;
-    long long id = 0;
+    constexpr static int64_t SN_ID = -1;
+    int64_t id = 0;
     std::string pk;
     std::string route;
     friend class OxenMQ;
@@ -89,7 +89,7 @@ namespace std {
     template <> struct hash<oxenmq::ConnectionID> {
         size_t operator()(const oxenmq::ConnectionID &c) const {
             return c.sn() ? oxenmq::already_hashed{}(c.pk) :
-                std::hash<long long>{}(c.id) + std::hash<std::string>{}(c.route);
+                std::hash<int64_t>{}(c.id) + std::hash<std::string>{}(c.route);
         }
     };
 } // namespace std
