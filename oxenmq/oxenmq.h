@@ -104,6 +104,17 @@ private:
     template <typename R> friend class Batch;
 };
 
+/// Opaque handler for a timer constructed by add_timer(...).  Safe (and cheap) to copy.  The only
+/// real use of this is to pass it in to cancel_timer() to cancel a timer.
+struct TimerID {
+    // Default construction; creates an object with a non-timer internal id value.
+    TimerID() : _id{0} {}
+private:
+    int _id;
+    explicit constexpr TimerID(int id) : _id{id} {}
+    friend class OxenMQ;
+};
+
 /**
  * Class that handles OxenMQ listeners, connections, proxying, and workers.  An application
  * typically has just one instance of this class.
@@ -309,15 +320,17 @@ private:
     zmq::socket_t zap_auth{context, zmq::socket_type::rep};
 
     struct bind_data {
+        std::string address;
         bool curve;
-        size_t index;
+        int64_t conn_id;
         AllowFunc allow;
-        bind_data(bool curve, AllowFunc allow)
-            : curve{curve}, index{0}, allow{std::move(allow)} {}
+        std::function<void(bool)> on_bind;
+        bind_data(std::string addr, bool curve, AllowFunc allow, std::function<void(bool)> on_bind)
+            : address{std::move(addr)}, curve{curve}, conn_id{0}, allow{std::move(allow)}, on_bind{std::move(on_bind)} {}
     };
 
     /// Addresses on which we are listening (or, before start(), on which we will listen).
-    std::vector<std::pair<std::string, bind_data>> bind;
+    std::vector<bind_data> bind;
 
     /// Info about a peer's established connection with us.  Note that "established" means both
     /// connected and authenticated.  Note that we only store peer info data for SN connections (in
@@ -336,8 +349,8 @@ private:
         /// specified during outgoing connections.
         AuthLevel auth_level = AuthLevel::none;
 
-        /// The actual internal socket index through which this connection is established
-        size_t conn_index;
+        /// The socket id through which this connection is established
+        int64_t conn_id;
 
         /// Will be set to a non-empty routing prefix *if* one is necessary on the connection.  This
         /// is used only for SN peers (non-SN incoming connections don't have a peer_info record,
@@ -365,23 +378,20 @@ private:
     /// SN pubkey string.
     std::unordered_multimap<ConnectionID, peer_info> peers;
 
-    /// Maps connection indices (which can change) to ConnectionID values (which are permanent).
-    /// This is primarily for outgoing sockets, but incoming sockets are here too (with empty-route
-    /// (and thus unroutable) ConnectionIDs).
-    std::vector<ConnectionID> conn_index_to_id;
+    /// For outgoing connections to service nodes `peers` contains the service node connection id,
+    /// but we sometimes need to be able to get the peer info from a numeric connection id (for
+    /// example, for incoming messages on a connection we made); this map lets us do that.
+    std::map<int64_t, ConnectionID> outgoing_sn_conns;
 
-    /// Maps listening socket ConnectionIDs to connection index values (these don't have peers
-    /// entries).  The keys here have empty routes (and thus aren't actually routable).
-    std::unordered_map<ConnectionID, size_t> incoming_conn_index;
-
-    /// The next ConnectionID value we should use (for non-SN connections).
-    std::atomic<long long> next_conn_id{1};
+    /// The next ConnectionID value we should use (for outgoing, non-SN connections).
+    std::atomic<int64_t> next_conn_id{1};
 
     /// Remotes we are still trying to connect to (via connect_remote(), not connect_sn()); when
     /// we pass handshaking we move them out of here and (if set) trigger the on_connect callback.
     /// Unlike regular node-to-node peers, these have an extra "HI"/"HELLO" sequence that we used
     /// before we consider ourselves connected to the remote.
-    std::list<std::tuple<size_t /*conn_index*/, long long /*conn_id*/, std::chrono::steady_clock::time_point, ConnectSuccess, ConnectFailure>> pending_connects;
+    std::list<std::tuple<int64_t /*conn_id*/, std::chrono::steady_clock::time_point, ConnectSuccess, ConnectFailure>>
+        pending_connects;
 
     /// Pending requests that have been sent out but not yet received a matching "REPLY".  The value
     /// is the timeout timestamp.
@@ -391,20 +401,18 @@ private:
     /// different polling sockets the proxy handler polls: this always contains some internal
     /// sockets for inter-thread communication followed by a pollitem for every connection (both
     /// incoming and outgoing) in `connections`.  We rebuild this from `connections` whenever
-    /// `pollitems_stale` is set to true.
+    /// `connections_updated` is set to true.
     std::vector<zmq::pollitem_t> pollitems;
-
-    /// If set then rebuild pollitems before the next poll (set when establishing new connections or
-    /// closing existing ones).
-    bool pollitems_stale = true;
 
     /// Rebuilds pollitems to include the internal sockets + all incoming/outgoing sockets.
     void rebuild_pollitems();
 
-    /// The connections to/from remotes we currently have open, both listening and outgoing.  Each
-    /// element [i] here corresponds to an the pollitem_t at pollitems[i+1+poll_internal_size].
-    /// (Ideally we'd use one structure, but zmq requires the pollitems be in contiguous storage).
-    std::vector<zmq::socket_t> connections;
+    /// The connections to/from remotes we currently have open, both listening and outgoing.
+    std::map<int64_t, zmq::socket_t> connections;
+
+    /// If set then it indicates a change in `connections` which means we need to rebuild pollitems
+    /// and stop using existing connections iterators.
+    bool connections_updated = true;
 
     /// Socket we listen on to receive control messages in the proxy thread. Each thread has its own
     /// internal "control" connection (returned by `get_control_socket()`) to this socket used to
@@ -415,8 +423,13 @@ private:
     /// Timers.  TODO: once cppzmq adds an interface around the zmq C timers API then switch to it.
     struct TimersDeleter { void operator()(void* timers); };
     struct timer_data { std::function<void()> function; bool squelch; bool running; int thread; };
-    std::unordered_map<int, timer_data> timer_jobs;
+    std::unordered_map<int, timer_data> timer_jobs; // keys are zmq timer ids
     std::unique_ptr<void, TimersDeleter> timers;
+    // The next internal timer id (returned opaquely via TimerID return from add_timer)
+    std::atomic<int> next_timer_id = 1;
+    // Maps our internal timer id values (returned by add_timer) to zmq timer ids; used for
+    // delete_timer().
+    std::unordered_map<int, int> timer_zmq_id;
 public:
     // This needs to be public because we have to be able to call it from a plain C function.
     // Nothing external may call it!
@@ -459,17 +472,17 @@ private:
 
     void proxy_schedule_reply_job(std::function<void()> f);
 
-    /// Looks up a peers element given a connect index (for outgoing connections where we already
+    /// Looks up a peers element given a connect id (for outgoing connections where we already
     /// knew the pubkey and SN status) or an incoming zmq message (which has the pubkey and sn
     /// status metadata set during initial connection authentication), creating a new peer element
     /// if required.
-    decltype(peers)::iterator proxy_lookup_peer(int conn_index, zmq::message_t& msg);
+    decltype(peers)::iterator proxy_lookup_peer(int64_t conn_id, zmq::message_t& msg);
 
     /// Handles built-in primitive commands in the proxy thread for things like "BYE" that have to
     /// be done in the proxy thread anyway (if we forwarded to a worker the worker would just have
     /// to send an instruction back to the proxy to do it).  Returns true if one was handled, false
     /// to continue with sending to a worker.
-    bool proxy_handle_builtin(size_t conn_index, std::vector<zmq::message_t>& parts);
+    bool proxy_handle_builtin(int64_t conn_id, zmq::socket_t& sock, std::vector<zmq::message_t>& parts);
 
     struct run_info;
     /// Gets an idle worker's run_info and removes the worker from the idle worker list.  If there
@@ -484,12 +497,15 @@ private:
     void proxy_run_worker(run_info& run);
 
     /// Sets up a job for a worker then signals the worker (or starts a worker thread)
-    void proxy_to_worker(size_t conn_index, std::vector<zmq::message_t>& parts);
+    void proxy_to_worker(int64_t conn_id, zmq::socket_t& sock, std::vector<zmq::message_t>& parts);
 
     /// proxy thread command handlers for commands sent from the outer object QUIT.  This doesn't
     /// get called immediately on a QUIT command: the QUIT commands tells workers to quit, then this
     /// gets called after all works have done so.
     void proxy_quit();
+
+    /// proxy handler for binding to addresses given via listen_*().
+    bool proxy_bind(bind_data& bind, size_t bind_index);
 
     // Common setup code for setting up an external (incoming or outgoing) socket.
     void setup_external_socket(zmq::socket_t& socket);
@@ -499,6 +515,9 @@ private:
     // be unencrypted and unauthenticated.  Note that the remote end must be in the same mode (i.e.
     // either accepting curve connections, or not accepting curve).
     void setup_outgoing_socket(zmq::socket_t& socket, std::string_view remote_pubkey, bool use_ephemeral_routing_id);
+
+    /// Sets the various properties on an listening socket prior to binding.
+    void setup_incoming_socket(zmq::socket_t& socket, bool curve, std::string_view pubkey, std::string_view privkey, size_t bind_index);
 
     /// Common connection implementation used by proxy_connect/proxy_send.  Returns the socket and,
     /// if a routing prefix is needed, the required prefix (or an empty string if not needed).  For
@@ -556,13 +575,16 @@ private:
     /// take over and queue batch jobs.
     void proxy_batch(detail::Batch* batch);
 
-    /// TIMER command.  Called with a serialized list containing: function pointer to assume
-    /// ownership of, an interval count (in ms), and whether or not jobs should be squelched (see
-    /// `add_timer()`).
+    /// TIMER command.  Called with a serialized list containing: our local timer_id, function
+    /// pointer to assume ownership of, an interval count (in ms), and whether or not jobs should be
+    /// squelched (see `add_timer()`).
     void proxy_timer(bt_list_consumer timer_data);
 
     /// Same, but deserialized
-    void proxy_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch, int thread);
+    void proxy_timer(int timer_id, std::function<void()> job, std::chrono::milliseconds interval, bool squelch, int thread);
+
+    /// TIMER_DEL command.  Called with a timer_id to delete an active timer.
+    void proxy_timer_del(int timer_id);
 
     /// ZAP (https://rfc.zeromq.org/spec:27/ZAP/) authentication handler; this does non-blocking
     /// processing of any waiting authentication requests for new incoming connections.
@@ -576,7 +598,7 @@ private:
     void proxy_expire_idle_peers();
 
     /// Helper method to actually close a remote connection and update the stuff that needs updating.
-    void proxy_close_connection(size_t removed, std::chrono::milliseconds linger);
+    void proxy_close_connection(int64_t removed, std::chrono::milliseconds linger);
 
     /// Closes an outgoing connection immediately, updates internal variables appropriately.
     /// Returns the next iterator (the original may or may not be removed from peers, depending on
@@ -611,7 +633,7 @@ private:
 
     /// Checks a peer's authentication level.  Returns true if allowed, warns and returns false if
     /// not.
-    bool proxy_check_auth(size_t conn_index, bool outgoing, const peer_info& peer,
+    bool proxy_check_auth(int64_t conn_id, bool outgoing, const peer_info& peer,
             zmq::message_t& command, const cat_call_t& cat_call, std::vector<zmq::message_t>& data);
 
     struct injected_task {
@@ -952,14 +974,26 @@ public:
      * will be encrypted.  `allow_connection` is invoked for any incoming connections on this
      * address to determine the incoming remote's access and authentication level.
      *
+     * If called before `start()` then the given bind address is mandatory and start() will throw if
+     * the bind fails.  If called after `start()` then the bind may fail (in which case the callback
+     * will be used to notify of the failure).
+     *
      * @param bind address - can be any string zmq supports; typically a tcp IP/port combination
      * such as: "tcp://\*:4567" or "tcp://1.2.3.4:5678".
      *
      * @param allow_connection function to call to determine whether to allow the connection and, if
-     * so, the authentication level it receives.  If omitted the default returns AuthLevel::none
-     * access.
+     * so, the authentication level it receives.  If omitted (or null) the default returns
+     * AuthLevel::none access for all connections.
+     *
+     * @param on_bind function to call when the port has been successfully opened or failed to
+     * open.  For addresses set up before .start() this will be called during `start()` itself; for
+     * post-start listens this will be called from the proxy thread when it opens the new port.
+     * Note that this function must is called directly from the proxy thread and so should be fast
+     * and non-blocking.
      */
-    void listen_curve(std::string bind, AllowFunc allow_connection = [](auto, auto, auto) { return AuthLevel::none; });
+    void listen_curve(std::string bind,
+            AllowFunc allow_connection = nullptr,
+            std::function<void(bool success)> on_bind = nullptr);
 
     /** Start listening on the given bind address in unauthenticated plain text mode.  Incoming
      * connections can come from anywhere.  `allow_connection` is invoked for any incoming
@@ -970,10 +1004,14 @@ public:
      * such as: "tcp://\*:4567" or "tcp://1.2.3.4:5678".
      *
      * @param allow_connection function to call to determine whether to allow the connection and, if
-     * so, the authentication level it receives.  If omitted the default returns AuthLevel::none
-     * access.
+     * so, the authentication level it receives.  If omitted (or null) the default returns
+     * AuthLevel::none access for all connections.
+     *
+     * @param on_result called after binding with the result; see `listen_curve` for details.
      */
-    void listen_plain(std::string bind, AllowFunc allow_connection = [](auto, auto, auto) { return AuthLevel::none; });
+    void listen_plain(std::string bind,
+            AllowFunc allow_connection = nullptr,
+            std::function<void(bool success)> on_bind = nullptr);
 
     /**
      * Try to initiate a connection to the given SN in anticipation of needing a connection in the
@@ -1239,9 +1277,41 @@ public:
      * (so that, under heavy load or long jobs, there can be more than one of the same job scheduled
      * or running at a time) then specify `squelch` as `false`.
      *
+     * The returned value can be kept and later passed into `cancel_timer()` if you want to be able
+     * to cancel a timer.
+     *
      * \param thread specifies a thread (added with add_tagged_thread()) on which this timer must run.
      */
-    void add_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch = true, std::optional<TaggedThreadID> = std::nullopt);
+    TimerID add_timer(std::function<void()> job, std::chrono::milliseconds interval, bool squelch = true, std::optional<TaggedThreadID> = std::nullopt);
+
+    /** Same as add_timer, above, except that it sets `timer` directly before adding the timer
+     * rather than returning it.
+     *
+     * This is recommended over the above in cases where the timer is extremely fast *and*
+     * cancellation will occur inside the job itself.  This version of the method guarantees that
+     * `timer` will be assigned to before the job is added to the job schedule so as to guarantee
+     * that `job` can safely use `timer` without needing to synchronize the assignment with the
+     * thread creating the timer.
+     *
+     * If in doubt and you need to cancel a job from within the job itself, use this method.
+     *
+     * Example usage:
+     *
+     *     auto timer = std::make_shared<TimerID>();
+     *     auto& timer_ref = *timer; // Get reference before we move away the shared_ptr
+     *     omq.add_timer(timer_ref, [timer=std::move(timer)] { ...; cancel_timer(*timer); });
+     */
+    void add_timer(TimerID& timer, std::function<void()> job, std::chrono::milliseconds interval, bool squelch = true, std::optional<TaggedThreadID> = std::nullopt);
+
+    /**
+     * Cancels a running timer.  Note that an existing timer job (or multiple, if the timer disabled
+     * squelch) that have already been scheduled may still be executed after cancel_timer is called.
+     *
+     * It is safe (though does nothing) to call this more than once with the same TimerID value.
+     *
+     * \param timer a TimerID value as returned by add_timer.
+     */
+    void cancel_timer(TimerID timer);
 };
 
 /// Helper class that slightly simplifies adding commands to a category.
@@ -1293,6 +1363,10 @@ struct data_parts_impl {
 /// something convertible to a string_view).
 template <typename InputIt, typename = std::enable_if_t<std::is_convertible_v<decltype(*std::declval<InputIt>()), std::string_view>>>
 data_parts_impl<InputIt> data_parts(InputIt begin, InputIt end) { return {std::move(begin), std::move(end)}; }
+
+/// Shortcut for send_option::data_parts(container.begin(), container.end())
+template <typename Container>
+auto data_parts(const Container& c) { return data_parts(c.begin(), c.end()); }
 
 /// Specifies a connection hint when passed in to send().  If there is no current connection to the
 /// peer then the hint is used to save a call to the SNRemoteAddress to get the connection location.
@@ -1395,8 +1469,8 @@ namespace connect_option {
 /// Typically use: `connect_options::ephemeral_routing_id{}` or `connect_options::ephemeral_routing_id{false}`.
 struct ephemeral_routing_id {
     bool use_ephemeral_routing_id = true;
-    // Constructor; default construction gives you pubkey routing, but the bool parameter can be
-    // specified as false to explicitly disable the pubkey routing flag.
+    // Constructor; default construction gives you ephemeral routing id, but the bool parameter can
+    // be specified as false to use pubkey routing flag.
     explicit ephemeral_routing_id(bool use = true) : use_ephemeral_routing_id{use} {}
 };
 
