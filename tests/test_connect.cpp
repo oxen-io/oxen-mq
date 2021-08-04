@@ -504,3 +504,107 @@ TEST_CASE("SN backchatter", "[connect][sn]") {
     auto lock = catch_lock();
     REQUIRE(f == "abc");
 }
+
+TEST_CASE("inproc connections", "[connect][inproc]") {
+    std::string inproc_name = "foo";
+    OxenMQ omq{get_logger("OMQ» "), LogLevel::trace};
+
+    omq.add_category("public", Access{AuthLevel::none});
+    omq.add_request_command("public", "hello", [&](Message& m) { m.send_reply("hi"); });
+
+    omq.start();
+
+    std::atomic<int> got{0};
+    bool success = false;
+    auto c_inproc = omq.connect_inproc(
+            [&](auto conn) { success = true; got++; },
+            [&](auto conn, std::string_view reason) { auto lock = catch_lock(); INFO("inproc connection failed: " << reason); got++; }
+            );
+
+    wait_for([&got] { return got.load() > 0; });
+    {
+        auto lock = catch_lock();
+        REQUIRE( success );
+        REQUIRE( got == 1 );
+    }
+
+    got = 0;
+    success = false;
+    omq.request(c_inproc, "public.hello", [&](auto success_, auto parts_) {
+        success = success_ && parts_.size() == 1 && parts_.front() == "hi"; got++;
+    });
+    reply_sleep();
+    {
+        auto lock = catch_lock();
+        REQUIRE( got == 1 );
+        REQUIRE( success );
+    }
+}
+
+TEST_CASE("no explicit inproc listening", "[connect][inproc]") {
+    OxenMQ omq{get_logger("OMQ» "), LogLevel::trace};
+    REQUIRE_THROWS_AS(omq.listen_plain("inproc://foo"), std::logic_error);
+    REQUIRE_THROWS_AS(omq.listen_curve("inproc://foo"), std::logic_error);
+}
+
+TEST_CASE("inproc connection permissions", "[connect][inproc]") {
+    std::string listen = random_localhost();
+    OxenMQ omq{get_logger("OMQ» "), LogLevel::trace};
+
+    omq.add_category("public", Access{AuthLevel::none});
+    omq.add_request_command("public", "hello", [&](Message& m) { m.send_reply("hi"); });
+    omq.add_category("private", Access{AuthLevel::admin});
+    omq.add_request_command("private", "handshake", [&](Message& m) { m.send_reply("yo dude"); });
+
+    omq.listen_plain(listen);
+
+    omq.start();
+
+    std::atomic<int> got{0};
+    bool success = false;
+    auto c_inproc = omq.connect_inproc(
+            [&](auto conn) { success = true; got++; },
+            [&](auto conn, std::string_view reason) { auto lock = catch_lock(); INFO("inproc connection failed: " << reason); got++; }
+            );
+
+    bool pub_success = false;
+    auto c_pub = omq.connect_remote(address{listen},
+            [&](auto conn) { pub_success = true; got++; },
+            [&](auto conn, std::string_view reason) { auto lock = catch_lock(); INFO("tcp connection failed: " << reason); got++; }
+            );
+
+    wait_for([&got] { return got.load() == 2; });
+    {
+        auto lock = catch_lock();
+        REQUIRE( got == 2 );
+        REQUIRE( success );
+        REQUIRE( pub_success );
+    }
+
+    got = 0;
+    success = false;
+    pub_success = false;
+    bool success_private = false;
+    bool pub_success_private = false;
+    omq.request(c_inproc, "public.hello", [&](auto success_, auto parts_) {
+        success = success_ && parts_.size() == 1 && parts_.front() == "hi"; got++;
+    });
+    omq.request(c_pub, "public.hello", [&](auto success_, auto parts_) {
+        pub_success = success_ && parts_.size() == 1 && parts_.front() == "hi"; got++;
+    });
+    omq.request(c_inproc, "private.handshake", [&](auto success_, auto parts_) {
+        success_private = success_ && parts_.size() == 1 && parts_.front() == "yo dude"; got++;
+    });
+    omq.request(c_pub, "private.handshake", [&](auto success_, auto parts_) {
+        pub_success_private = success_; got++;
+    });
+    wait_for([&got] { return got.load() == 4; });
+    {
+        auto lock = catch_lock();
+        REQUIRE( got == 4 );
+        REQUIRE( success );
+        REQUIRE( pub_success );
+        REQUIRE( success_private );
+        REQUIRE_FALSE( pub_success_private );
+    }
+}
