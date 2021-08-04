@@ -15,9 +15,10 @@ TEST_CASE("timer test", "[timer][basic]") {
     auto start = std::chrono::steady_clock::now();
     wait_for([&] { return ticks.load() > 3; });
     {
+        auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
         auto lock = catch_lock();
         REQUIRE( ticks.load() > 3 );
-        REQUIRE( std::chrono::steady_clock::now() - start < 40ms );
+        REQUIRE( elapsed_ms < 50 * TIME_DILATION );
     }
 }
 
@@ -35,13 +36,13 @@ TEST_CASE("timer squelch", "[timer][squelch]") {
     // finishes, by which point we set `done` and so should get exactly 1 tick.
     auto timer = omq.add_timer([&] {
         if (first.exchange(false)) {
-            std::this_thread::sleep_for(30ms);
+            std::this_thread::sleep_for(30ms * TIME_DILATION);
             ticks++;
             done = true;
         } else if (!done) {
             ticks++;
         }
-    }, 5ms, true /* squelch */);
+    }, 5ms * TIME_DILATION, true /* squelch */);
     omq.start();
 
     wait_for([&] { return done.load(); });
@@ -58,7 +59,7 @@ TEST_CASE("timer squelch", "[timer][squelch]") {
     std::atomic<int> ticks2 = 0;
     auto timer2 = omq.add_timer([&] {
         if (first2.exchange(false)) {
-            std::this_thread::sleep_for(30ms);
+            std::this_thread::sleep_for(40ms);
             done2 = true;
         } else if (!done2) {
             ticks2++;
@@ -82,13 +83,13 @@ TEST_CASE("timer cancel", "[timer][cancel]") {
     std::atomic<int> ticks = 0;
 
     // We set up *and cancel* this timer before omq starts, so it should never fire
-    auto notimer = omq.add_timer([&] { ticks += 1000; }, 5ms);
+    auto notimer = omq.add_timer([&] { ticks += 1000; }, 5ms * TIME_DILATION);
     omq.cancel_timer(notimer);
 
     TimerID timer = omq.add_timer([&] {
         if (++ticks == 3)
             omq.cancel_timer(timer);
-    }, 5ms);
+    }, 5ms * TIME_DILATION);
 
     omq.start();
 

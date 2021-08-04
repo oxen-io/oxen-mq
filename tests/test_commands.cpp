@@ -470,7 +470,7 @@ TEST_CASE("deferred replies", "[commands][send][deferred]") {
         std::string msg = m.data.empty() ? ""s : std::string{m.data.front()};
         std::thread t{[send=m.send_later(), msg=std::move(msg)] {
             { auto lock = catch_lock(); UNSCOPED_INFO("sleeping"); }
-            std::this_thread::sleep_for(50ms);
+            std::this_thread::sleep_for(50ms * TIME_DILATION);
             { auto lock = catch_lock(); UNSCOPED_INFO("sending"); }
             send.reply(msg);
         }};
@@ -516,7 +516,7 @@ TEST_CASE("deferred replies", "[commands][send][deferred]") {
         auto lock = catch_lock();
         REQUIRE( replies.size() == 0 ); // The server waits 50ms before sending, so we shouldn't have any reply yet
     }
-    std::this_thread::sleep_for(60ms); // We're at least 70ms in now so the 50ms-delayed server responses should have arrived
+    std::this_thread::sleep_for(60ms * TIME_DILATION); // We're at least 70ms in now so the 50ms-delayed server responses should have arrived
     {
         std::lock_guard lq{reply_mut};
         auto lock = catch_lock();

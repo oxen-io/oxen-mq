@@ -279,7 +279,7 @@ TEST_CASE("SN disconnections", "[connect][disconnect]") {
     lmq[2]->send(pubkey[1], "sn.hi");
     lmq[1]->send(pubkey[0], "BYE");
     lmq[0]->send(pubkey[2], "sn.hi");
-    std::this_thread::sleep_for(50ms);
+    std::this_thread::sleep_for(50ms * TIME_DILATION);
 
     auto lock = catch_lock();
     REQUIRE(his == 5);
