@@ -59,7 +59,7 @@ TEST_CASE("timer squelch", "[timer][squelch]") {
     std::atomic<int> ticks2 = 0;
     auto timer2 = omq.add_timer([&] {
         if (first2.exchange(false)) {
-            std::this_thread::sleep_for(40ms);
+            std::this_thread::sleep_for(40ms * TIME_DILATION);
             done2 = true;
         } else if (!done2) {
             ticks2++;
