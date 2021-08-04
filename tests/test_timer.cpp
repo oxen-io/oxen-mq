@@ -15,9 +15,10 @@ TEST_CASE("timer test", "[timer][basic]") {
     auto start = std::chrono::steady_clock::now();
     wait_for([&] { return ticks.load() > 3; });
     {
+        auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
         auto lock = catch_lock();
         REQUIRE( ticks.load() > 3 );
-        REQUIRE( std::chrono::steady_clock::now() - start < 40ms );
+        REQUIRE( elapsed_ms < 50 );
     }
 }
 
@@ -58,7 +59,7 @@ TEST_CASE("timer squelch", "[timer][squelch]") {
     std::atomic<int> ticks2 = 0;
     auto timer2 = omq.add_timer([&] {
         if (first2.exchange(false)) {
-            std::this_thread::sleep_for(30ms);
+            std::this_thread::sleep_for(40ms);
             done2 = true;
         } else if (!done2) {
             ticks2++;
