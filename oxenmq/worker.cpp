@@ -19,7 +19,7 @@ namespace {
 [[gnu::always_inline]] inline
 bool worker_wait_for(OxenMQ& lmq, zmq::socket_t& sock, std::vector<zmq::message_t>& parts, const std::string_view worker_id, const std::string_view expect) {
     while (true) {
-        lmq.log(LogLevel::debug, __FILE__, __LINE__, "worker ", worker_id, " waiting for ", expect);
+        lmq.log(LogLevel::trace, __FILE__, __LINE__, "worker ", worker_id, " waiting for ", expect);
         parts.clear();
         recv_message_parts(sock, parts);
         if (parts.size() != 1) {
