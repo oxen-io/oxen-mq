@@ -1,0 +1,21 @@
+From: Jason Rhinelander <jason@imaginary.ca>
+Date: Sat, 28 Mar 2020 12:22:07 -0300
+Subject: Fully version library
+
+---
+ CMakeLists.txt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 68926f8..51f5fc2 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -24,7 +24,7 @@ include(GNUInstallDirs)
+ 
+ message(STATUS "oxenmq v${PROJECT_VERSION}")
+ 
+-set(OXENMQ_LIBVERSION 0)
++set(OXENMQ_LIBVERSION ${PROJECT_VERSION})
+ 
+ 
+ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
