@@ -4,15 +4,15 @@ Maintainer: Jason Rhinelander <jason@imaginary.ca>
 Build-Depends: debhelper-compat (= 11), cmake (>= 3.5), g++-8, pkg-config, libzmq3-dev (>= 4.3), libsodium-dev, libpgm-dev
 Standards-Version: 4.4.1
 Section: libs
-Homepage: https://github.com/loki-project/loki-mq
+Homepage: https://github.com/oxen-io/oxen-mq
 
 Package: liboxenmq-dev
 Section: libdevel
 Architecture: any
 Depends: liboxenmq@LIB_VERSION@ (= ${binary:Version}), ${misc:Depends}, libzmq3-dev (>= 4.3)
-Description: zeromq-based Loki message passing library (headers)
+Description: zeromq-based Oxen message passing library (headers)
  This C++17 library contains an abstraction layer around ZeroMQ to support
- integration with Loki authentication, RPC, and message passing.  It is
+ integration with Oxen authentication, RPC, and message passing.  It is
  designed to be usable as the underlying communication mechanism of SN-to-SN
  communication ("quorumnet"), the RPC interface used by wallets and local
  daemon commands, communication channels between oxend and auxiliary services
@@ -25,9 +25,9 @@ Description: zeromq-based Loki message passing library (headers)
 Package: liboxenmq@LIB_VERSION@
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Description: zeromq-based Loki message passing library
+Description: zeromq-based Oxen message passing library
  This C++17 library contains an abstraction layer around ZeroMQ to support
- integration with Loki authentication, RPC, and message passing.  It is
+ integration with Oxen authentication, RPC, and message passing.  It is
  designed to be usable as the underlying communication mechanism of SN-to-SN
  communication ("quorumnet"), the RPC interface used by wallets and local
  daemon commands, communication channels between oxend and auxiliary services
