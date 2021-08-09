@@ -1,3 +1,10 @@
+oxenmq (1.2.6-2~ubuntu2004) focal; urgency=medium
+
+  * fix control file
+  * Loki->Oxen in package descriptions
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Mon, 09 Aug 2021 13:19:00 -0300
+
 oxenmq (1.2.6-1~ubuntu2004) focal; urgency=medium
 
   * Rediff patches
