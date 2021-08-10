@@ -1,6 +1,6 @@
-local distro = "fedora-34";
-local distro_name = 'Fedora 34';
-local distro_docker = 'fedora:34';
+local distro = "fedora-33";
+local distro_name = 'Fedora 33';
+local distro_docker = 'fedora:33';
 
 local submodules = {
     name: 'submodules',
