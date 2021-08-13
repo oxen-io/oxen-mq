@@ -119,7 +119,6 @@ void OxenMQ::proxy_set_active_sns(pubkey_set pubkeys) {
 }
 
 void OxenMQ::update_active_sns(pubkey_set added, pubkey_set removed) {
-    LMQ_LOG(info, "uh, ", added.size());
     if (proxy_thread.joinable()) {
         std::array<uintptr_t, 2> data;
         data[0] = detail::serialize_object(std::move(added));
@@ -139,7 +138,6 @@ void OxenMQ::proxy_update_active_sns(pubkey_set added, pubkey_set removed) {
     // values, pubkeys that already(added) or do not(removed) exist), then pass the purified lists
     // to the _clean version.
 
-    LMQ_LOG(info, "uh, ", added.size(), ", ", removed.size());
     for (auto it = removed.begin(); it != removed.end(); ) {
         const auto& pk = *it;
         if (pk.size() != 32) {
