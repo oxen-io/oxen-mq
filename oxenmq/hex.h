@@ -131,7 +131,7 @@ constexpr char from_hex_pair(unsigned char a, unsigned char b) noexcept { return
 
 /// Converts a sequence of hex digits to bytes.  Undefined behaviour if any characters are not in
 /// [0-9a-fA-F] or if the input sequence length is not even: call `is_hex` first if you need to
-/// check.  It is permitted for the input and output ranges to overlap as long as out is no earlier
+/// check.  It is permitted for the input and output ranges to overlap as long as out is no later
 /// than begin.
 template <typename InputIt, typename OutputIt>
 void from_hex(InputIt begin, InputIt end, OutputIt out) {

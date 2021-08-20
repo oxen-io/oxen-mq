@@ -136,7 +136,7 @@ constexpr bool is_base32z(std::string_view s) { return is_base32z<>(s); }
 
 /// Converts a sequence of base32z digits to bytes.  Undefined behaviour if any characters are not
 /// valid base32z alphabet characters.  It is permitted for the input and output ranges to overlap
-/// as long as `out` is no earlier than `begin`.  Note that if you pass in a sequence that could not
+/// as long as `out` is no later than `begin`.  Note that if you pass in a sequence that could not
 /// have been created by a base32z encoding of a byte sequence, we treat the excess bits as if they
 /// were not provided.
 ///

@@ -165,7 +165,7 @@ constexpr bool is_base64(std::string_view s) { return is_base64(s.begin(), s.end
 
 /// Converts a sequence of base64 digits to bytes.  Undefined behaviour if any characters are not
 /// valid base64 alphabet characters.  It is permitted for the input and output ranges to overlap as
-/// long as `out` is no earlier than `begin`.  Trailing padding characters are permitted but not
+/// long as `out` is no later than `begin`.  Trailing padding characters are permitted but not
 /// required.
 ///
 /// It is possible to provide "impossible" base64 encoded values; for example "YWJja" which has 30
