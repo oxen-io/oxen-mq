@@ -76,9 +76,11 @@ static_assert(b64_lut.from_b64('/') == 63 && b64_lut.from_b64('7') == 59 && b64_
 
 } // namespace detail
 
-/// Converts bytes into a base64 encoded character sequence.
+/// Converts bytes into a base64 encoded character sequence, writing them starting at `out`.
+/// Returns the final value of out (i.e. the iterator positioned just after the last written base64
+/// character).
 template <typename InputIt, typename OutputIt>
-void to_base64(InputIt begin, InputIt end, OutputIt out) {
+OutputIt to_base64(InputIt begin, InputIt end, OutputIt out) {
     static_assert(sizeof(decltype(*begin)) == 1, "to_base64 requires chars/bytes");
     int bits = 0; // Tracks the number of unconsumed bits held in r, will always be in {0, 2, 4}
     std::uint_fast16_t r = 0;
@@ -116,6 +118,8 @@ void to_base64(InputIt begin, InputIt end, OutputIt out) {
         *out++ = detail::b64_lut.to_b64(r << 2);
         *out++ = '=';
     }
+
+    return out;
 }
 
 /// Creates and returns a base64 string from an iterator pair of a character sequence
@@ -166,7 +170,8 @@ constexpr bool is_base64(std::string_view s) { return is_base64(s.begin(), s.end
 /// Converts a sequence of base64 digits to bytes.  Undefined behaviour if any characters are not
 /// valid base64 alphabet characters.  It is permitted for the input and output ranges to overlap as
 /// long as `out` is no later than `begin`.  Trailing padding characters are permitted but not
-/// required.
+/// required.  Returns the final value of out (that is, the iterator positioned just after the
+/// last written character).
 ///
 /// It is possible to provide "impossible" base64 encoded values; for example "YWJja" which has 30
 /// bits of data even though a base64 encoded byte string should have 24 (4 chars) or 36 (6 chars)
@@ -175,7 +180,7 @@ constexpr bool is_base64(std::string_view s) { return is_base64(s.begin(), s.end
 /// encoding of "abcd") and "YWJjZB", "YWJjZC", ..., "YWJjZP" all decode to the same "abcd" value:
 /// the last 4 bits of the last character are essentially considered padding.
 template <typename InputIt, typename OutputIt>
-void from_base64(InputIt begin, InputIt end, OutputIt out) {
+OutputIt from_base64(InputIt begin, InputIt end, OutputIt out) {
     static_assert(sizeof(decltype(*begin)) == 1, "from_base64 requires chars/bytes");
     uint_fast16_t curr = 0;
     int bits = 0; // number of bits we've loaded into val; we always keep this < 8.
@@ -199,6 +204,8 @@ void from_base64(InputIt begin, InputIt end, OutputIt out) {
     // Don't worry about leftover bits because either they have to be 0, or they can't happen at
     // all.  See base32z.h for why: the reasoning is exactly the same (except using 6 bits per
     // character here instead of 5).
+
+    return out;
 }
 
 /// Converts base64 digits from a iterator pair of characters into a std::string of bytes.
