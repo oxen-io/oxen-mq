@@ -44,6 +44,16 @@ TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
     std::basic_string_view<std::byte> b{bytes.data(), bytes.size()};
     REQUIRE( oxenmq::to_hex(b) == "ff421234"s );
 
+    // In-place decoding and truncation via to_hex's returned iterator:
+    std::string some_hex = "48656c6c6f";
+    some_hex.erase(oxenmq::from_hex(some_hex.begin(), some_hex.end(), some_hex.begin()), some_hex.end());
+    REQUIRE( some_hex == "Hello" );
+
+    // Test the returned iterator from encoding
+    std::string hellohex;
+    *oxenmq::to_hex(some_hex.begin(), some_hex.end(), std::back_inserter(hellohex))++ = '!';
+    REQUIRE( hellohex == "48656c6c6f!" );
+
     bytes.resize(8);
     bytes[0] = std::byte{'f'}; bytes[1] = std::byte{'f'}; bytes[2] = std::byte{'4'}; bytes[3] = std::byte{'2'};
     bytes[4] = std::byte{'1'}; bytes[5] = std::byte{'2'}; bytes[6] = std::byte{'3'}; bytes[7] = std::byte{'4'};
@@ -98,6 +108,16 @@ TEST_CASE("base32z encoding/decoding", "[encoding][decoding][base32z]") {
     oxenmq::from_base32z(pk_b32z.begin(), pk_b32z.end(), std::back_inserter(pk_again));
     REQUIRE( pk_b32z_again == pk_b32z );
     REQUIRE( pk_again == pk );
+
+    // In-place decoding and truncation via returned iterator:
+    std::string some_b32z = "jb1sa5dx";
+    some_b32z.erase(oxenmq::from_base32z(some_b32z.begin(), some_b32z.end(), some_b32z.begin()), some_b32z.end());
+    REQUIRE( some_b32z == "Hello" );
+
+    // Test the returned iterator from encoding
+    std::string hellob32z;
+    *oxenmq::to_base32z(some_b32z.begin(), some_b32z.end(), std::back_inserter(hellob32z))++ = '!';
+    REQUIRE( hellob32z == "jb1sa5dx!" );
 
     std::vector<std::byte> bytes{{std::byte{0}, std::byte{255}}};
     std::basic_string_view<std::byte> b{bytes.data(), bytes.size()};
@@ -188,6 +208,16 @@ TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
     oxenmq::from_base64(pk_b64.begin(), pk_b64.end(), std::back_inserter(pk_again));
     REQUIRE( pk_b64_again == pk_b64 );
     REQUIRE( pk_again == pk );
+
+    // In-place decoding and truncation via returned iterator:
+    std::string some_b64 = "SGVsbG8=";
+    some_b64.erase(oxenmq::from_base64(some_b64.begin(), some_b64.end(), some_b64.begin()), some_b64.end());
+    REQUIRE( some_b64 == "Hello" );
+
+    // Test the returned iterator from encoding
+    std::string hellob64;
+    *oxenmq::to_base64(some_b64.begin(), some_b64.end(), std::back_inserter(hellob64))++ = '!';
+    REQUIRE( hellob64 == "SGVsbG8=!" );
 
     std::vector<std::byte> bytes{{std::byte{0}, std::byte{255}}};
     std::basic_string_view<std::byte> b{bytes.data(), bytes.size()};

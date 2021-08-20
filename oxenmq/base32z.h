@@ -74,9 +74,11 @@ static_assert(b32z_lut.from_b32z('w') == 20 && b32z_lut.from_b32z('T') == 17 && 
 
 } // namespace detail
 
-/// Converts bytes into a base32z encoded character sequence.
+/// Converts bytes into a base32z encoded character sequence, writing them starting at `out`.
+/// Returns the final value of out (i.e. the iterator positioned just after the last written base32z
+/// character).
 template <typename InputIt, typename OutputIt>
-void to_base32z(InputIt begin, InputIt end, OutputIt out) {
+OutputIt to_base32z(InputIt begin, InputIt end, OutputIt out) {
     static_assert(sizeof(decltype(*begin)) == 1, "to_base32z requires chars/bytes");
     int bits = 0; // Tracks the number of unconsumed bits held in r, will always be in [0, 4]
     std::uint_fast16_t r = 0;
@@ -100,6 +102,8 @@ void to_base32z(InputIt begin, InputIt end, OutputIt out) {
 
     if (bits > 0) // We hit the end, but still have some unconsumed bits so need one final character to append
         *out++ = detail::b32z_lut.to_b32z(r << (5 - bits));
+
+    return out;
 }
 
 /// Creates a base32z string from an iterator pair of a byte sequence.
@@ -138,7 +142,8 @@ constexpr bool is_base32z(std::string_view s) { return is_base32z<>(s); }
 /// valid base32z alphabet characters.  It is permitted for the input and output ranges to overlap
 /// as long as `out` is no later than `begin`.  Note that if you pass in a sequence that could not
 /// have been created by a base32z encoding of a byte sequence, we treat the excess bits as if they
-/// were not provided.
+/// were not provided.  Returns the final value of out (that is, the iterator positioned just after
+/// the last written character).
 ///
 /// For example, "yyy" represents a 15-bit value, but a byte sequence is either 8-bit (requiring 2
 /// characters) or 16-bit (requiring 4).  Similarly, "yb" is an impossible encoding because it has
@@ -146,7 +151,7 @@ constexpr bool is_base32z(std::string_view s) { return is_base32z<>(s); }
 /// 16th or 24th or ... bit).  We treat any such bits as if they were not specified (even if they
 /// are): which means "yy", "yb", "yyy", "yy9", "yd", etc. all decode to the same 1-byte value "\0".
 template <typename InputIt, typename OutputIt>
-void from_base32z(InputIt begin, InputIt end, OutputIt out) {
+OutputIt from_base32z(InputIt begin, InputIt end, OutputIt out) {
     static_assert(sizeof(decltype(*begin)) == 1, "from_base32z requires chars/bytes");
     uint_fast16_t curr = 0;
     int bits = 0; // number of bits we've loaded into val; we always keep this < 8.
@@ -183,6 +188,8 @@ void from_base32z(InputIt begin, InputIt end, OutputIt out) {
     // any 8n + {0,2,5} char output) and added a base32z character to the end.  If you do that,
     // well, too bad: you're giving invalid output and so we're just going to pretend that extra
     // character you added isn't there by not doing anything here.
+
+    return out;
 }
 
 /// Convert a base32z sequence into a std::string of bytes.  Undefined behaviour if any characters
