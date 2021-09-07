@@ -28,6 +28,7 @@
 
 #include "bt_serialize.h"
 #include "bt_producer.h"
+#include "variant.h"
 
 #include <cassert>
 #include <iterator>
@@ -248,7 +249,7 @@ bt_list_producer::bt_list_producer(bt_dict_producer* parent, std::string_view pr
 bt_list_producer::bt_list_producer(bt_list_producer&& other)
         : data{std::move(other.data)}, buffer{other.buffer}, from{other.from}, to{other.to} {
     if (other.has_child) throw std::logic_error{"Cannot move bt_list/dict_producer with active sublists/subdicts"};
-    std::visit([](auto& x) {
+    var::visit([](auto& x) {
         if constexpr (!std::is_same_v<buf_span&, decltype(x)>)
             x = nullptr;
     }, other.data);
@@ -262,7 +263,7 @@ bt_list_producer::bt_list_producer(char* begin, char* end)
 }
 
 bt_list_producer::~bt_list_producer() {
-    std::visit([this](auto& x) {
+    var::visit([this](auto& x) {
         if constexpr (!std::is_same_v<buf_span&, decltype(x)>) {
             if (!x)
                 return;
@@ -296,7 +297,7 @@ bt_dict_producer bt_list_producer::append_dict() {
 
 
 void bt_list_producer::buffer_append(std::string_view d, bool advance) {
-    std::visit([d, advance, this](auto& x) {
+    var::visit([d, advance, this](auto& x) {
         if constexpr (std::is_same_v<buf_span&, decltype(x)>) {
             size_t avail = std::distance(x.first, x.second);
             if (d.size() > avail)
@@ -314,7 +315,7 @@ void bt_list_producer::buffer_append(std::string_view d, bool advance) {
 static constexpr std::string_view eee = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"sv;
 
 void bt_list_producer::append_intermediate_ends(size_t count) {
-    return std::visit([this, count](auto& x) mutable {
+    return var::visit([this, count](auto& x) mutable {
         if constexpr (std::is_same_v<buf_span&, decltype(x)>) {
             for (; count > eee.size(); count -= eee.size())
                 buffer_append(eee, false);
