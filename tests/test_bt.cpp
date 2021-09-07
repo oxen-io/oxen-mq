@@ -227,31 +227,3 @@ TEST_CASE("bt tuple serialization", "[bt][tuple][serialization]") {
             std::make_pair("b"sv, std::make_tuple(1, 2, 3)) );
 }
 
-#if 0
-    {
-        std::cout << "zomg consumption\n";
-        bt_dict_consumer dc{zomg_};
-        for (int i = 0; i < 5; i++)
-            if (!dc.skip_until("b"))
-                throw std::runtime_error("Couldn't find b, but I know it's there!");
-
-        auto dc1 = dc;
-        if (dc.skip_until("z")) {
-            auto v = dc.consume_integer<int>();
-            std::cout << "  - " << v.first << ": " << v.second << "\n";
-        } else {
-            std::cout << "  - no z (bad!)\n";
-        }
-
-        std::cout << "zomg (second pass)\n";
-        for (auto &p : dc1.consume_dict().second) {
-            std::cout << "  - " << p.first << " = (whatever)\n";
-        }
-        while (dc1) {
-            auto v = dc1.consume_integer<int>();
-            std::cout << "  - " << v.first << ": " << v.second << "\n";
-        }
-    }
-#endif
-
-
