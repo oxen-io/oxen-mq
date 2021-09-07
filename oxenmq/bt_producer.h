@@ -14,6 +14,39 @@ using namespace std::literals;
 
 class bt_dict_producer;
 
+#if defined(__APPLE__) && defined(__MAC_OS_X_VERSION_MIN_REQUIRED) && __MAC_OS_X_VERSION_MIN_REQUIRED < 101500
+#define OXENMQ_APPLE_TO_CHARS_WORKAROUND
+/// Really simplistic version of std::to_chars on Apple, because Apple doesn't allow `std::to_chars`
+/// to be used if targetting anything before macOS 10.15.  The buffer must have at least 20 chars of
+/// space (for int types up to 64-bit); we return a pointer one past the last char written.
+template <typename IntType>
+char* apple_to_chars10(char* buf, IntType val) {
+    static_assert(std::is_integral_v<IntType> && sizeof(IntType) <= 64);
+    if constexpr (std::is_signed_v<IntType>) {
+        if (val < 0) {
+            buf[0] = '-';
+            return apple_to_chars10(buf+1, static_cast<std::make_unsigned_t<IntType>>(-val));
+        }
+    }
+
+    // write it to the buffer in reverse (because we don't know how many chars we'll need yet, but
+    // writing in reverse will figure that out).
+    char* pos = buf;
+    do {
+        *pos++ = '0' + static_cast<char>(val % 10);
+        val /= 10;
+    } while (val > 0);
+
+    // Reverse the digits into the right order
+    int swaps = (pos - buf) / 2;
+    for (int i = 0; i < swaps; i++)
+        std::swap(buf[i], pos[-1 - i]);
+
+    return pos;
+}
+#endif
+
+
 /// Class that allows you to build a bt-encoded list manually, without copying or allocating memory.
 /// This is essentially the reverse of bt_list_consumer: where it lets you stream-parse a buffer,
 /// this class lets you build directly into a buffer that you own.
@@ -62,9 +95,15 @@ class bt_list_producer {
     template <typename IntType>
     char* write_integer(IntType val, char* buf) {
         static_assert(sizeof(IntType) <= 64);
+
+#ifndef OXENMQ_APPLE_TO_CHARS_WORKAROUND
         auto [ptr, ec] = std::to_chars(buf, buf+20, val);
         assert(ec == std::errc());
         return ptr;
+#else
+        // Hate apple.
+        return apple_to_chars10(buf, val);
+#endif
     }
 
     // Serializes an integer value and appends it to the output buffer.  Does not call

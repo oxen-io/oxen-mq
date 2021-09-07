@@ -289,3 +289,34 @@ TEST_CASE("bt allocation-free producer", "[bt][dict][list][producer]") {
         CHECK( lp.view() == "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeed3:foo3:bar1:gi42e1:hld1:ad1:Ali999eeeeeee" );
     }
 }
+
+#ifdef OXENMQ_APPLE_TO_CHARS_WORKAROUND
+TEST_CASE("apple to_chars workaround test", "[bt][apple][sucks]") {
+    char buf[20];
+    auto buf_view = [&](char* end) { return std::string_view{buf, static_cast<size_t>(end - buf)}; };
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, 0)) == "0" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, 1)) == "1" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, 2)) == "2" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, 10)) == "10" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, 42)) == "42" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, 99)) == "99" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, 1234567890)) == "1234567890" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, -1)) == "-1" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, -2)) == "-2" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, -10)) == "-10" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, -99)) == "-99" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, -1234567890)) == "-1234567890" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, char{42})) == "42" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, (unsigned char){42})) == "42" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, short{42})) == "42" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, std::numeric_limits<char>::min())) == "-128" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, std::numeric_limits<char>::max())) == "127" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, (unsigned char){42})) == "42" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, std::numeric_limits<uint64_t>::max())) == "18446744073709551615" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, int64_t{-1})) == "-1" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, std::numeric_limits<int64_t>::min())) == "-9223372036854775808" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, int64_t{-9223372036854775807})) == "-9223372036854775807" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, int64_t{9223372036854775807})) == "9223372036854775807" );
+    CHECK( buf_view(oxenmq::apple_to_chars10(buf, int64_t{9223372036854775806})) == "9223372036854775806" );
+}
+#endif
