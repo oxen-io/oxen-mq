@@ -265,7 +265,7 @@ public:
                     std::is_same_v<typename BadUnorderedMap::iterator, ForwardIt> ||
                     std::is_same_v<typename BadUnorderedMap::const_iterator, ForwardIt>));
         while (from != to) {
-            auto& [k, v] = *from++;
+            const auto& [k, v] = *from++;
             append_impl(k);
             check_incrementing_key(k.size());
             append_impl(v);
