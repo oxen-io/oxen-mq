@@ -1,4 +1,5 @@
 #include "oxenmq/bt_serialize.h"
+#include "oxenmq/bt_producer.h"
 #include "common.h"
 #include <map>
 #include <set>
@@ -210,6 +211,10 @@ TEST_CASE("bt tuple serialization", "[bt][tuple][serialization]") {
     bt_list m{{1, 2, std::make_tuple(3, 4, "hi"sv), std::make_pair("foo"s, "bar"sv), -4}};
     REQUIRE( bt_serialize(m) == "li1ei2eli3ei4e2:hiel3:foo3:barei-4ee" );
 
+}
+
+TEST_CASE("bt allocation-free consumer", "[bt][dict][list][consumer]") {
+
     // Consumer deserialization:
     bt_list_consumer lc{"li1ei2eli3ei4e2:hiel3:foo3:barei-4ee"};
     REQUIRE( lc.consume_integer<int>() == 1 );
@@ -227,3 +232,60 @@ TEST_CASE("bt tuple serialization", "[bt][tuple][serialization]") {
             std::make_pair("b"sv, std::make_tuple(1, 2, 3)) );
 }
 
+TEST_CASE("bt allocation-free producer", "[bt][dict][list][producer]") {
+
+    char smallbuf[16];
+    bt_list_producer toosmall{smallbuf, 16}; // le, total = 2
+    toosmall += 42; // i42e, total = 6
+    toosmall += "abcdefgh"; // 8:abcdefgh, total=16
+    CHECK( toosmall.view() == "li42e8:abcdefghe" );
+
+    CHECK_THROWS_AS( toosmall += "", std::length_error );
+
+    char buf[1024];
+    bt_list_producer lp{buf, sizeof(buf)};
+    CHECK( lp.view() == "le" );
+    CHECK( (void*) lp.end() == (void*) (buf + 2) );
+
+    lp.append("abc");
+    CHECK( lp.view() == "l3:abce" );
+    lp += 42;
+    CHECK( lp.view() == "l3:abci42ee" );
+    std::vector<int> randos = {{1, 17, -999}};
+    lp.append(randos.begin(), randos.end());
+    CHECK( lp.view() == "l3:abci42ei1ei17ei-999ee" );
+
+    {
+        auto sublist = lp.append_list();
+        CHECK_THROWS_AS( lp.append(1), std::logic_error );
+        CHECK( sublist.view() == "le" );
+        CHECK( lp.view() == "l3:abci42ei1ei17ei-999elee" );
+        sublist.append(0);
+
+        auto sublist2{std::move(sublist)};
+        sublist2 += "";
+        CHECK( sublist2.view() == "li0e0:e" );
+        CHECK( lp.view() == "l3:abci42ei1ei17ei-999eli0e0:ee" );
+    }
+
+    lp.append_list().append_list().append_list() += "omg"s;
+    CHECK( lp.view() == "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeee" );
+
+    {
+        auto dict = lp.append_dict();
+        CHECK( dict.view() == "de" );
+        CHECK( lp.view() == "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeedee" );
+
+        CHECK_THROWS_AS( lp.append(1), std::logic_error );
+
+        dict.append("foo", "bar");
+        dict.append("g", 42);
+
+        CHECK( dict.view() == "d3:foo3:bar1:gi42ee" );
+        CHECK( lp.view() == "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeed3:foo3:bar1:gi42eee" );
+
+        dict.append_list("h").append_dict().append_dict("a").append_list("A") += 999;
+        CHECK( dict.view() == "d3:foo3:bar1:gi42e1:hld1:ad1:Ali999eeeeee" );
+        CHECK( lp.view() == "l3:abci42ei1ei17ei-999eli0e0:elll3:omgeeed3:foo3:bar1:gi42e1:hld1:ad1:Ali999eeeeeee" );
+    }
+}
