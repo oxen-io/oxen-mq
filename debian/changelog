@@ -1,3 +1,9 @@
+oxenmq (1.2.6-2~ubuntu2110) impish; urgency=medium
+
+  * New build for ubuntu 21.10
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Fri, 17 Sep 2021 11:29:54 -0300
+
 oxenmq (1.2.6-2~ubuntu2104) hirsute; urgency=medium
 
   * fix control file
