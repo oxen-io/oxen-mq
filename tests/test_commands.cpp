@@ -472,7 +472,7 @@ TEST_CASE("deferred replies", "[commands][send][deferred]") {
             { auto lock = catch_lock(); UNSCOPED_INFO("sleeping"); }
             std::this_thread::sleep_for(50ms * TIME_DILATION);
             { auto lock = catch_lock(); UNSCOPED_INFO("sending"); }
-            send.reply(msg);
+            send(msg);
         }};
         t.detach();
     });
