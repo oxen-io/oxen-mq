@@ -167,6 +167,16 @@ template <typename CharT>
 constexpr bool is_base64(std::basic_string_view<CharT> s) { return is_base64(s.begin(), s.end()); }
 constexpr bool is_base64(std::string_view s) { return is_base64(s.begin(), s.end()); }
 
+/// Returns the number of characters required to encode a base64 string from the given number of bytes.
+inline constexpr size_t to_base64_size(size_t byte_size) {
+    // ⌈bits/6⌉ rounded up to the next multiple of 4:
+    return ((byte_size*8 + 5) / 6 + 3) & ~3;
+}
+/// Returns the (maximum) number of bytes required to decode a base64 string of the given size.
+inline constexpr size_t from_base64_size(size_t b64_size) {
+    return b64_size*6 / 8; // ⌊bits/8⌋; floor because we ignore trailing "impossible" bits (see below)
+}
+
 /// Converts a sequence of base64 digits to bytes.  Undefined behaviour if any characters are not
 /// valid base64 alphabet characters.  It is permitted for the input and output ranges to overlap as
 /// long as `out` is no later than `begin`.  Trailing padding characters are permitted but not

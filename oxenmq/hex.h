@@ -124,6 +124,11 @@ template <typename CharT>
 constexpr bool is_hex(std::basic_string_view<CharT> s) { return is_hex(s.begin(), s.end()); }
 constexpr bool is_hex(std::string_view s) { return is_hex(s.begin(), s.end()); }
 
+/// Returns the number of characters required to encode a hex string from the given number of bytes.
+inline constexpr size_t to_hex_size(size_t byte_size) { return byte_size * 2; }
+/// Returns the number of bytes required to decode a hex string of the given size.
+inline constexpr size_t from_hex_size(size_t hex_size) { return hex_size / 2; }
+
 /// Convert a hex digit into its numeric (0-15) value
 constexpr char from_hex_digit(unsigned char x) noexcept {
     return detail::hex_lut.from_hex(x);

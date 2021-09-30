@@ -60,6 +60,16 @@ TEST_CASE("hex encoding/decoding", "[encoding][decoding][hex]") {
     std::basic_string_view<std::byte> hex_bytes{bytes.data(), bytes.size()};
     REQUIRE( oxenmq::is_hex(hex_bytes) );
     REQUIRE( oxenmq::from_hex(hex_bytes) == "\xff\x42\x12\x34" );
+
+    REQUIRE( oxenmq::to_hex_size(1) == 2 );
+    REQUIRE( oxenmq::to_hex_size(2) == 4 );
+    REQUIRE( oxenmq::to_hex_size(3) == 6 );
+    REQUIRE( oxenmq::to_hex_size(4) == 8 );
+    REQUIRE( oxenmq::to_hex_size(100) == 200 );
+    REQUIRE( oxenmq::from_hex_size(2) == 1 );
+    REQUIRE( oxenmq::from_hex_size(4) == 2 );
+    REQUIRE( oxenmq::from_hex_size(6) == 3 );
+    REQUIRE( oxenmq::from_hex_size(98) == 49 );
 }
 
 TEST_CASE("base32z encoding/decoding", "[encoding][decoding][base32z]") {
@@ -128,6 +138,27 @@ TEST_CASE("base32z encoding/decoding", "[encoding][decoding][base32z]") {
     std::basic_string_view<std::byte> b32_bytes{bytes.data(), bytes.size()};
     REQUIRE( oxenmq::is_base32z(b32_bytes) );
     REQUIRE( oxenmq::from_base32z(b32_bytes) == "\x00\xff"sv );
+
+    REQUIRE( oxenmq::to_base32z_size(1) == 2 );
+    REQUIRE( oxenmq::to_base32z_size(2) == 4 );
+    REQUIRE( oxenmq::to_base32z_size(3) == 5 );
+    REQUIRE( oxenmq::to_base32z_size(4) == 7 );
+    REQUIRE( oxenmq::to_base32z_size(5) == 8 );
+    REQUIRE( oxenmq::to_base32z_size(30) == 48 );
+    REQUIRE( oxenmq::to_base32z_size(31) == 50 );
+    REQUIRE( oxenmq::to_base32z_size(32) == 52 );
+    REQUIRE( oxenmq::to_base32z_size(33) == 53 );
+    REQUIRE( oxenmq::to_base32z_size(100) == 160 );
+    REQUIRE( oxenmq::from_base32z_size(160) == 100 );
+    REQUIRE( oxenmq::from_base32z_size(53) == 33 );
+    REQUIRE( oxenmq::from_base32z_size(52) == 32 );
+    REQUIRE( oxenmq::from_base32z_size(50) == 31 );
+    REQUIRE( oxenmq::from_base32z_size(48) == 30 );
+    REQUIRE( oxenmq::from_base32z_size(8) == 5 );
+    REQUIRE( oxenmq::from_base32z_size(7) == 4 );
+    REQUIRE( oxenmq::from_base32z_size(5) == 3 );
+    REQUIRE( oxenmq::from_base32z_size(4) == 2 );
+    REQUIRE( oxenmq::from_base32z_size(2) == 1 );
 }
 
 TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
@@ -228,6 +259,30 @@ TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
     std::basic_string_view<std::byte> b64_bytes{bytes.data(), bytes.size()};
     REQUIRE( oxenmq::is_base64(b64_bytes) );
     REQUIRE( oxenmq::from_base64(b64_bytes) == "\xff\x00"sv );
+
+    REQUIRE( oxenmq::to_base64_size(1) == 4 );
+    REQUIRE( oxenmq::to_base64_size(2) == 4 );
+    REQUIRE( oxenmq::to_base64_size(3) == 4 );
+    REQUIRE( oxenmq::to_base64_size(4) == 8 );
+    REQUIRE( oxenmq::to_base64_size(5) == 8 );
+    REQUIRE( oxenmq::to_base64_size(6) == 8 );
+    REQUIRE( oxenmq::to_base64_size(30) == 40 );
+    REQUIRE( oxenmq::to_base64_size(31) == 44 );
+    REQUIRE( oxenmq::to_base64_size(32) == 44 );
+    REQUIRE( oxenmq::to_base64_size(33) == 44 );
+    REQUIRE( oxenmq::to_base64_size(100) == 136 );
+    REQUIRE( oxenmq::from_base64_size(136) == 102 ); // Not symmetric because we don't know the last two are padding
+    REQUIRE( oxenmq::from_base64_size(134) == 100 ); // Unpadded
+    REQUIRE( oxenmq::from_base64_size(44) == 33 );
+    REQUIRE( oxenmq::from_base64_size(43) == 32 );
+    REQUIRE( oxenmq::from_base64_size(42) == 31 );
+    REQUIRE( oxenmq::from_base64_size(40) == 30 );
+    REQUIRE( oxenmq::from_base64_size(8) == 6 );
+    REQUIRE( oxenmq::from_base64_size(7) == 5 );
+    REQUIRE( oxenmq::from_base64_size(6) == 4 );
+    REQUIRE( oxenmq::from_base64_size(4) == 3 );
+    REQUIRE( oxenmq::from_base64_size(3) == 2 );
+    REQUIRE( oxenmq::from_base64_size(2) == 1 );
 }
 
 TEST_CASE("std::byte decoding", "[decoding][hex][base32z][base64]") {

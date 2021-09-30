@@ -138,6 +138,11 @@ template <typename CharT>
 constexpr bool is_base32z(std::basic_string_view<CharT> s) { return is_base32z(s.begin(), s.end()); }
 constexpr bool is_base32z(std::string_view s) { return is_base32z<>(s); }
 
+/// Returns the number of characters required to encode a base32z string from the given number of bytes.
+inline constexpr size_t to_base32z_size(size_t byte_size) { return (byte_size*8 + 4) / 5; } // ⌈bits/5⌉ because 5 bits per byte
+/// Returns the (maximum) number of bytes required to decode a base32z string of the given size.
+inline constexpr size_t from_base32z_size(size_t b32z_size) { return b32z_size*5 / 8; } // ⌊bits/8⌋
+
 /// Converts a sequence of base32z digits to bytes.  Undefined behaviour if any characters are not
 /// valid base32z alphabet characters.  It is permitted for the input and output ranges to overlap
 /// as long as `out` is no later than `begin`.  Note that if you pass in a sequence that could not
