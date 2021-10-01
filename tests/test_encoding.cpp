@@ -139,6 +139,16 @@ TEST_CASE("base32z encoding/decoding", "[encoding][decoding][base32z]") {
     REQUIRE( oxenmq::is_base32z(b32_bytes) );
     REQUIRE( oxenmq::from_base32z(b32_bytes) == "\x00\xff"sv );
 
+    REQUIRE( oxenmq::is_base32z("") );
+    REQUIRE_FALSE( oxenmq::is_base32z("y") );
+    REQUIRE( oxenmq::is_base32z("yy") );
+    REQUIRE_FALSE( oxenmq::is_base32z("yyy") );
+    REQUIRE( oxenmq::is_base32z("yyyy") );
+    REQUIRE( oxenmq::is_base32z("yyyyy") );
+    REQUIRE_FALSE( oxenmq::is_base32z("yyyyyy") );
+    REQUIRE( oxenmq::is_base32z("yyyyyyy") );
+    REQUIRE( oxenmq::is_base32z("yyyyyyyy") );
+
     REQUIRE( oxenmq::to_base32z_size(1) == 2 );
     REQUIRE( oxenmq::to_base32z_size(2) == 4 );
     REQUIRE( oxenmq::to_base32z_size(3) == 5 );
@@ -210,6 +220,7 @@ TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
     REQUIRE( oxenmq::is_base64("YWJjZB") ); // not really valid, but we explicitly accept it
 
     REQUIRE_FALSE( oxenmq::is_base64("YWJjZ=") ); // invalid padding (padding can only be 4th or 3rd+4th of a 4-char block)
+    REQUIRE_FALSE( oxenmq::is_base64("YYYYA") ); // invalid: base64 can never be length 4n+1
     REQUIRE_FALSE( oxenmq::is_base64("YWJj=") );
     REQUIRE_FALSE( oxenmq::is_base64("YWJj=A") );
     REQUIRE_FALSE( oxenmq::is_base64("YWJjA===") );
