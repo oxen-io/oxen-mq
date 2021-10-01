@@ -285,6 +285,90 @@ TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
     REQUIRE( oxenmq::from_base64_size(2) == 1 );
 }
 
+TEST_CASE("transcoding", "[decoding][encoding][base32z][hex][base64]") {
+    // Decoders:
+    oxenmq::base64_decoder in64{pk_b64.begin(), pk_b64.end()};
+    oxenmq::base32z_decoder in32z{pk_b32z.begin(), pk_b32z.end()};
+    oxenmq::hex_decoder in16{pk_hex.begin(), pk_hex.end()};
+
+    // Transcoders:
+    oxenmq::base32z_encoder b64_to_b32z{in64, in64.end()};
+    oxenmq::base32z_encoder hex_to_b32z{in16, in16.end()};
+    oxenmq::hex_encoder b64_to_hex{in64, in64.end()};
+    oxenmq::hex_encoder b32z_to_hex{in32z, in32z.end()};
+    oxenmq::base64_encoder hex_to_b64{in16, in16.end()};
+    oxenmq::base64_encoder b32z_to_b64{in32z, in32z.end()};
+    // These ones are stupid, but should work anyway:
+    oxenmq::base64_encoder b64_to_b64{in64, in64.end()};
+    oxenmq::base32z_encoder b32z_to_b32z{in32z, in32z.end()};
+    oxenmq::hex_encoder hex_to_hex{in16, in16.end()};
+
+    // Decoding to bytes:
+    std::string x;
+    auto xx = std::back_inserter(x);
+    std::copy(in64, in64.end(), xx);
+    REQUIRE( x == pk );
+    x.clear();
+    std::copy(in32z, in32z.end(), xx);
+    REQUIRE( x == pk );
+    x.clear();
+    std::copy(in16, in16.end(), xx);
+    REQUIRE( x == pk );
+
+    // Transcoding
+    x.clear();
+    std::copy(b64_to_hex, b64_to_hex.end(), xx);
+    CHECK( x == pk_hex );
+
+    x.clear();
+    std::copy(b64_to_b32z, b64_to_b32z.end(), xx);
+    CHECK( x == pk_b32z );
+
+    x.clear();
+    std::copy(b64_to_b64, b64_to_b64.end(), xx);
+    CHECK( x == pk_b64 );
+
+    x.clear();
+    std::copy(b32z_to_hex, b32z_to_hex.end(), xx);
+    CHECK( x == pk_hex );
+
+    x.clear();
+    std::copy(b32z_to_b32z, b32z_to_b32z.end(), xx);
+    CHECK( x == pk_b32z );
+
+    x.clear();
+    std::copy(b32z_to_b64, b32z_to_b64.end(), xx);
+    CHECK( x == pk_b64 );
+
+    x.clear();
+    std::copy(hex_to_hex, hex_to_hex.end(), xx);
+    CHECK( x == pk_hex );
+
+    x.clear();
+    std::copy(hex_to_b32z, hex_to_b32z.end(), xx);
+    CHECK( x == pk_b32z );
+
+    x.clear();
+    std::copy(hex_to_b64, hex_to_b64.end(), xx);
+    CHECK( x == pk_b64 );
+
+    // Make a big chain of conversions
+    oxenmq::base32z_encoder it1{in64, in64.end()};
+    oxenmq::base32z_decoder it2{it1, it1.end()};
+    oxenmq::base64_encoder it3{it2, it2.end()};
+    oxenmq::base64_decoder it4{it3, it3.end()};
+    oxenmq::hex_encoder it5{it4, it4.end()};
+    x.clear();
+    std::copy(it5, it5.end(), xx);
+    CHECK( x == pk_hex );
+
+    // No-padding b64 encoding:
+    oxenmq::base64_encoder b64_nopad{pk.begin(), pk.end(), false};
+    x.clear();
+    std::copy(b64_nopad, b64_nopad.end(), xx);
+    CHECK( x == pk_b64.substr(0, pk_b64.size()-1) );
+}
+
 TEST_CASE("std::byte decoding", "[decoding][hex][base32z][base64]") {
     // Decoding to std::byte is a little trickier because you can't assign to a byte without an
     // explicit cast, which means we have to properly detect that output is going to a std::byte

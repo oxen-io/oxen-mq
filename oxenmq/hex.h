@@ -67,18 +67,50 @@ inline constexpr size_t to_hex_size(size_t byte_size) { return byte_size * 2; }
 /// Returns the number of bytes required to decode a hex string of the given size.
 inline constexpr size_t from_hex_size(size_t hex_size) { return hex_size / 2; }
 
+/// Iterable object for on-the-fly hex encoding.  Used internally, but also particularly useful when
+/// converting from one encoding to another.
+template <typename InputIt>
+struct hex_encoder final {
+private:
+    InputIt _it, _end;
+    static_assert(sizeof(decltype(*_it)) == 1, "hex_encoder requires chars/bytes input iterator");
+    uint8_t c;
+    bool second_half = false;
+public:
+    using iterator_category = std::input_iterator_tag;
+    using difference_type = std::ptrdiff_t;
+    using value_type = char;
+    using reference = value_type;
+    using pointer = void;
+    hex_encoder(InputIt begin, InputIt end) : _it{std::move(begin)}, _end{std::move(end)} {}
+
+    hex_encoder end() { return {_end, _end}; }
+
+    bool operator==(const hex_encoder& i) { return _it == i._it && second_half == i.second_half; }
+    bool operator!=(const hex_encoder& i) { return !(*this == i); }
+
+    hex_encoder& operator++() {
+        second_half = !second_half;
+        if (!second_half)
+            ++_it;
+        return *this;
+    }
+    hex_encoder operator++(int) { hex_encoder copy{*this}; ++*this; return copy; }
+    char operator*() {
+        return detail::hex_lut.to_hex(second_half
+                ? c & 0x0f
+                : (c = static_cast<uint8_t>(*_it)) >> 4);
+    }
+};
+
 /// Creates hex digits from a character sequence given by iterators, writes them starting at `out`.
 /// Returns the final value of out (i.e. the iterator positioned just after the last written
 /// hex character).
 template <typename InputIt, typename OutputIt>
 OutputIt to_hex(InputIt begin, InputIt end, OutputIt out) {
     static_assert(sizeof(decltype(*begin)) == 1, "to_hex requires chars/bytes");
-    for (; begin != end; ++begin) {
-        uint8_t c = static_cast<uint8_t>(*begin);
-        *out++ = detail::hex_lut.to_hex(c >> 4);
-        *out++ = detail::hex_lut.to_hex(c & 0x0f);
-    }
-    return out;
+    auto it = hex_encoder{begin, end};
+    return std::copy(it, it.end(), out);
 }
 
 /// Creates a string of hex digits from a character sequence iterator pair
@@ -141,6 +173,48 @@ constexpr char from_hex_digit(unsigned char x) noexcept {
 /// Constructs a byte value from a pair of hex digits
 constexpr char from_hex_pair(unsigned char a, unsigned char b) noexcept { return (from_hex_digit(a) << 4) | from_hex_digit(b); }
 
+/// Iterable object for on-the-fly hex decoding.  Used internally but also particularly useful when
+/// converting from one encoding to another.  Undefined behaviour if the given iterator range is not
+/// a valid hex string with even length (i.e. is_hex() should return true).
+template <typename InputIt>
+struct hex_decoder final {
+private:
+    InputIt _it, _end;
+    static_assert(sizeof(decltype(*_it)) == 1, "hex_encoder requires chars/bytes input iterator");
+    char byte;
+public:
+    using iterator_category = std::input_iterator_tag;
+    using difference_type = std::ptrdiff_t;
+    using value_type = char;
+    using reference = value_type;
+    using pointer = void;
+    hex_decoder(InputIt begin, InputIt end) : _it{std::move(begin)}, _end{std::move(end)} {
+        if (_it != _end)
+            load_byte();
+    }
+
+    hex_decoder end() { return {_end, _end}; }
+
+    bool operator==(const hex_decoder& i) { return _it == i._it; }
+    bool operator!=(const hex_decoder& i) { return _it != i._it; }
+
+    hex_decoder& operator++() {
+        if (++_it != _end)
+            load_byte();
+        return *this;
+    }
+    hex_decoder operator++(int) { hex_decoder copy{*this}; ++*this; return copy; }
+    char operator*() const { return byte; }
+
+private:
+    void load_byte() {
+        auto a = *_it;
+        auto b = *++_it;
+        byte = from_hex_pair(static_cast<unsigned char>(a), static_cast<unsigned char>(b));
+    }
+
+};
+
 /// Converts a sequence of hex digits to bytes.  Undefined behaviour if any characters are not in
 /// [0-9a-fA-F] or if the input sequence length is not even: call `is_hex` first if you need to
 /// check.  It is permitted for the input and output ranges to overlap as long as out is no later
@@ -148,14 +222,11 @@ constexpr char from_hex_pair(unsigned char a, unsigned char b) noexcept { return
 /// last written character).
 template <typename InputIt, typename OutputIt>
 OutputIt from_hex(InputIt begin, InputIt end, OutputIt out) {
-    using std::distance;
     assert(is_hex(begin, end));
-    while (begin != end) {
-        auto a = *begin++;
-        auto b = *begin++;
-        *out++ = static_cast<detail::byte_type_t<OutputIt>>(
-                from_hex_pair(static_cast<unsigned char>(a), static_cast<unsigned char>(b)));
-    }
+    auto it = hex_decoder(begin, end);
+    const auto hend = it.end();
+    while (it != hend)
+        *out++ = static_cast<detail::byte_type_t<OutputIt>>(*it++);
     return out;
 }
 

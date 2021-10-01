@@ -87,50 +87,88 @@ inline constexpr size_t from_base64_size(size_t b64_size) {
     return b64_size * 3 / 4; // == ⌊bits/8⌋; floor because we ignore trailing "impossible" bits (see below)
 }
 
+/// Iterable object for on-the-fly base64 encoding.  Used internally, but also particularly useful
+/// when converting from one encoding to another.
+template <typename InputIt>
+struct base64_encoder final {
+private:
+    InputIt _it, _end;
+    static_assert(sizeof(decltype(*_it)) == 1, "base64_encoder requires chars/bytes input iterator");
+    int bits; // Number of bits held in r; will always be >= 6 until we are at the end.
+    int padding;
+    uint_fast16_t r;
+public:
+    using iterator_category = std::input_iterator_tag;
+    using difference_type = std::ptrdiff_t;
+    using value_type = char;
+    using reference = value_type;
+    using pointer = void;
+    base64_encoder(InputIt begin, InputIt end, bool padded = true) : _it{std::move(begin)}, _end{std::move(end)}, padding{padded} {
+        if (_it != _end) {
+            bits = 8;
+            r = static_cast<unsigned char>(*_it);
+        } else {
+            bits = 0;
+        }
+    }
+
+    base64_encoder end() { return {_end, _end, false}; }
+
+    bool operator==(const base64_encoder& i) { return _it == i._it && bits == i.bits && padding == i.padding; }
+    bool operator!=(const base64_encoder& i) { return !(*this == i); }
+
+    base64_encoder& operator++() {
+        if (bits == 0) {
+            padding--;
+            return *this;
+        }
+        assert(bits >= 6);
+        // Discard the most significant 6 bits
+        bits -= 6;
+        r &= (1 << bits) - 1;
+        // If we end up with less than 6 significant bits then try to pull another 8 bits:
+        if (bits < 6 && _it != _end) {
+            if (++_it != _end) {
+                r = (r << 8) | static_cast<unsigned char>(*_it);
+                bits += 8;
+            } else if (bits > 0) {
+                // No more input bytes, so shift `r` to put the bits we have into the most
+                // significant bit position for the final character, and figure out how many padding
+                // bytes we want to append.  E.g. if we have "11" we want
+                // the last character to be encoded "110000".
+                if (padding) {
+                    // padding should be:
+                    // 3n+0 input => 4n output, no padding, handled below
+                    // 3n+1 input => 4n+2 output + 2 padding; we'll land here with 2 trailing bits
+                    // 3n+2 input => 4n+3 output + 1 padding; we'll land here with 4 trailing bits
+                    padding = 3 - bits / 2;
+                }
+                r <<= (6 - bits);
+                bits = 6;
+            } else {
+                padding = 0; // No excess bits, so input was a multiple of 3 and thus no padding
+            }
+        }
+        return *this;
+    }
+    base64_encoder operator++(int) { base64_encoder copy{*this}; ++*this; return copy; }
+
+    char operator*() {
+        if (bits == 0 && padding)
+            return '=';
+        // Right-shift off the excess bits we aren't accessing yet
+        return detail::b64_lut.to_b64(r >> (bits - 6));
+    }
+};
+
 /// Converts bytes into a base64 encoded character sequence, writing them starting at `out`.
 /// Returns the final value of out (i.e. the iterator positioned just after the last written base64
 /// character).
 template <typename InputIt, typename OutputIt>
 OutputIt to_base64(InputIt begin, InputIt end, OutputIt out) {
     static_assert(sizeof(decltype(*begin)) == 1, "to_base64 requires chars/bytes");
-    int bits = 0; // Tracks the number of unconsumed bits held in r, will always be in {0, 2, 4}
-    std::uint_fast16_t r = 0;
-    while (begin != end) {
-        r = r << 8 | static_cast<unsigned char>(*begin++);
-
-        // we just added 8 bits, so we can *always* consume 6 to produce one character, so (net) we
-        // are adding 2 bits.
-        bits += 2;
-        *out++ = detail::b64_lut.to_b64(r >> bits); // Right-shift off the bits we aren't consuming right now
-
-        // Drop the bits we don't want to keep (because we just consumed them)
-        r &= (1 << bits) - 1;
-
-        if (bits == 6) { // We have enough bits to produce a second character (which means we had 4 before and added 8)
-            bits = 0;
-            *out++ = detail::b64_lut.to_b64(r);
-            r = 0;
-        }
-    }
-
-    // If bits == 0 then we ended our 6-bit outputs coinciding with 8-bit values, i.e. at a multiple
-    // of 24 bits: this means we don't have anything else to output and don't need any padding.
-    if (bits == 2) {
-        // We finished with 2 unconsumed bits, which means we ended 1 byte past a 24-bit group (e.g.
-        // 1 byte, 4 bytes, 301 bytes, etc.); since we need to always be a multiple of 4 output
-        // characters that means we've produced 1: so we right-fill 0s to get the next char, then
-        // add two padding ='s.
-        *out++ = detail::b64_lut.to_b64(r << 4);
-        *out++ = '=';
-        *out++ = '=';
-    } else if (bits == 4) {
-        // 4 bits left means we produced 2 6-bit values from the first 2 bytes of a 3-byte group.
-        // Fill 0s to get the last one, plus one padding output.
-        *out++ = detail::b64_lut.to_b64(r << 2);
-        *out++ = '=';
-    }
-
-    return out;
+    auto it = base64_encoder{begin, end};
+    return std::copy(it, it.end(), out);
 }
 
 /// Creates and returns a base64 string from an iterator pair of a character sequence
@@ -196,6 +234,82 @@ template <typename CharT>
 constexpr bool is_base64(std::basic_string_view<CharT> s) { return is_base64(s.begin(), s.end()); }
 constexpr bool is_base64(std::string_view s) { return is_base64(s.begin(), s.end()); }
 
+/// Iterable object for on-the-fly base64 decoding.  Used internally, but also particularly useful
+/// when converting from one encoding to another.  The input range must be a valid base64 encoded
+/// string (with or without padding).
+///
+/// Note that we ignore "padding" bits without requiring that they actually be 0.  For instance, the
+/// bytes "\ff\ff" are ideally encoded as "//8=" (16 bits of 1s + 2 padding 0 bits, then a full
+/// 6-bit padding char).  We don't, however, require that the padding bits be 0.  That is, "///=",
+/// "//9=", "//+=", etc. will all decode to the same \ff\ff output string.
+template <typename InputIt>
+struct base64_decoder final {
+private:
+    InputIt _it, _end;
+    static_assert(sizeof(decltype(*_it)) == 1, "base64_decoder requires chars/bytes input iterator");
+    uint_fast16_t in = 0;
+    int bits = 0; // number of bits loaded into `in`; will be in [8, 12] until we hit the end
+public:
+    using iterator_category = std::input_iterator_tag;
+    using difference_type = std::ptrdiff_t;
+    using value_type = char;
+    using reference = value_type;
+    using pointer = void;
+    base64_decoder(InputIt begin, InputIt end) : _it{std::move(begin)}, _end{std::move(end)} {
+        if (_it != _end)
+            load_byte();
+    }
+
+    base64_decoder end() { return {_end, _end}; }
+
+    bool operator==(const base64_decoder& i) { return _it == i._it; }
+    bool operator!=(const base64_decoder& i) { return _it != i._it; }
+
+    base64_decoder& operator++() {
+        // Discard 8 most significant bits
+        bits -= 8;
+        in &= (1 << bits) - 1;
+        if (++_it != _end)
+            load_byte();
+        return *this;
+    }
+    base64_decoder operator++(int) { base64_decoder copy{*this}; ++*this; return copy; }
+
+    char operator*() {
+        return in >> (bits - 8);
+    }
+
+private:
+    void load_in() {
+        // We hit padding trying to read enough for a full byte, so we're done.  (And since you were
+        // already supposed to have checked validity with is_base64, the padding can only be at the
+        // end).
+        auto c = static_cast<unsigned char>(*_it);
+        if (c == '=') {
+            _it = _end;
+            bits = 0;
+            return;
+        }
+
+        in = in << 6
+            | detail::b64_lut.from_b64(c);
+        bits += 6;
+    }
+
+    void load_byte() {
+        load_in();
+        if (bits && bits < 8 && ++_it != _end)
+            load_in();
+
+        // If we hit the _end iterator above then we hit the end of the input (or hit padding) with
+        // fewer than 8 bits accumulated to make a full byte.  For a properly encoded base64 string
+        // this should only be possible with 0, 2, or 4 bits of all 0s; these are essentially
+        // "padding" bits (e.g.  encoding 2 byte (16 bits) requires 3 b64 chars (18 bits), where
+        // only the first 16 bits are significant).  Ideally any padding bits should be 0, but we
+        // don't check that and rather just ignore them.
+    }
+};
+
 /// Converts a sequence of base64 digits to bytes.  Undefined behaviour if any characters are not
 /// valid base64 alphabet characters.  It is permitted for the input and output ranges to overlap as
 /// long as `out` is no later than `begin`.  Trailing padding characters are permitted but not
@@ -211,29 +325,10 @@ constexpr bool is_base64(std::string_view s) { return is_base64(s.begin(), s.end
 template <typename InputIt, typename OutputIt>
 OutputIt from_base64(InputIt begin, InputIt end, OutputIt out) {
     static_assert(sizeof(decltype(*begin)) == 1, "from_base64 requires chars/bytes");
-    uint_fast16_t curr = 0;
-    int bits = 0; // number of bits we've loaded into val; we always keep this < 8.
-    while (begin != end) {
-        auto c = static_cast<unsigned char>(*begin++);
-
-        // padding; don't bother checking if we're at the end because is_base64 is a precondition
-        // and we're allowed UB if it isn't satisfied.
-        if (c == '=') continue;
-
-        curr = curr << 6 | detail::b64_lut.from_b64(c);
-        if (bits == 0)
-            bits = 6;
-        else {
-            bits -= 2; // Added 6, removing 8
-            *out++ = static_cast<detail::byte_type_t<OutputIt>>(
-                    static_cast<uint8_t>(curr >> bits));
-            curr &= (1 << bits) - 1;
-        }
-    }
-    // Don't worry about leftover bits because either they have to be 0, or they can't happen at
-    // all.  See base32z.h for why: the reasoning is exactly the same (except using 6 bits per
-    // character here instead of 5).
-
+    base64_decoder it{begin, end};
+    auto bend = it.end();
+    while (it != bend)
+        *out++ = static_cast<detail::byte_type_t<OutputIt>>(*it++);
     return out;
 }
 
