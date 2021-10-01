@@ -62,6 +62,11 @@ static_assert(hex_lut.from_hex('a') == 10 && hex_lut.from_hex('F') == 15 && hex_
 
 } // namespace detail
 
+/// Returns the number of characters required to encode a hex string from the given number of bytes.
+inline constexpr size_t to_hex_size(size_t byte_size) { return byte_size * 2; }
+/// Returns the number of bytes required to decode a hex string of the given size.
+inline constexpr size_t from_hex_size(size_t hex_size) { return hex_size / 2; }
+
 /// Creates hex digits from a character sequence given by iterators, writes them starting at `out`.
 /// Returns the final value of out (i.e. the iterator positioned just after the last written
 /// hex character).
@@ -80,8 +85,10 @@ OutputIt to_hex(InputIt begin, InputIt end, OutputIt out) {
 template <typename It>
 std::string to_hex(It begin, It end) {
     std::string hex;
-    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>)
-        hex.reserve(2 * std::distance(begin, end));
+    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>) {
+        using std::distance;
+        hex.reserve(to_hex_size(distance(begin, end)));
+    }
     to_hex(begin, end, std::back_inserter(hex));
     return hex;
 }
@@ -104,9 +111,11 @@ template <typename It>
 constexpr bool is_hex(It begin, It end) {
     static_assert(sizeof(decltype(*begin)) == 1, "is_hex requires chars/bytes");
     constexpr bool ra = std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>;
-    if constexpr (ra)
-        if (std::distance(begin, end) % 2 != 0)
+    if constexpr (ra) {
+        using std::distance;
+        if (distance(begin, end) % 2 != 0)
             return false;
+    }
 
     size_t count = 0;
     for (; begin != end; ++begin) {
@@ -155,8 +164,10 @@ OutputIt from_hex(InputIt begin, InputIt end, OutputIt out) {
 template <typename It>
 std::string from_hex(It begin, It end) {
     std::string bytes;
-    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>)
-        bytes.reserve(std::distance(begin, end) / 2);
+    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>) {
+        using std::distance;
+        bytes.reserve(from_hex_size(distance(begin, end)));
+    }
     from_hex(begin, end, std::back_inserter(bytes));
     return bytes;
 }

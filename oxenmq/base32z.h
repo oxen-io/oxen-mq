@@ -74,6 +74,11 @@ static_assert(b32z_lut.from_b32z('w') == 20 && b32z_lut.from_b32z('T') == 17 && 
 
 } // namespace detail
 
+/// Returns the number of characters required to encode a base32z string from the given number of bytes.
+inline constexpr size_t to_base32z_size(size_t byte_size) { return (byte_size*8 + 4) / 5; } // ⌈bits/5⌉ because 5 bits per byte
+/// Returns the (maximum) number of bytes required to decode a base32z string of the given size.
+inline constexpr size_t from_base32z_size(size_t b32z_size) { return b32z_size*5 / 8; } // ⌊bits/8⌋
+
 /// Converts bytes into a base32z encoded character sequence, writing them starting at `out`.
 /// Returns the final value of out (i.e. the iterator positioned just after the last written base32z
 /// character).
@@ -110,8 +115,10 @@ OutputIt to_base32z(InputIt begin, InputIt end, OutputIt out) {
 template <typename It>
 std::string to_base32z(It begin, It end) {
     std::string base32z;
-    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>)
-        base32z.reserve((std::distance(begin, end)*8 + 4) / 5); // == bytes*8/5, rounded up.
+    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>) {
+        using std::distance;
+        base32z.reserve(to_base32z_size(distance(begin, end)));
+    }
     to_base32z(begin, end, std::back_inserter(base32z));
     return base32z;
 }
@@ -121,15 +128,36 @@ template <typename CharT>
 std::string to_base32z(std::basic_string_view<CharT> s) { return to_base32z(s.begin(), s.end()); }
 inline std::string to_base32z(std::string_view s) { return to_base32z<>(s); }
 
-/// Returns true if all elements in the range are base32z characters
+/// Returns true if the given [begin, end) range is an acceptable base32z string: specifically every
+/// character must be in the base32z alphabet, and the string must be a valid encoding length that
+/// could have been produced by to_base32z (i.e. some lengths are impossible).
 template <typename It>
 constexpr bool is_base32z(It begin, It end) {
     static_assert(sizeof(decltype(*begin)) == 1, "is_base32z requires chars/bytes");
+    size_t count = 0;
+    constexpr bool random = std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>;
+    if constexpr (random) {
+        using std::distance;
+        count = distance(begin, end) % 8;
+        if (count == 1 || count == 3 || count == 6) // see below
+            return false;
+    }
     for (; begin != end; ++begin) {
         auto c = static_cast<unsigned char>(*begin);
         if (detail::b32z_lut.from_b32z(c) == 0 && !(c == 'y' || c == 'Y'))
             return false;
+        if constexpr (!random)
+            count++;
     }
+    // Check for a valid length.
+    // - 5n + 0 bytes encodes to 8n chars (no padding bits)
+    // - 5n + 1 bytes encodes to 8n+2 chars (last 2 bits are padding)
+    // - 5n + 2 bytes encodes to 8n+4 chars (last 4 bits are padding)
+    // - 5n + 3 bytes encodes to 8n+5 chars (last 1 bit is padding)
+    // - 5n + 4 bytes encodes to 8n+7 chars (last 3 bits are padding)
+    if constexpr (!random)
+        if (count %= 8; count == 1 || count == 3 || count == 6)
+            return false;
     return true;
 }
 
@@ -197,8 +225,10 @@ OutputIt from_base32z(InputIt begin, InputIt end, OutputIt out) {
 template <typename It>
 std::string from_base32z(It begin, It end) {
     std::string bytes;
-    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>)
-        bytes.reserve((std::distance(begin, end)*5 + 7) / 8); // == chars*5/8, rounded up.
+    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>) {
+        using std::distance;
+        bytes.reserve(from_base32z_size(distance(begin, end)));
+    }
     from_base32z(begin, end, std::back_inserter(bytes));
     return bytes;
 }

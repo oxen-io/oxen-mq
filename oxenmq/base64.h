@@ -76,6 +76,17 @@ static_assert(b64_lut.from_b64('/') == 63 && b64_lut.from_b64('7') == 59 && b64_
 
 } // namespace detail
 
+/// Returns the number of characters required to encode a base64 string from the given number of bytes.
+inline constexpr size_t to_base64_size(size_t byte_size) {
+    // bytes*4/3, rounded up to the next multiple of 4
+    return (byte_size + 2) / 3 * 4;
+}
+/// Returns the (maximum) number of bytes required to decode a base64 string of the given size.
+/// Note that this may overallocate by 1-2 bytes if the size includes 1-2 padding chars.
+inline constexpr size_t from_base64_size(size_t b64_size) {
+    return b64_size * 3 / 4; // == ⌊bits/8⌋; floor because we ignore trailing "impossible" bits (see below)
+}
+
 /// Converts bytes into a base64 encoded character sequence, writing them starting at `out`.
 /// Returns the final value of out (i.e. the iterator positioned just after the last written base64
 /// character).
@@ -126,8 +137,10 @@ OutputIt to_base64(InputIt begin, InputIt end, OutputIt out) {
 template <typename It>
 std::string to_base64(It begin, It end) {
     std::string base64;
-    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>)
-        base64.reserve((std::distance(begin, end) + 2) / 3 * 4); // bytes*4/3, rounded up to the next multiple of 4
+    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>) {
+        using std::distance;
+        base64.reserve(to_base64_size(distance(begin, end)));
+    }
     to_base64(begin, end, std::back_inserter(base64));
     return base64;
 }
@@ -139,11 +152,20 @@ inline std::string to_base64(std::string_view s) { return to_base64<>(s); }
 
 /// Returns true if the range is a base64 encoded value; we allow (but do not require) '=' padding,
 /// but only at the end, only 1 or 2, and only if it pads out the total to a multiple of 4.
+/// Otherwise the string must contain only valid base64 characters, and must not have a length of
+/// 4n+1 (because that cannot be produced by base64 encoding).
 template <typename It>
 constexpr bool is_base64(It begin, It end) {
     static_assert(sizeof(decltype(*begin)) == 1, "is_base64 requires chars/bytes");
     using std::distance;
     using std::prev;
+    size_t count = 0;
+    constexpr bool random = std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>;
+    if constexpr (random) {
+        count = distance(begin, end) % 4;
+        if (count == 1)
+            return false;
+    }
 
     // Allow 1 or 2 padding chars *if* they pad it to a multiple of 4.
     if (begin != end && distance(begin, end) % 4 == 0) {
@@ -158,7 +180,14 @@ constexpr bool is_base64(It begin, It end) {
         auto c = static_cast<unsigned char>(*begin);
         if (detail::b64_lut.from_b64(c) == 0 && c != 'A')
             return false;
+        if constexpr (!random)
+            count++;
     }
+
+    if constexpr (!random)
+        if (count % 4 == 1) // base64 encoding will produce 4n, 4n+2, 4n+3, but never 4n+1
+            return false;
+
     return true;
 }
 
@@ -213,8 +242,10 @@ OutputIt from_base64(InputIt begin, InputIt end, OutputIt out) {
 template <typename It>
 std::string from_base64(It begin, It end) {
     std::string bytes;
-    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>)
-        bytes.reserve(std::distance(begin, end)*6 / 8); // each digit carries 6 bits; this may overallocate by 1-2 bytes due to padding
+    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>) {
+        using std::distance;
+        bytes.reserve(from_base64_size(distance(begin, end)));
+    }
     from_base64(begin, end, std::back_inserter(bytes));
     return bytes;
 }
