@@ -77,9 +77,10 @@ static_assert(b64_lut.from_b64('/') == 63 && b64_lut.from_b64('7') == 59 && b64_
 } // namespace detail
 
 /// Returns the number of characters required to encode a base64 string from the given number of bytes.
-inline constexpr size_t to_base64_size(size_t byte_size) {
-    // bytes*4/3, rounded up to the next multiple of 4
-    return (byte_size + 2) / 3 * 4;
+inline constexpr size_t to_base64_size(size_t byte_size, bool padded = true) {
+    return padded
+        ? (byte_size + 2) / 3 * 4 // bytes*4/3, rounded up to the next multiple of 4
+        : (byte_size * 4 + 2) / 3; // ⌈bytes*4/3⌉
 }
 /// Returns the (maximum) number of bytes required to decode a base64 string of the given size.
 /// Note that this may overallocate by 1-2 bytes if the size includes 1-2 padding chars.
@@ -165,13 +166,14 @@ public:
 /// Returns the final value of out (i.e. the iterator positioned just after the last written base64
 /// character).
 template <typename InputIt, typename OutputIt>
-OutputIt to_base64(InputIt begin, InputIt end, OutputIt out) {
+OutputIt to_base64(InputIt begin, InputIt end, OutputIt out, bool padded = true) {
     static_assert(sizeof(decltype(*begin)) == 1, "to_base64 requires chars/bytes");
-    auto it = base64_encoder{begin, end};
+    auto it = base64_encoder{begin, end, padded};
     return std::copy(it, it.end(), out);
 }
 
-/// Creates and returns a base64 string from an iterator pair of a character sequence
+/// Creates and returns a base64 string from an iterator pair of a character sequence.  The
+/// resulting string will have '=' padding, if appropriate.
 template <typename It>
 std::string to_base64(It begin, It end) {
     std::string base64;
@@ -183,10 +185,30 @@ std::string to_base64(It begin, It end) {
     return base64;
 }
 
-/// Creates a base64 string from an iterable, std::string-like object
+/// Creates and returns a base64 string from an iterator pair of a character sequence.  The
+/// resulting string will not be padded.
+template <typename It>
+std::string to_base64_unpadded(It begin, It end) {
+    std::string base64;
+    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>) {
+        using std::distance;
+        base64.reserve(to_base64_size(distance(begin, end), false));
+    }
+    to_base64(begin, end, std::back_inserter(base64), false);
+    return base64;
+}
+
+/// Creates a base64 string from an iterable, std::string-like object.  The string will have '='
+/// padding, if appropriate.
 template <typename CharT>
 std::string to_base64(std::basic_string_view<CharT> s) { return to_base64(s.begin(), s.end()); }
 inline std::string to_base64(std::string_view s) { return to_base64<>(s); }
+
+/// Creates a base64 string from an iterable, std::string-like object.  The string will not be
+/// padded.
+template <typename CharT>
+std::string to_base64_unpadded(std::basic_string_view<CharT> s) { return to_base64_unpadded(s.begin(), s.end()); }
+inline std::string to_base64_unpadded(std::string_view s) { return to_base64_unpadded<>(s); }
 
 /// Returns true if the range is a base64 encoded value; we allow (but do not require) '=' padding,
 /// but only at the end, only 1 or 2, and only if it pads out the total to a multiple of 4.

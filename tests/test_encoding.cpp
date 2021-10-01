@@ -186,6 +186,13 @@ TEST_CASE("base64 encoding/decoding", "[encoding][decoding][base64]") {
     REQUIRE( oxenmq::to_base64("abcde")  == "YWJjZGU=" );
     REQUIRE( oxenmq::to_base64("abcdef") == "YWJjZGVm" );
 
+    REQUIRE( oxenmq::to_base64_unpadded("a")   == "YQ" );
+    REQUIRE( oxenmq::to_base64_unpadded("ab")  == "YWI" );
+    REQUIRE( oxenmq::to_base64_unpadded("abc") == "YWJj" );
+    REQUIRE( oxenmq::to_base64_unpadded("abcd")   == "YWJjZA" );
+    REQUIRE( oxenmq::to_base64_unpadded("abcde")  == "YWJjZGU" );
+    REQUIRE( oxenmq::to_base64_unpadded("abcdef") == "YWJjZGVm" );
+
     REQUIRE( oxenmq::to_base64("\0\0\0\xff"s) == "AAAA/w==" );
     REQUIRE( oxenmq::to_base64("\0\0\0\xff\xff"s) == "AAAA//8=" );
     REQUIRE( oxenmq::to_base64("\0\0\0\xff\xff\xff"s) == "AAAA////" );
