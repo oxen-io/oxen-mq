@@ -100,7 +100,7 @@ private:
     // Number of bits held in r; will always be >= 6 until we are at the end.
     int bits{_it != _end ? 8 : 0};
     // Holds bits of data we've already read, which might belong to current or next chars
-    uint_fast16_t r{bits ? static_cast<unsigned char>(*_it) : 0u};
+    uint_fast16_t r{bits ? static_cast<unsigned char>(*_it) : (unsigned char)0};
 public:
     using iterator_category = std::input_iterator_tag;
     using difference_type = std::ptrdiff_t;
