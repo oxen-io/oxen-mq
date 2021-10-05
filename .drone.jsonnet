@@ -1,3 +1,6 @@
+
+local apt_get_quiet = 'apt-get -o=Dpkg::Use-Pty=0 -q ';
+
 local debian_pipeline(name, image, arch='amd64', deps='g++ libsodium-dev libzmq3-dev', cmake_extra='', build_type='Release', extra_cmds=[], allow_fail=false) = {
     kind: 'pipeline',
     type: 'docker',
@@ -10,10 +13,12 @@ local debian_pipeline(name, image, arch='amd64', deps='g++ libsodium-dev libzmq3
             image: image,
             [if allow_fail then "failure"]: "ignore",
             commands: [
-                'apt-get update',
-                'apt-get install -y eatmydata',
-                'eatmydata apt-get dist-upgrade -y',
-                'eatmydata apt-get install -y cmake git ninja-build pkg-config ccache ' + deps,
+                'echo "Building on ${DRONE_STAGE_MACHINE}"',
+                'echo "man-db man-db/auto-update boolean false" | debconf-set-selections',
+                apt_get_quiet + 'update',
+                apt_get_quiet + 'install -y eatmydata',
+                'eatmydata ' + apt_get_quiet + 'dist-upgrade -y',
+                'eatmydata ' + apt_get_quiet + 'install -y cmake git ninja-build pkg-config ccache ' + deps,
                 'git submodule update --init --recursive',
                 'mkdir build',
                 'cd build',
