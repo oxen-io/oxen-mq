@@ -95,23 +95,20 @@ struct base64_encoder final {
 private:
     InputIt _it, _end;
     static_assert(sizeof(decltype(*_it)) == 1, "base64_encoder requires chars/bytes input iterator");
-    int bits; // Number of bits held in r; will always be >= 6 until we are at the end.
+    // How much padding (at most) we can add at the end
     int padding;
-    uint_fast16_t r;
+    // Number of bits held in r; will always be >= 6 until we are at the end.
+    int bits{_it != _end ? 8 : 0};
+    // Holds bits of data we've already read, which might belong to current or next chars
+    uint_fast16_t r{bits ? static_cast<unsigned char>(*_it) : 0u};
 public:
     using iterator_category = std::input_iterator_tag;
     using difference_type = std::ptrdiff_t;
     using value_type = char;
     using reference = value_type;
     using pointer = void;
-    base64_encoder(InputIt begin, InputIt end, bool padded = true) : _it{std::move(begin)}, _end{std::move(end)}, padding{padded} {
-        if (_it != _end) {
-            bits = 8;
-            r = static_cast<unsigned char>(*_it);
-        } else {
-            bits = 0;
-        }
-    }
+    base64_encoder(InputIt begin, InputIt end, bool padded = true)
+        : _it{std::move(begin)}, _end{std::move(end)}, padding{padded} {}
 
     base64_encoder end() { return {_end, _end, false}; }
 

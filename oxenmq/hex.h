@@ -74,7 +74,7 @@ struct hex_encoder final {
 private:
     InputIt _it, _end;
     static_assert(sizeof(decltype(*_it)) == 1, "hex_encoder requires chars/bytes input iterator");
-    uint8_t c;
+    uint8_t c = 0;
     bool second_half = false;
 public:
     using iterator_category = std::input_iterator_tag;
