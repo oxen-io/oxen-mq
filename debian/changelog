@@ -1,3 +1,9 @@
+oxenmq (1.2.6-2~ubuntu2104+b1) hirsute; urgency=medium
+
+  * Rebuild.
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Tue, 12 Oct 2021 13:36:39 -0300
+
 oxenmq (1.2.6-2~ubuntu2104) hirsute; urgency=medium
 
   * fix control file
