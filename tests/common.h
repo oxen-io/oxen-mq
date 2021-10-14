@@ -18,9 +18,9 @@ constexpr int TIME_DILATION =
 static auto startup = std::chrono::steady_clock::now();
 
 /// Returns a localhost connection string to listen on.  It can be considered random, though in
-/// practice in the current implementation is sequential starting at 4500.
+/// practice in the current implementation is sequential starting at 25432.
 inline std::string random_localhost() {
-    static uint16_t last = 4499;
+    static std::atomic<uint16_t> last = 25432;
     last++;
     assert(last); // We should never call this enough to overflow
     return "tcp://127.0.0.1:" + std::to_string(last);
