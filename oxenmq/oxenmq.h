@@ -279,7 +279,7 @@ public:
     std::chrono::milliseconds CONN_HEARTBEAT_TIMEOUT = 30s;
 
     /// Allows you to set options on the internal zmq context object.  For advanced use only.
-    //void set_zmq_context_option(zmq::ctxopt option, int value);
+    void set_zmq_context_option(zmq::ctxopt option, int value);
 
     /** The umask to apply when constructing sockets (which affects any new ipc:// listening sockets
      * that get created).  Does nothing if set to -1 (the default), and does nothing on Windows.
