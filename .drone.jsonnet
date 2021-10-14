@@ -32,14 +32,14 @@ local debian_pipeline(name, image, arch='amd64', deps='g++ libsodium-dev libzmq3
 local clang(version) = debian_pipeline(
     'Debian sid/clang-' + version + ' (amd64)',
     'debian:sid',
-    deps='clang-13 libsodium-dev libzmq3-dev',
-    cmake_extra='-DCMAKE_C_COMPILER=clang-13 -DCMAKE_CXX_COMPILER=clang++-13 '
+    deps='clang-' + version + ' libsodium-dev libzmq3-dev',
+    cmake_extra='-DCMAKE_C_COMPILER=clang-' + version + ' -DCMAKE_CXX_COMPILER=clang++-' + version + ' '
 );
 
 local full_llvm(version) = debian_pipeline(
     'Debian sid/llvm-' + version + ' (amd64)',
     'debian:sid',
-    deps='clang-13 lld-13 libc++-13-dev libc++abi-13-dev libsodium-dev libzmq3-dev',
+    deps='clang-' + version + ' lld-' + version + ' libc++-' + version + '-dev libc++abi-' + version + '-dev libsodium-dev libzmq3-dev',
     cmake_extra='-DCMAKE_C_COMPILER=clang-' + version +
                 ' -DCMAKE_CXX_COMPILER=clang++-' + version +
                 ' -DCMAKE_CXX_FLAGS=-stdlib=libc++ ' +
