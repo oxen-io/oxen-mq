@@ -1,6 +1,6 @@
 Name:           oxenmq
 Version:        1.2.7
-Release:        2%{?dist}
+Release:        1%{?dist}
 Summary:        zeromq-based Oxen message passing library
 
 License:        BSD
@@ -88,6 +88,9 @@ build software using oxenmq.
 
 
 %changelog
+* Thu Oct 14 2021 Jason Rhinelander <jason@imaginary.ca> - 1.2.7-1
+- Bump version.
+
 * Sat Sep 25 2021 Technical Tumbleweed <necro_nemesis@hotmail.com> - 1.2.6
 - CentOS Stream 8 requires dependency epel-release in order to access repo containing
   cppzmq-devel build dependency
