@@ -62,15 +62,18 @@ static_assert(hex_lut.from_hex('a') == 10 && hex_lut.from_hex('F') == 15 && hex_
 
 } // namespace detail
 
-/// Creates hex digits from a character sequence.
+/// Creates hex digits from a character sequence given by iterators, writes them starting at `out`.
+/// Returns the final value of out (i.e. the iterator positioned just after the last written
+/// hex character).
 template <typename InputIt, typename OutputIt>
-void to_hex(InputIt begin, InputIt end, OutputIt out) {
+OutputIt to_hex(InputIt begin, InputIt end, OutputIt out) {
     static_assert(sizeof(decltype(*begin)) == 1, "to_hex requires chars/bytes");
     for (; begin != end; ++begin) {
         uint8_t c = static_cast<uint8_t>(*begin);
         *out++ = detail::hex_lut.to_hex(c >> 4);
         *out++ = detail::hex_lut.to_hex(c & 0x0f);
     }
+    return out;
 }
 
 /// Creates a string of hex digits from a character sequence iterator pair
@@ -131,10 +134,11 @@ constexpr char from_hex_pair(unsigned char a, unsigned char b) noexcept { return
 
 /// Converts a sequence of hex digits to bytes.  Undefined behaviour if any characters are not in
 /// [0-9a-fA-F] or if the input sequence length is not even: call `is_hex` first if you need to
-/// check.  It is permitted for the input and output ranges to overlap as long as out is no earlier
-/// than begin.
+/// check.  It is permitted for the input and output ranges to overlap as long as out is no later
+/// than begin.  Returns the final value of out (that is, the iterator positioned just after the
+/// last written character).
 template <typename InputIt, typename OutputIt>
-void from_hex(InputIt begin, InputIt end, OutputIt out) {
+OutputIt from_hex(InputIt begin, InputIt end, OutputIt out) {
     using std::distance;
     assert(is_hex(begin, end));
     while (begin != end) {
@@ -143,6 +147,7 @@ void from_hex(InputIt begin, InputIt end, OutputIt out) {
         *out++ = static_cast<detail::byte_type_t<OutputIt>>(
                 from_hex_pair(static_cast<unsigned char>(a), static_cast<unsigned char>(b)));
     }
+    return out;
 }
 
 /// Converts a sequence of hex digits to a string of bytes and returns it.  Undefined behaviour if
