@@ -1,6 +1,6 @@
 Name:           oxenmq
-Version:        1.2.6
-Release:        2%{?dist}
+Version:        1.2.7
+Release:        1%{?dist}
 Summary:        zeromq-based Oxen message passing library
 
 License:        BSD
@@ -87,11 +87,14 @@ build software using oxenmq.
 
 
 %changelog
+* Fri Oct 15 2021 Technical Tumbleweed <necro_nemesis@hotmail.com> - 1.2.7~1
+- spec file version bump
+
 * Mon Aug 09 2021 Jason Rhinelander <jason@imaginary.ca> - 1.2.6-2
 - Split oxenmq into lib and devel package
 - Versioned the library, as we do for debs
 - Updated various package descriptions and build commands
 
-* Thu Jul 22 2021 Technical Tumbleweed (necro_nemesis@hotmail.com) oxenmq
+* Thu Jul 22 2021 Technical Tumbleweed <necro_nemesis@hotmail.com> oxenmq
 -First oxenmq RPM
 -Second build update to v1.2.6
