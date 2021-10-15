@@ -1,6 +1,6 @@
 Name:           oxenmq
-Version:        1.2.6
-Release:        2%{?dist}
+Version:        1.2.7
+Release:        1%{?dist}
 Summary:        zeromq-based Oxen message passing library
 
 License:        BSD
