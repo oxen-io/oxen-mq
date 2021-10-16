@@ -82,6 +82,9 @@ inline constexpr auto DEFAULT_CONNECT_SN_KEEP_ALIVE = 5min;
 // The default timeout for connect_remote()
 inline constexpr auto REMOTE_CONNECT_TIMEOUT = 10s;
 
+// Default timeout for connect_inproc()
+inline constexpr auto INPROC_CONNECT_TIMEOUT = 50ms;
+
 // The amount of time we wait for a reply to a REQUEST before calling the callback with
 // `false` to signal a timeout.
 inline constexpr auto DEFAULT_REQUEST_TIMEOUT = 15s;
@@ -409,6 +412,9 @@ private:
 
     /// The connections to/from remotes we currently have open, both listening and outgoing.
     std::map<int64_t, zmq::socket_t> connections;
+
+    /// The connection ID of the built-in inproc listener for making requests to self
+    int64_t inproc_listener_connid;
 
     /// If set then it indicates a change in `connections` which means we need to rebuild pollitems
     /// and stop using existing connections iterators.
@@ -1000,7 +1006,7 @@ public:
      * connections on this address to determine the incoming remote's access and authentication
      * level.  Note that `allow_connection` here will be called with an empty pubkey.
      *
-     * @param bind address - can be any string zmq supports; typically a tcp IP/port combination
+     * @param bind address - can be any string zmq supports, for example a tcp IP/port combination
      * such as: "tcp://\*:4567" or "tcp://1.2.3.4:5678".
      *
      * @param allow_connection function to call to determine whether to allow the connection and, if
@@ -1094,6 +1100,16 @@ public:
             std::string_view pubkey,
             AuthLevel auth_level = AuthLevel::none,
             std::chrono::milliseconds timeout = REMOTE_CONNECT_TIMEOUT);
+
+    /// Connects to the built-in in-process listening socket of this OxenMQ server for local
+    /// communication.  Note that auth_level defaults to admin (unlike connect_remote), and the
+    /// default timeout is much shorter.
+    ///
+    /// Also note that incoming inproc requests are unauthenticated: that is, they will always have
+    /// admin-level access.
+    template <typename... Option>
+    ConnectionID connect_inproc(ConnectSuccess on_connect, ConnectFailure on_failure,
+            const Option&... options);
 
     /**
      * Disconnects an established outgoing connection established with `connect_remote()` (or, less
@@ -1676,6 +1692,27 @@ ConnectionID OxenMQ::connect_sn(std::string_view pubkey, const Option&... option
     detail::send_control(get_control_socket(), "CONNECT_SN", bt_serialize(opts));
 
     return pubkey;
+}
+
+template <typename... Option>
+ConnectionID OxenMQ::connect_inproc(ConnectSuccess on_connect, ConnectFailure on_failure,
+            const Option&... options) {
+    bt_dict opts{
+        {"timeout", INPROC_CONNECT_TIMEOUT.count()},
+        {"auth_level", static_cast<std::underlying_type_t<AuthLevel>>(AuthLevel::admin)}
+    };
+
+    (detail::apply_connect_option(*this, true, opts, options), ...);
+
+    auto id = next_conn_id++;
+    opts["conn_id"] = id;
+    opts["connect"] = detail::serialize_object(std::move(on_connect));
+    opts["failure"] = detail::serialize_object(std::move(on_failure));
+    opts["remote"] = "inproc://sn-self";
+
+    detail::send_control(get_control_socket(), "CONNECT_REMOTE", bt_serialize(opts));
+
+    return id;
 }
 
 template <typename... T>
