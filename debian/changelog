@@ -1,3 +1,41 @@
+oxenmq (1.2.7-1) unstable; urgency=medium
+
+  [ Jason Rhinelander ]
+  * Tweak test timers to deal with Apple's shitty thread scheduling
+  * Update bundled zeromq download version
+  * Apple test suite hacks
+  * Another apple time fix attempt
+  * Add support for inproc: requests
+  * Downgrade "worker waiting for" log message to trace
+  * Remove debugging
+  * Fix backwards logic on overlapping ranges comment
+  * Make {to,from}_{hex/b64/b32} return output iterator
+  * Remove ancient dead code
+  * Add allocation-free bt-list and bt-dict producer
+  * Apple workaround
+  * Another workaround for crapple
+  * Add const
+
+  [ Jeff Becker ]
+  * add operator() overload for defered message that sends reply
+
+  [ Jason Rhinelander ]
+  * Expose size calculations; stricter b32z/b64 validity checking
+  * Make (and use) iterator approach for encoding/decoding
+  * Add b32z/b64 invalid garbage tests
+  * Add methods for unpadded base64 construction
+  * Simplify iterator initialization & avoid warnings
+  * Fix r narrowing initialization warning when uint_fast16_t is small
+  * drone: quiet/optimize image setup
+  * Allow disabling -Werror via a cmake option
+  * Update catch2 to latest 2.x upstream
+  * Crank clang to 13
+  * Maybe fix macos tests?
+  * Fix versioning in clang/llvm pipeline functions
+  * Rediff patches
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Sat, 16 Oct 2021 11:37:12 -0300
+
 oxenmq (1.2.6-2) unstable; urgency=medium
 
   * fix control file
