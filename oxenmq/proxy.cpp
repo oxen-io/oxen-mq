@@ -411,6 +411,13 @@ void OxenMQ::proxy_loop() {
         saved_umask = umask(STARTUP_UMASK);
 #endif
 
+    {
+        zmq::socket_t inproc_listener{context, zmq::socket_type::router};
+        inproc_listener.bind(SN_ADDR_SELF);
+        inproc_listener_connid = next_conn_id++;
+        connections.emplace_hint(connections.end(), inproc_listener_connid, std::move(inproc_listener));
+    }
+
     for (size_t i = 0; i < bind.size(); i++) {
         if (!proxy_bind(bind[i], i)) {
             LMQ_LOG(warn, "OxenMQ failed to listen on ", bind[i].address);
