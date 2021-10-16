@@ -75,6 +75,15 @@ public:
 
         explicit DeferredSend(Message& m) : oxenmq{m.oxenmq}, conn{m.conn}, reply_tag{m.reply_tag} {}
 
+        template <typename... Args>
+        void operator()(Args &&...args) const {
+          if (reply_tag.empty())
+            back(std::forward<Args>(args)...);
+          else
+            reply(std::forward<Args>(args)...);
+        };
+
+
         /// Equivalent to msg.send_back(...), but can be invoked later.
         template <typename... Args>
         void back(std::string_view command, Args&&... args) const;
