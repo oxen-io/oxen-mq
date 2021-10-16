@@ -5,12 +5,22 @@
 
 using namespace oxenmq;
 
+// Apple's mutexes, thread scheduling, and IO handling are garbage and it shows up with lots of
+// spurious failures in this test suite (because it expects a system to not suck that badly), so we
+// multiply the time-sensitive bits by this factor as a hack to make the test suite work.
+constexpr int TIME_DILATION =
+#ifdef __APPLE__
+    5;
+#else
+    1;
+#endif
+
 static auto startup = std::chrono::steady_clock::now();
 
 /// Returns a localhost connection string to listen on.  It can be considered random, though in
-/// practice in the current implementation is sequential starting at 4500.
+/// practice in the current implementation is sequential starting at 25432.
 inline std::string random_localhost() {
-    static uint16_t last = 4499;
+    static std::atomic<uint16_t> last = 25432;
     last++;
     assert(last); // We should never call this enough to overflow
     return "tcp://127.0.0.1:" + std::to_string(last);
@@ -30,7 +40,7 @@ inline void wait_for(Func f) {
     for (int i = 0; i < 20; i++) {
         if (f())
             break;
-        std::this_thread::sleep_for(10ms);
+        std::this_thread::sleep_for(10ms * TIME_DILATION);
     }
     auto lock = catch_lock();
     UNSCOPED_INFO("done waiting after " << (std::chrono::steady_clock::now() - start).count() << "ns");
@@ -43,7 +53,7 @@ inline void wait_for_conn(std::atomic<bool> &c) {
 }
 
 /// Waits enough time for us to receive a reply from a localhost remote.
-inline void reply_sleep() { std::this_thread::sleep_for(10ms); }
+inline void reply_sleep() { std::this_thread::sleep_for(10ms * TIME_DILATION); }
 
 inline OxenMQ::Logger get_logger(std::string prefix = "") {
     std::string me = "tests/common.h";
