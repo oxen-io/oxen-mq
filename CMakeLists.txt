@@ -17,7 +17,7 @@ cmake_minimum_required(VERSION 3.7)
 set(CMAKE_OSX_DEPLOYMENT_TARGET 10.12 CACHE STRING "macOS deployment target (Apple clang only)")
 
 project(liboxenmq
-    VERSION 1.2.6
+    VERSION 1.2.7
     LANGUAGES CXX C)
 
 include(GNUInstallDirs)
@@ -113,7 +113,13 @@ target_include_directories(oxenmq
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cppzmq>
 )
 
-target_compile_options(oxenmq PRIVATE -Wall -Wextra -Werror)
+target_compile_options(oxenmq PRIVATE -Wall -Wextra)
+
+option(WARNINGS_AS_ERRORS "treat all warnings as errors" ON)
+if(WARNINGS_AS_ERRORS)
+    target_compile_options(oxenmq PRIVATE -Werror)
+endif()
+
 set_target_properties(oxenmq PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
