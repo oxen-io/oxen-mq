@@ -4,3 +4,6 @@
 [submodule "Catch2"]
 	path = tests/Catch2
 	url = https://github.com/catchorg/Catch2.git
+[submodule "pyoxenmq/pybind11"]
+	path = pyoxenmq/pybind11
+	url = https://github.com/pybind/pybind11.git

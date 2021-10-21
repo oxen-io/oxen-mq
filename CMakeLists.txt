@@ -17,7 +17,7 @@ cmake_minimum_required(VERSION 3.7)
 set(CMAKE_OSX_DEPLOYMENT_TARGET 10.12 CACHE STRING "macOS deployment target (Apple clang only)")
 
 project(liboxenmq
-    VERSION 1.2.7
+    VERSION 1.2.8
     LANGUAGES CXX C)
 
 include(GNUInstallDirs)
@@ -43,6 +43,8 @@ option(OXENMQ_BUILD_TESTS "Building and perform oxenmq tests" ${oxenmq_IS_TOPLEV
 option(OXENMQ_INSTALL "Add oxenmq libraries and headers to cmake install target; defaults to ON if BUILD_SHARED_LIBS is enabled or we are the top-level project; OFF for a static subdirectory build" ${oxenmq_INSTALL_DEFAULT})
 option(OXENMQ_INSTALL_CPPZMQ "Install cppzmq header with oxenmq/ headers (requires OXENMQ_INSTALL)" ON)
 option(OXENMQ_LOKIMQ_COMPAT "Install lokimq compatibility headers and pkg-config for rename migration" ON)
+
+option(OXENMQ_PYTHON "Build pyoxenmq" OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -120,12 +122,8 @@ if(WARNINGS_AS_ERRORS)
     target_compile_options(oxenmq PRIVATE -Werror)
 endif()
 
-set_target_properties(oxenmq PROPERTIES
-    CXX_STANDARD 17
-    CXX_STANDARD_REQUIRED ON
-    CXX_EXTENSIONS OFF
-    POSITION_INDEPENDENT_CODE ON
-)
+target_compile_features(oxenmq PUBLIC cxx_std_17)
+set_target_properties(oxenmq PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 function(link_dep_libs target linktype libdirs)
     foreach(lib ${ARGN})
@@ -172,6 +170,10 @@ export(
     NAMESPACE oxenmq::
     FILE oxenmqTargets.cmake
 )
+
+if(OXENMQ_PYTHON)
+    add_subdirectory(pyoxenmq)
+endif()
 
 if(OXENMQ_INSTALL)
     install(
