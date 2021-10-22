@@ -1,3 +1,11 @@
+oxenmq (1.2.8-1~ubuntu2110) impish; urgency=medium
+
+  * fix lib version
+  * Update ci to use our pre-built images
+  * Updates for pyoxenmq 1.0.0
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Thu, 21 Oct 2021 23:01:13 -0300
+
 oxenmq (1.2.7-1~ubuntu2110) impish; urgency=medium
 
   [ Jason Rhinelander ]
