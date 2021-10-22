@@ -1,3 +1,11 @@
+oxenmq (1.2.8-1~ubuntu2004) focal; urgency=medium
+
+  * fix lib version
+  * Update ci to use our pre-built images
+  * Updates for pyoxenmq 1.0.0
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Thu, 21 Oct 2021 23:01:07 -0300
+
 oxenmq (1.2.7-1~ubuntu2004) focal; urgency=medium
 
   [ Jason Rhinelander ]
