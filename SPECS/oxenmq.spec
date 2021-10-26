@@ -1,5 +1,5 @@
 Name:           oxenmq
-Version:        1.2.7
+Version:        1.2.8
 Release:        1%{?dist}
 Summary:        zeromq-based Oxen message passing library
 
@@ -87,6 +87,8 @@ build software using oxenmq.
 
 
 %changelog
+* Mon Oct 25 2021 Technical Tumbleweed <necro_nemesis@hotmail.com> -1.2.8~1
+- Merge dev changes 1.2.8
 * Fri Oct 15 2021 Technical Tumbleweed <necro_nemesis@hotmail.com> -1.2.7~1
 - Merge dev changes 1.2.7
 - change branch Catch2 to 2.x
