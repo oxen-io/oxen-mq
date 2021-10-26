@@ -163,9 +163,8 @@ struct address {
 
     /// Returns a QR-code friendly address string.  This returns an all-uppercase version of the
     /// address with "TCP://" or "CURVE://" for the protocol string, and uses upper-case base32z
-    /// encoding for the pubkey (for curve addresses).  For literal IPv6 addresses we replace the
-    /// surround the
-    /// address with $ instead of $
+    /// encoding for the pubkey (for curve addresses).  For literal IPv6 addresses we surround the
+    /// address with $ instead of [...]
     ///
     /// \throws std::logic_error if called on a unix socket address.
     std::string qr_address() const;
