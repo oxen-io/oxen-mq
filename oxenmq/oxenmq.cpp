@@ -262,7 +262,9 @@ void OxenMQ::start() {
 }
 
 void OxenMQ::listen_curve(std::string bind_addr, AllowFunc allow_connection, std::function<void(bool)> on_bind) {
-    if (!allow_connection) allow_connection = [](auto, auto, auto) { return AuthLevel::none; };
+    if (std::string_view{bind_addr}.substr(0, 9) == "inproc://")
+        throw std::logic_error{"inproc:// cannot be used with listen_curve"};
+    if (!allow_connection) allow_connection = [](auto&&...) { return AuthLevel::none; };
     bind_data d{std::move(bind_addr), true, std::move(allow_connection), std::move(on_bind)};
     if (proxy_thread.joinable())
         detail::send_control(get_control_socket(), "BIND", bt_serialize(detail::serialize_object(std::move(d))));
@@ -271,7 +273,9 @@ void OxenMQ::listen_curve(std::string bind_addr, AllowFunc allow_connection, std
 }
 
 void OxenMQ::listen_plain(std::string bind_addr, AllowFunc allow_connection, std::function<void(bool)> on_bind) {
-    if (!allow_connection) allow_connection = [](auto, auto, auto) { return AuthLevel::none; };
+    if (std::string_view{bind_addr}.substr(0, 9) == "inproc://")
+        throw std::logic_error{"inproc:// cannot be used with listen_plain"};
+    if (!allow_connection) allow_connection = [](auto&&...) { return AuthLevel::none; };
     bind_data d{std::move(bind_addr), false, std::move(allow_connection), std::move(on_bind)};
     if (proxy_thread.joinable())
         detail::send_control(get_control_socket(), "BIND", bt_serialize(detail::serialize_object(std::move(d))));
