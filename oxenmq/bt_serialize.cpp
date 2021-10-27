@@ -27,6 +27,10 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "bt_serialize.h"
+#include "bt_producer.h"
+#include "variant.h"
+
+#include <cassert>
 #include <iterator>
 
 namespace oxenmq {
@@ -225,6 +229,140 @@ std::pair<std::string_view, std::string_view> bt_dict_consumer::next_string() {
     ret.second = bt_list_consumer::consume_string_view();
     ret.first = flush_key();
     return ret;
+}
+
+
+bt_list_producer::bt_list_producer(bt_list_producer* parent, std::string_view prefix)
+        : data{parent}, buffer{parent->buffer}, from{buffer.first} {
+    parent->has_child = true;
+    buffer_append(prefix);
+    append_intermediate_ends();
+}
+
+bt_list_producer::bt_list_producer(bt_dict_producer* parent, std::string_view prefix)
+        : data{parent}, buffer{parent->buffer}, from{buffer.first} {
+    parent->has_child = true;
+    buffer_append(prefix);
+    append_intermediate_ends();
+}
+
+bt_list_producer::bt_list_producer(bt_list_producer&& other)
+        : data{std::move(other.data)}, buffer{other.buffer}, from{other.from}, to{other.to} {
+    if (other.has_child) throw std::logic_error{"Cannot move bt_list/dict_producer with active sublists/subdicts"};
+    var::visit([](auto& x) {
+        if constexpr (!std::is_same_v<buf_span&, decltype(x)>)
+            x = nullptr;
+    }, other.data);
+}
+
+
+bt_list_producer::bt_list_producer(char* begin, char* end)
+        : data{buf_span{begin, end}}, buffer{*std::get_if<buf_span>(&data)}, from{buffer.first} {
+    buffer_append("l"sv);
+    append_intermediate_ends();
+}
+
+bt_list_producer::~bt_list_producer() {
+    var::visit([this](auto& x) {
+        if constexpr (!std::is_same_v<buf_span&, decltype(x)>) {
+            if (!x)
+                return;
+
+            assert(!has_child);
+            assert(x->has_child);
+            x->has_child = false;
+            // We've already written the intermediate 'e', so just increment the buffer to
+            // finalize it.
+            buffer.first++;
+        }
+    }, data);
+}
+
+void bt_list_producer::append(std::string_view data) {
+    if (has_child) throw std::logic_error{"Cannot append to list when a sublist is active"};
+    append_impl(data);
+    append_intermediate_ends();
+}
+
+bt_list_producer bt_list_producer::append_list() {
+    if (has_child) throw std::logic_error{"Cannot call append_list while another nested list/dict is active"};
+    return bt_list_producer{this};
+}
+
+bt_dict_producer bt_list_producer::append_dict() {
+    if (has_child) throw std::logic_error{"Cannot call append_dict while another nested list/dict is active"};
+    return bt_dict_producer{this};
+}
+
+
+
+void bt_list_producer::buffer_append(std::string_view d, bool advance) {
+    var::visit([d, advance, this](auto& x) {
+        if constexpr (std::is_same_v<buf_span&, decltype(x)>) {
+            size_t avail = std::distance(x.first, x.second);
+            if (d.size() > avail)
+                throw std::length_error{"Cannot write bt_producer: buffer size exceeded"};
+            std::copy(d.begin(), d.end(), x.first);
+            to = x.first + d.size();
+            if (advance)
+                x.first += d.size();
+        } else {
+            x->buffer_append(d, advance);
+        }
+    }, data);
+}
+
+static constexpr std::string_view eee = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"sv;
+
+void bt_list_producer::append_intermediate_ends(size_t count) {
+    return var::visit([this, count](auto& x) mutable {
+        if constexpr (std::is_same_v<buf_span&, decltype(x)>) {
+            for (; count > eee.size(); count -= eee.size())
+                buffer_append(eee, false);
+            buffer_append(eee.substr(0, count), false);
+        } else {
+            // x is a parent pointer
+            x->append_intermediate_ends(count + 1);
+            to = x->to - 1; // Our `to` should be one 'e' before our parent's `to`.
+        }
+    }, data);
+}
+
+void bt_list_producer::append_impl(std::string_view s) {
+    char buf[21]; // length + ':'
+    auto* ptr = write_integer(s.size(), buf);
+    *ptr++ = ':';
+    buffer_append({buf, static_cast<size_t>(ptr-buf)});
+    buffer_append(s);
+}
+
+
+// Subdict constructors
+bt_dict_producer::bt_dict_producer(bt_list_producer* parent) : bt_list_producer{parent, "d"sv} {}
+bt_dict_producer::bt_dict_producer(bt_dict_producer* parent) : bt_list_producer{parent, "d"sv} {}
+
+#ifndef NDEBUG
+
+void bt_dict_producer::check_incrementing_key(size_t size) {
+    std::string_view this_key{buffer.first - size, size};
+    assert(!last_key.data() || this_key > last_key);
+    last_key = this_key;
+}
+
+#endif
+
+bt_dict_producer bt_dict_producer::append_dict(std::string_view key) {
+    if (has_child) throw std::logic_error{"Cannot call append_dict while another nested list/dict is active"};
+    append_impl(key);
+    check_incrementing_key(key.size());
+    return bt_dict_producer{this};
+}
+
+bt_list_producer bt_dict_producer::append_list(std::string_view key) {
+    if (has_child) throw std::logic_error{"Cannot call append_list while another nested list/dict is active"};
+    append_impl(key);
+    check_incrementing_key(key.size());
+    return bt_list_producer{this};
 }
 
 
