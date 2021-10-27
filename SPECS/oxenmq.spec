@@ -1,5 +1,5 @@
 Name:           oxenmq
-Version:        1.2.7
+Version:        1.2.8
 Release:        1%{?dist}
 Summary:        zeromq-based Oxen message passing library
 
@@ -88,6 +88,8 @@ build software using oxenmq.
 
 
 %changelog
+* Mon Oct 25 2021 Technical Tumbleweed <necro_nemesis@hotmail.com> - 1.2.8~1
+- Bump version.
 * Thu Oct 14 2021 Jason Rhinelander <jason@imaginary.ca> - 1.2.7-1
 - Bump version.
 
