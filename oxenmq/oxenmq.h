@@ -82,6 +82,9 @@ inline constexpr auto DEFAULT_CONNECT_SN_KEEP_ALIVE = 5min;
 // The default timeout for connect_remote()
 inline constexpr auto REMOTE_CONNECT_TIMEOUT = 10s;
 
+// Default timeout for connect_inproc()
+inline constexpr auto INPROC_CONNECT_TIMEOUT = 50ms;
+
 // The amount of time we wait for a reply to a REQUEST before calling the callback with
 // `false` to signal a timeout.
 inline constexpr auto DEFAULT_REQUEST_TIMEOUT = 15s;
@@ -410,6 +413,9 @@ private:
     /// The connections to/from remotes we currently have open, both listening and outgoing.
     std::map<int64_t, zmq::socket_t> connections;
 
+    /// The connection ID of the built-in inproc listener for making requests to self
+    int64_t inproc_listener_connid;
+
     /// If set then it indicates a change in `connections` which means we need to rebuild pollitems
     /// and stop using existing connections iterators.
     bool connections_updated = true;
@@ -442,7 +448,7 @@ private:
     /// indices of idle, active workers
     std::vector<unsigned int> idle_workers;
 
-    /// Maximum number of general task workers, specified by g`/during construction
+    /// Maximum number of general task workers, specified by set_general_threads()
     int general_workers = std::max<int>(1, std::thread::hardware_concurrency());
 
     /// Maximum number of possible worker threads we can have.  This is calculated when starting,
@@ -780,13 +786,6 @@ public:
      * listening in curve25519 mode (otherwise we couldn't verify its authenticity).  Should return
      * empty for not found or if SN lookups are not supported.
      *
-     * @param allow_incoming is a callback that OxenMQ can use to determine whether an incoming
-     * connection should be allowed at all and, if so, whether the connection is from a known
-     * service node.  Called with the connecting IP, the remote's verified x25519 pubkey, and the 
-     * called on incoming connections with the (verified) incoming connection
-     * pubkey (32-byte binary string) to determine whether the given SN should be allowed to
-     * connect.
-     *
      * @param log a function or callable object that writes a log message.  If omitted then all log
      * messages are suppressed.
      *
@@ -1000,7 +999,7 @@ public:
      * connections on this address to determine the incoming remote's access and authentication
      * level.  Note that `allow_connection` here will be called with an empty pubkey.
      *
-     * @param bind address - can be any string zmq supports; typically a tcp IP/port combination
+     * @param bind address - can be any string zmq supports, for example a tcp IP/port combination
      * such as: "tcp://\*:4567" or "tcp://1.2.3.4:5678".
      *
      * @param allow_connection function to call to determine whether to allow the connection and, if
@@ -1027,7 +1026,7 @@ public:
      * @param pubkey - the public key (32-byte binary string) of the service node to connect to
      * @param options - connection options; see the structs in `connect_option`, in particular:
      *        - keep_alive -- how long the SN connection will be kept alive after valid activity
-     *        - remote_hint -- a remote address hint that may be used instead of doing a lookup
+     *        - hint -- a remote address hint that may be used instead of doing a lookup
      *        - ephemeral_routing_id -- allows you to override the EPHEMERAL_ROUTING_ID option for
      *          this connection.
      *
@@ -1095,6 +1094,16 @@ public:
             AuthLevel auth_level = AuthLevel::none,
             std::chrono::milliseconds timeout = REMOTE_CONNECT_TIMEOUT);
 
+    /// Connects to the built-in in-process listening socket of this OxenMQ server for local
+    /// communication.  Note that auth_level defaults to admin (unlike connect_remote), and the
+    /// default timeout is much shorter.
+    ///
+    /// Also note that incoming inproc requests are unauthenticated: that is, they will always have
+    /// admin-level access.
+    template <typename... Option>
+    ConnectionID connect_inproc(ConnectSuccess on_connect, ConnectFailure on_failure,
+            const Option&... options);
+
     /**
      * Disconnects an established outgoing connection established with `connect_remote()` (or, less
      * commonly, `connect_sn()`).
@@ -1103,8 +1112,7 @@ public:
      *
      * @param linger how long to allow the connection to linger while there are still pending
      * outbound messages to it before disconnecting and dropping any pending messages.  (Note that
-     * this lingering is internal; the disconnect_remote() call does not block).  The default is 1
-     * second.
+     * this lingering is internal; the disconnect() call does not block).  The default is 1 second.
      *
      * If given a pubkey, we try to close an outgoing connection to the given SN if one exists; note
      * however that this is often not particularly useful as messages to that SN can immediately
@@ -1118,8 +1126,8 @@ public:
      * if not already connected).
      *
      * If a new connection is established it will have a relatively short (30s) idle timeout.  If
-     * the connection should stay open longer you should either call `connect(pubkey, IDLETIME)` or
-     * pass a a `send_option::keep_alive{IDLETIME}` in `opts`.
+     * the connection should stay open longer you should either call `connect_sn(pubkey, IDLETIME)`
+     * or pass a a `send_option::keep_alive{IDLETIME}` in `opts`.
      *
      * Note that this method (along with connect) doesn't block waiting for a connection or for the
      * message to send; it merely instructs the proxy thread that it should send.  ZMQ will
@@ -1273,9 +1281,9 @@ public:
     /**
      * Adds a timer that gets scheduled periodically in the job queue.  Normally jobs are not
      * double-booked: that is, a new timed job will not be scheduled if the timer fires before a
-     * previously scheduled callback of the job has not yet completed.  If you want to override this
-     * (so that, under heavy load or long jobs, there can be more than one of the same job scheduled
-     * or running at a time) then specify `squelch` as `false`.
+     * previously scheduled callback of the job has completed.  If you want to override this (so
+     * that, under heavy load or long jobs, there can be more than one of the same job scheduled or
+     * running at a time) then specify `squelch` as `false`.
      *
      * The returned value can be kept and later passed into `cancel_timer()` if you want to be able
      * to cancel a timer.
@@ -1411,6 +1419,8 @@ struct outgoing {
 
 /// Specifies the idle timeout for the connection - if a new or existing outgoing connection is used
 /// for the send and its current idle timeout setting is less than this value then it is updated.
+///
+/// A negative value is treated as if the option were not supplied at all.
 struct keep_alive {
     std::chrono::milliseconds time;
     explicit keep_alive(std::chrono::milliseconds time) : time{std::move(time)} {}
@@ -1421,6 +1431,8 @@ struct keep_alive {
 /// (This has no effect if specified on a non-request() call).  Note that requests failures are only
 /// processed in the CONN_CHECK_INTERVAL timer, so it can be up to that much longer than the time
 /// specified here before a failure callback is invoked.
+///
+/// Specifying a negative timeout is equivalent to not specifying the option at all.
 struct request_timeout {
     std::chrono::milliseconds time;
     explicit request_timeout(std::chrono::milliseconds time) : time{std::move(time)} {}
@@ -1466,7 +1478,7 @@ namespace connect_option {
 /// the default (OxenMQ::EPHEMERAL_ROUTING_ID).  See OxenMQ::EPHEMERAL_ROUTING_ID for a description
 /// of this.
 ///
-/// Typically use: `connect_options::ephemeral_routing_id{}` or `connect_options::ephemeral_routing_id{false}`.
+/// Typically use: `connect_option::ephemeral_routing_id{}` or `connect_option::ephemeral_routing_id{false}`.
 struct ephemeral_routing_id {
     bool use_ephemeral_routing_id = true;
     // Constructor; default construction gives you ephemeral routing id, but the bool parameter can
@@ -1486,6 +1498,8 @@ struct timeout {
 /// milliseconds.  If an outgoing connection already exists, the longer of the existing and the
 /// given keep alive is used.
 ///
+/// A negative value is treated as if the keep_alive option had not been specified.
+///
 /// Note that, if not specified, the default keep-alive for a connection established via
 /// connect_sn() is 5 minutes (which is much longer than the default for an implicit connect() by
 /// calling send() directly with a pubkey.)
@@ -1501,6 +1515,7 @@ struct keep_alive {
 /// potentially expensive lookup call).
 struct hint {
     std::string address;
+    // Constructor taking a hint.  If the hint is an empty string then no hint will be used.
     explicit hint(std::string_view address) : address{address} {}
 };
 
@@ -1554,6 +1569,7 @@ void apply_send_option(bt_list& parts, bt_dict&, const send_option::data_parts_i
 
 /// `hint` specialization: sets the hint in the control data
 inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::hint& hint) {
+    if (hint.connect_hint.empty()) return;
     control_data["hint"] = hint.connect_hint;
 }
 
@@ -1574,12 +1590,14 @@ inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option
 
 /// `keep_alive` specialization: increases the outgoing socket idle timeout (if shorter)
 inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::keep_alive& timeout) {
-    control_data["keep_alive"] = timeout.time.count();
+    if (timeout.time >= 0ms)
+        control_data["keep_alive"] = timeout.time.count();
 }
 
 /// `request_timeout` specialization: set the timeout time for a request
 inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::request_timeout& timeout) {
-    control_data["request_timeout"] = timeout.time.count();
+    if (timeout.time >= 0ms)
+        control_data["request_timeout"] = timeout.time.count();
 }
 
 /// `queue_failure` specialization
@@ -1624,10 +1642,12 @@ inline void apply_connect_option(OxenMQ& omq, bool remote, bt_dict& opts, const 
     else omq.log(LogLevel::warn, __FILE__, __LINE__, "connect_option::timeout ignored for connect_sn(...)");
 }
 inline void apply_connect_option(OxenMQ& omq, bool remote, bt_dict& opts, const connect_option::keep_alive& ka) {
-    if (!remote) opts["keep_alive"] = ka.time.count();
+    if (ka.time < 0ms) return;
+    else if (!remote) opts["keep_alive"] = ka.time.count();
     else omq.log(LogLevel::warn, __FILE__, __LINE__, "connect_option::keep_alive ignored for connect_remote(...)");
 }
 inline void apply_connect_option(OxenMQ& omq, bool remote, bt_dict& opts, const connect_option::hint& hint) {
+    if (hint.address.empty()) return;
     if (!remote) opts["hint"] = hint.address;
     else omq.log(LogLevel::warn, __FILE__, __LINE__, "connect_option::hint ignored for connect_remote(...)");
 }
@@ -1676,6 +1696,27 @@ ConnectionID OxenMQ::connect_sn(std::string_view pubkey, const Option&... option
     detail::send_control(get_control_socket(), "CONNECT_SN", bt_serialize(opts));
 
     return pubkey;
+}
+
+template <typename... Option>
+ConnectionID OxenMQ::connect_inproc(ConnectSuccess on_connect, ConnectFailure on_failure,
+            const Option&... options) {
+    bt_dict opts{
+        {"timeout", INPROC_CONNECT_TIMEOUT.count()},
+        {"auth_level", static_cast<std::underlying_type_t<AuthLevel>>(AuthLevel::admin)}
+    };
+
+    (detail::apply_connect_option(*this, true, opts, options), ...);
+
+    auto id = next_conn_id++;
+    opts["conn_id"] = id;
+    opts["connect"] = detail::serialize_object(std::move(on_connect));
+    opts["failure"] = detail::serialize_object(std::move(on_failure));
+    opts["remote"] = "inproc://sn-self";
+
+    detail::send_control(get_control_socket(), "CONNECT_REMOTE", bt_serialize(opts));
+
+    return id;
 }
 
 template <typename... T>

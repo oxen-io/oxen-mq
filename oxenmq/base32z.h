@@ -74,40 +74,81 @@ static_assert(b32z_lut.from_b32z('w') == 20 && b32z_lut.from_b32z('T') == 17 && 
 
 } // namespace detail
 
-/// Converts bytes into a base32z encoded character sequence.
-template <typename InputIt, typename OutputIt>
-void to_base32z(InputIt begin, InputIt end, OutputIt out) {
-    static_assert(sizeof(decltype(*begin)) == 1, "to_base32z requires chars/bytes");
-    int bits = 0; // Tracks the number of unconsumed bits held in r, will always be in [0, 4]
-    std::uint_fast16_t r = 0;
-    while (begin != end) {
-        r = r << 8 | static_cast<unsigned char>(*begin++);
+/// Returns the number of characters required to encode a base32z string from the given number of bytes.
+inline constexpr size_t to_base32z_size(size_t byte_size) { return (byte_size*8 + 4) / 5; } // ⌈bits/5⌉ because 5 bits per byte
+/// Returns the (maximum) number of bytes required to decode a base32z string of the given size.
+inline constexpr size_t from_base32z_size(size_t b32z_size) { return b32z_size*5 / 8; } // ⌊bits/8⌋
 
-        // we just added 8 bits, so we can *always* consume 5 to produce one character, so (net) we
-        // are adding 3 bits.
-        bits += 3;
-        *out++ = detail::b32z_lut.to_b32z(r >> bits); // Right-shift off the bits we aren't consuming right now
+/// Iterable object for on-the-fly base32z encoding.  Used internally, but also particularly useful
+/// when converting from one encoding to another.
+template <typename InputIt>
+struct base32z_encoder final {
+private:
+    InputIt _it, _end;
+    static_assert(sizeof(decltype(*_it)) == 1, "base32z_encoder requires chars/bytes input iterator");
+    // Number of bits held in r; will always be >= 5 until we are at the end.
+    int bits{_it != _end ? 8 : 0};
+    // Holds bits of data we've already read, which might belong to current or next chars
+    uint_fast16_t r{bits ? static_cast<unsigned char>(*_it) : (unsigned char)0};
+public:
+    using iterator_category = std::input_iterator_tag;
+    using difference_type = std::ptrdiff_t;
+    using value_type = char;
+    using reference = value_type;
+    using pointer = void;
+    base32z_encoder(InputIt begin, InputIt end) : _it{std::move(begin)}, _end{std::move(end)} {}
 
-        // Drop the bits we don't want to keep (because we just consumed them)
+    base32z_encoder end() { return {_end, _end}; }
+
+    bool operator==(const base32z_encoder& i) { return _it == i._it && bits == i.bits; }
+    bool operator!=(const base32z_encoder& i) { return !(*this == i); }
+
+    base32z_encoder& operator++() {
+        assert(bits >= 5);
+        // Discard the most significant 5 bits
+        bits -= 5;
         r &= (1 << bits) - 1;
-
-        if (bits >= 5) { // We have enough bits to produce a second character; essentially the same as above
-            bits -= 5; // Except now we are just consuming 5 without having added any more
-            *out++ = detail::b32z_lut.to_b32z(r >> bits);
-            r &= (1 << bits) - 1;
+        // If we end up with less than 5 significant bits then try to pull another 8 bits:
+        if (bits < 5 && _it != _end) {
+            if (++_it != _end) {
+                r = (r << 8) | static_cast<unsigned char>(*_it);
+                bits += 8;
+            } else if (bits > 0) {
+                // No more input bytes, so shift `r` to put the bits we have into the most
+                // significant bit position for the final character.  E.g. if we have "11" we want
+                // the last character to be encoded "11000".
+                r <<= (5 - bits);
+                bits = 5;
+            }
         }
+        return *this;
     }
+    base32z_encoder operator++(int) { base32z_encoder copy{*this}; ++*this; return copy; }
 
-    if (bits > 0) // We hit the end, but still have some unconsumed bits so need one final character to append
-        *out++ = detail::b32z_lut.to_b32z(r << (5 - bits));
+    char operator*() {
+        // Right-shift off the excess bits we aren't accessing yet
+        return detail::b32z_lut.to_b32z(r >> (bits - 5));
+    }
+};
+
+/// Converts bytes into a base32z encoded character sequence, writing them starting at `out`.
+/// Returns the final value of out (i.e. the iterator positioned just after the last written base32z
+/// character).
+template <typename InputIt, typename OutputIt>
+OutputIt to_base32z(InputIt begin, InputIt end, OutputIt out) {
+    static_assert(sizeof(decltype(*begin)) == 1, "to_base32z requires chars/bytes");
+    base32z_encoder it{begin, end};
+    return std::copy(it, it.end(), out);
 }
 
 /// Creates a base32z string from an iterator pair of a byte sequence.
 template <typename It>
 std::string to_base32z(It begin, It end) {
     std::string base32z;
-    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>)
-        base32z.reserve((std::distance(begin, end)*8 + 4) / 5); // == bytes*8/5, rounded up.
+    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>) {
+        using std::distance;
+        base32z.reserve(to_base32z_size(distance(begin, end)));
+    }
     to_base32z(begin, end, std::back_inserter(base32z));
     return base32z;
 }
@@ -117,15 +158,36 @@ template <typename CharT>
 std::string to_base32z(std::basic_string_view<CharT> s) { return to_base32z(s.begin(), s.end()); }
 inline std::string to_base32z(std::string_view s) { return to_base32z<>(s); }
 
-/// Returns true if all elements in the range are base32z characters
+/// Returns true if the given [begin, end) range is an acceptable base32z string: specifically every
+/// character must be in the base32z alphabet, and the string must be a valid encoding length that
+/// could have been produced by to_base32z (i.e. some lengths are impossible).
 template <typename It>
 constexpr bool is_base32z(It begin, It end) {
     static_assert(sizeof(decltype(*begin)) == 1, "is_base32z requires chars/bytes");
+    size_t count = 0;
+    constexpr bool random = std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>;
+    if constexpr (random) {
+        using std::distance;
+        count = distance(begin, end) % 8;
+        if (count == 1 || count == 3 || count == 6) // see below
+            return false;
+    }
     for (; begin != end; ++begin) {
         auto c = static_cast<unsigned char>(*begin);
         if (detail::b32z_lut.from_b32z(c) == 0 && !(c == 'y' || c == 'Y'))
             return false;
+        if constexpr (!random)
+            count++;
     }
+    // Check for a valid length.
+    // - 5n + 0 bytes encodes to 8n chars (no padding bits)
+    // - 5n + 1 bytes encodes to 8n+2 chars (last 2 bits are padding)
+    // - 5n + 2 bytes encodes to 8n+4 chars (last 4 bits are padding)
+    // - 5n + 3 bytes encodes to 8n+5 chars (last 1 bit is padding)
+    // - 5n + 4 bytes encodes to 8n+7 chars (last 3 bits are padding)
+    if constexpr (!random)
+        if (count %= 8; count == 1 || count == 3 || count == 6)
+            return false;
     return true;
 }
 
@@ -134,55 +196,89 @@ template <typename CharT>
 constexpr bool is_base32z(std::basic_string_view<CharT> s) { return is_base32z(s.begin(), s.end()); }
 constexpr bool is_base32z(std::string_view s) { return is_base32z<>(s); }
 
-/// Converts a sequence of base32z digits to bytes.  Undefined behaviour if any characters are not
-/// valid base32z alphabet characters.  It is permitted for the input and output ranges to overlap
-/// as long as `out` is no earlier than `begin`.  Note that if you pass in a sequence that could not
-/// have been created by a base32z encoding of a byte sequence, we treat the excess bits as if they
-/// were not provided.
+/// Iterable object for on-the-fly base32z decoding.  Used internally, but also particularly useful
+/// when converting from one encoding to another.  The input range must be a valid base32z
+/// encoded string.
 ///
-/// For example, "yyy" represents a 15-bit value, but a byte sequence is either 8-bit (requiring 2
-/// characters) or 16-bit (requiring 4).  Similarly, "yb" is an impossible encoding because it has
-/// its 10th bit set (b = 00001), but a base32z encoded value should have all 0's beyond the 8th (or
-/// 16th or 24th or ... bit).  We treat any such bits as if they were not specified (even if they
-/// are): which means "yy", "yb", "yyy", "yy9", "yd", etc. all decode to the same 1-byte value "\0".
-template <typename InputIt, typename OutputIt>
-void from_base32z(InputIt begin, InputIt end, OutputIt out) {
-    static_assert(sizeof(decltype(*begin)) == 1, "from_base32z requires chars/bytes");
-    uint_fast16_t curr = 0;
-    int bits = 0; // number of bits we've loaded into val; we always keep this < 8.
-    while (begin != end) {
-        curr = curr << 5 | detail::b32z_lut.from_b32z(static_cast<unsigned char>(*begin++));
-        if (bits >= 3) {
-            bits -= 3; // Added 5, removing 8
-            *out++ = static_cast<detail::byte_type_t<OutputIt>>(
-                    static_cast<uint8_t>(curr >> bits));
-            curr &= (1 << bits) - 1;
-        } else {
-            bits += 5;
-        }
+/// Note that we ignore "padding" bits without requiring that they actually be 0.  For instance, the
+/// bytes "\ff\ff" are ideally encoded as "999o" (16 bits of 1s + 4 padding 0 bits), but we don't
+/// require that the padding bits be 0.  That is, "9999", "9993", etc. will all decode to the same
+/// \ff\ff output string.
+template <typename InputIt>
+struct base32z_decoder final {
+private:
+    InputIt _it, _end;
+    static_assert(sizeof(decltype(*_it)) == 1, "base32z_decoder requires chars/bytes input iterator");
+    uint_fast16_t in = 0;
+    int bits = 0; // number of bits loaded into `in`; will be in [8, 12] until we hit the end
+public:
+    using iterator_category = std::input_iterator_tag;
+    using difference_type = std::ptrdiff_t;
+    using value_type = char;
+    using reference = value_type;
+    using pointer = void;
+    base32z_decoder(InputIt begin, InputIt end) : _it{std::move(begin)}, _end{std::move(end)} {
+        if (_it != _end)
+            load_byte();
     }
 
-    // Ignore any trailing bits.  base32z encoding always has at least as many bits as the source
-    // bytes, which means we should not be able to get here from a properly encoded b32z value with
-    // anything other than 0s: if we have no extra bits (e.g. 5 bytes == 8 b32z chars) then we have
-    // a 0-bit value; if we have some extra bits (e.g. 6 bytes requires 10 b32z chars, but that
-    // contains 50 bits > 48 bits) then those extra bits will be 0s (and this covers the bits -= 3
-    // case above: it'll leave us with 0-4 extra bits, but those extra bits would be 0 if produced
-    // from an actual byte sequence).
-    //
-    // The "bits += 5" case, then, means that we could end with 5-7 bits.  This, however, cannot be
-    // produced by a valid encoding:
-    // - 0 bytes gives us 0 chars with 0 leftover bits
-    // - 1 byte gives us 2 chars with 2 leftover bits
-    // - 2 bytes gives us 4 chars with 4 leftover bits
-    // - 3 bytes gives us 5 chars with 1 leftover bit
-    // - 4 bytes gives us 7 chars with 3 leftover bits
-    // - 5 bytes gives us 8 chars with 0 leftover bits (this is where the cycle repeats)
-    //
-    // So really the only way we can get 5-7 leftover bits is if you took a 0, 2 or 5 char output (or
-    // any 8n + {0,2,5} char output) and added a base32z character to the end.  If you do that,
-    // well, too bad: you're giving invalid output and so we're just going to pretend that extra
-    // character you added isn't there by not doing anything here.
+    base32z_decoder end() { return {_end, _end}; }
+
+    bool operator==(const base32z_decoder& i) { return _it == i._it; }
+    bool operator!=(const base32z_decoder& i) { return _it != i._it; }
+
+    base32z_decoder& operator++() {
+        // Discard 8 most significant bits
+        bits -= 8;
+        in &= (1 << bits) - 1;
+        if (++_it != _end)
+            load_byte();
+        return *this;
+    }
+    base32z_decoder operator++(int) { base32z_decoder copy{*this}; ++*this; return copy; }
+
+    char operator*() {
+        return in >> (bits - 8);
+    }
+
+private:
+    void load_in() {
+        in = in << 5
+            | detail::b32z_lut.from_b32z(static_cast<unsigned char>(*_it));
+        bits += 5;
+    }
+
+    void load_byte() {
+        load_in();
+        if (bits < 8 && ++_it != _end)
+            load_in();
+
+        // If we hit the _end iterator above then we hit the end of the input with fewer than 8 bits
+        // accumulated to make a full byte.  For a properly encoded base32z string this should only
+        // be possible with 0-4 bits of all 0s; these are essentially "padding" bits (e.g. encoding
+        // 2 byte (16 bits) requires 4 b32z chars (20 bits), where only the first 16 bits are
+        // significant).  Ideally any padding bits should be 0, but we don't check that and rather
+        // just ignore them.
+        //
+        // It also isn't possible to get here with 5-7 bits if the string passes `is_base32z`
+        // because the length checks we do there disallow such a length as valid.  (If you were to
+        // pass such a string to us anyway then we are technically UB, but the current
+        // implementation just ignore the extra bits as if they are extra padding).
+    }
+};
+
+/// Converts a sequence of base32z digits to bytes.  Undefined behaviour if any characters are not
+/// valid base32z alphabet characters.  It is permitted for the input and output ranges to overlap
+/// as long as `out` is no later than `begin`.
+///
+template <typename InputIt, typename OutputIt>
+OutputIt from_base32z(InputIt begin, InputIt end, OutputIt out) {
+    static_assert(sizeof(decltype(*begin)) == 1, "from_base32z requires chars/bytes");
+    base32z_decoder it{begin, end};
+    auto bend = it.end();
+    while (it != bend)
+        *out++ = static_cast<detail::byte_type_t<OutputIt>>(*it++);
+    return out;
 }
 
 /// Convert a base32z sequence into a std::string of bytes.  Undefined behaviour if any characters
@@ -190,8 +286,10 @@ void from_base32z(InputIt begin, InputIt end, OutputIt out) {
 template <typename It>
 std::string from_base32z(It begin, It end) {
     std::string bytes;
-    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>)
-        bytes.reserve((std::distance(begin, end)*5 + 7) / 8); // == chars*5/8, rounded up.
+    if constexpr (std::is_base_of_v<std::random_access_iterator_tag, typename std::iterator_traits<It>::iterator_category>) {
+        using std::distance;
+        bytes.reserve(from_base32z_size(distance(begin, end)));
+    }
     from_base32z(begin, end, std::back_inserter(bytes));
     return bytes;
 }
