@@ -44,6 +44,7 @@
 #include <atomic>
 #include <cassert>
 #include <cstdint>
+#include <future>
 #include "zmq.hpp"
 #include "address.h"
 #include "bt_serialize.h"
@@ -55,10 +56,6 @@
 // Timers were not added until 4.3.0
 #error "ZMQ >= 4.3.0 required"
 #endif
-
-namespace std {
-template <class R> class promise;
-}
 
 namespace oxenmq {
 
