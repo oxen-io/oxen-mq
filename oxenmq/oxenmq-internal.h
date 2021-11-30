@@ -2,15 +2,15 @@
 #include "oxenmq.h"
 
 // Inside some method:
-//     LMQ_LOG(warn, "bad ", 42, " stuff");
+//     OMQ_LOG(warn, "bad ", 42, " stuff");
 //
-#define LMQ_LOG(level, ...) log(LogLevel::level, __FILE__, __LINE__, __VA_ARGS__)
+#define OMQ_LOG(level, ...) log(LogLevel::level, __FILE__, __LINE__, __VA_ARGS__)
 
 #ifndef NDEBUG
-// Same as LMQ_LOG(trace, ...) when not doing a release build; nothing under a release build.
-#  define LMQ_TRACE(...) log(LogLevel::trace, __FILE__, __LINE__, __VA_ARGS__)
+// Same as OMQ_LOG(trace, ...) when not doing a release build; nothing under a release build.
+#  define OMQ_TRACE(...) log(LogLevel::trace, __FILE__, __LINE__, __VA_ARGS__)
 #else
-#  define LMQ_TRACE(...)
+#  define OMQ_TRACE(...)
 #endif
 
 namespace oxenmq {

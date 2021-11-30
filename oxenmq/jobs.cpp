@@ -7,7 +7,7 @@ namespace oxenmq {
 void OxenMQ::proxy_batch(detail::Batch* batch) {
     batches.insert(batch);
     const auto [jobs, tagged_threads] = batch->size();
-    LMQ_TRACE("proxy queuing batch job with ", jobs, " jobs", tagged_threads ? " (job uses tagged thread(s))" : "");
+    OMQ_TRACE("proxy queuing batch job with ", jobs, " jobs", tagged_threads ? " (job uses tagged thread(s))" : "");
     if (!tagged_threads) {
         for (size_t i = 0; i < jobs; i++)
             batch_jobs.emplace(batch, i);
@@ -82,19 +82,19 @@ void OxenMQ::proxy_timer(bt_list_consumer timer_data) {
 void OxenMQ::_queue_timer_job(int timer_id) {
     auto it = timer_jobs.find(timer_id);
     if (it == timer_jobs.end()) {
-        LMQ_LOG(warn, "Could not find timer job ", timer_id);
+        OMQ_LOG(warn, "Could not find timer job ", timer_id);
         return;
     }
     auto& [func, squelch, running, thread] = it->second;
     if (squelch && running) {
-        LMQ_LOG(debug, "Not running timer job ", timer_id, " because a job for that timer is still running");
+        OMQ_LOG(debug, "Not running timer job ", timer_id, " because a job for that timer is still running");
         return;
     }
 
     if (thread == -1) { // Run directly in proxy thread
         try { func(); }
-        catch (const std::exception &e) { LMQ_LOG(warn, "timer job ", timer_id, " raised an exception: ", e.what()); }
-        catch (...) { LMQ_LOG(warn, "timer job ", timer_id, " raised a non-std exception"); }
+        catch (const std::exception &e) { OMQ_LOG(warn, "timer job ", timer_id, " raised an exception: ", e.what()); }
+        catch (...) { OMQ_LOG(warn, "timer job ", timer_id, " raised a non-std exception"); }
         return;
     }
 
@@ -104,15 +104,15 @@ void OxenMQ::_queue_timer_job(int timer_id) {
         running = true;
         b->completion([this,timer_id](auto results) {
             try { results[0].get(); }
-            catch (const std::exception &e) { LMQ_LOG(warn, "timer job ", timer_id, " raised an exception: ", e.what()); }
-            catch (...) { LMQ_LOG(warn, "timer job ", timer_id, " raised a non-std exception"); }
+            catch (const std::exception &e) { OMQ_LOG(warn, "timer job ", timer_id, " raised an exception: ", e.what()); }
+            catch (...) { OMQ_LOG(warn, "timer job ", timer_id, " raised a non-std exception"); }
             auto it = timer_jobs.find(timer_id);
             if (it != timer_jobs.end())
                 it->second.running = false;
         }, OxenMQ::run_in_proxy);
     }
     batches.insert(b);
-    LMQ_TRACE("b: ", b->size().first, ", ", b->size().second, "; thread = ", thread);
+    OMQ_TRACE("b: ", b->size().first, ", ", b->size().second, "; thread = ", thread);
     assert(b->size() == std::make_pair(size_t{1}, thread > 0));
     auto& queue = thread > 0
         ? std::get<std::queue<batch_job>>(tagged_workers[thread - 1])
@@ -172,7 +172,7 @@ TaggedThreadID OxenMQ::add_tagged_thread(std::string name, std::function<void()>
     busy = false;
     run.worker_id = tagged_workers.size(); // We want index + 1 (b/c 0 is used for non-tagged jobs)
     run.worker_routing_id = "t" + std::to_string(run.worker_id);
-    LMQ_TRACE("Created new tagged thread ", name, " with routing id ", run.worker_routing_id);
+    OMQ_TRACE("Created new tagged thread ", name, " with routing id ", run.worker_routing_id);
 
     run.worker_thread = std::thread{&OxenMQ::worker_thread, this, run.worker_id, name, std::move(start)};
 
