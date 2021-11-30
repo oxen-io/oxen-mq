@@ -31,6 +31,7 @@
 #include <string_view>
 #include <cstdint>
 #include <iosfwd>
+#include <functional>
 
 namespace oxenmq {
 
@@ -206,4 +207,12 @@ struct address {
 // Outputs address.full_address() when sent to an ostream.
 std::ostream& operator<<(std::ostream& o, const address& a);
 
-}
+} // namespace oxenmq
+
+namespace std {
+template<> struct hash<oxenmq::address> {
+    std::size_t operator()(const oxenmq::address& a) const noexcept {
+        return std::hash<std::string>{}(a.full_address(oxenmq::address::encoding::hex));
+    }
+};
+} // namespace std
