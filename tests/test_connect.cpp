@@ -244,7 +244,7 @@ TEST_CASE("unique connection IDs", "[connect][id]") {
 
 
 TEST_CASE("SN disconnections", "[connect][disconnect]") {
-    std::vector<std::unique_ptr<OxenMQ>> lmq;
+    std::vector<std::unique_ptr<OxenMQ>> omq;
     std::vector<std::string> pubkey, privkey;
     std::unordered_map<std::string, std::string> conn;
     REQUIRE(sodium_init() != -1);
@@ -258,13 +258,13 @@ TEST_CASE("SN disconnections", "[connect][disconnect]") {
     }
     std::atomic<int> his{0};
     for (int i = 0; i < pubkey.size(); i++) {
-        lmq.push_back(std::make_unique<OxenMQ>(
+        omq.push_back(std::make_unique<OxenMQ>(
             pubkey[i], privkey[i], true,
             [conn](auto pk) { auto it = conn.find((std::string) pk); if (it != conn.end()) return it->second; return ""s; },
             get_logger("S" + std::to_string(i) + "» "),
             LogLevel::trace
         ));
-        auto& server = *lmq.back();
+        auto& server = *omq.back();
 
         server.listen_curve(conn[pubkey[i]]);
         server.add_category("sn", Access{AuthLevel::none, true})
@@ -273,12 +273,12 @@ TEST_CASE("SN disconnections", "[connect][disconnect]") {
         server.start();
     }
 
-    lmq[0]->send(pubkey[1], "sn.hi");
-    lmq[0]->send(pubkey[2], "sn.hi");
-    lmq[2]->send(pubkey[0], "sn.hi");
-    lmq[2]->send(pubkey[1], "sn.hi");
-    lmq[1]->send(pubkey[0], "BYE");
-    lmq[0]->send(pubkey[2], "sn.hi");
+    omq[0]->send(pubkey[1], "sn.hi");
+    omq[0]->send(pubkey[2], "sn.hi");
+    omq[2]->send(pubkey[0], "sn.hi");
+    omq[2]->send(pubkey[1], "sn.hi");
+    omq[1]->send(pubkey[0], "BYE");
+    omq[0]->send(pubkey[2], "sn.hi");
     std::this_thread::sleep_for(50ms * TIME_DILATION);
 
     auto lock = catch_lock();
