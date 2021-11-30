@@ -25,7 +25,7 @@ void continue_big_task(std::vector<oxenmq::job_result<double>> results) {
     done.set_value({sum, exc_count});
 }
 
-void start_big_task(oxenmq::OxenMQ& lmq) {
+void start_big_task(oxenmq::OxenMQ& omq) {
     size_t num_jobs = 32;
 
     oxenmq::Batch<double /*return type*/> batch;
@@ -36,21 +36,21 @@ void start_big_task(oxenmq::OxenMQ& lmq) {
 
     batch.completion(&continue_big_task);
 
-    lmq.batch(std::move(batch));
+    omq.batch(std::move(batch));
 }
 
 
 TEST_CASE("batching many small jobs", "[batch-many]") {
-    oxenmq::OxenMQ lmq{
+    oxenmq::OxenMQ omq{
         "", "", // generate ephemeral keys
         false, // not a service node
         [](auto) { return ""; },
     };
-    lmq.set_general_threads(4);
-    lmq.set_batch_threads(4);
-    lmq.start();
+    omq.set_general_threads(4);
+    omq.set_batch_threads(4);
+    omq.start();
 
-    start_big_task(lmq);
+    start_big_task(omq);
     auto sum = done.get_future().get();
     auto lock = catch_lock();
     REQUIRE( sum.first == 1337.0 );
@@ -58,14 +58,14 @@ TEST_CASE("batching many small jobs", "[batch-many]") {
 }
 
 TEST_CASE("batch exception propagation", "[batch-exceptions]") {
-    oxenmq::OxenMQ lmq{
+    oxenmq::OxenMQ omq{
         "", "", // generate ephemeral keys
         false, // not a service node
         [](auto) { return ""; },
     };
-    lmq.set_general_threads(4);
-    lmq.set_batch_threads(4);
-    lmq.start();
+    omq.set_general_threads(4);
+    omq.set_batch_threads(4);
+    omq.start();
 
     std::promise<void> done_promise;
     std::future<void> done_future = done_promise.get_future();
@@ -83,7 +83,7 @@ TEST_CASE("batch exception propagation", "[batch-exceptions]") {
                 REQUIRE_THROWS_MATCHES( results[1].get() == 0, std::domain_error, Message("bad value 2") );
                 done_promise.set_value();
                 });
-        lmq.batch(std::move(batch));
+        omq.batch(std::move(batch));
         done_future.get();
     }
 
@@ -105,7 +105,7 @@ TEST_CASE("batch exception propagation", "[batch-exceptions]") {
                 REQUIRE_THROWS_MATCHES( results[1].get(), std::domain_error, Message("bad value 2") );
                 done_promise.set_value();
                 });
-        lmq.batch(std::move(batch));
+        omq.batch(std::move(batch));
         done_future.get();
     }
 
@@ -120,7 +120,7 @@ TEST_CASE("batch exception propagation", "[batch-exceptions]") {
                 REQUIRE_THROWS_MATCHES( results[1].get(), std::domain_error, Message("bad value 2") );
                 done_promise.set_value();
                 });
-        lmq.batch(std::move(batch));
+        omq.batch(std::move(batch));
         done_future.get();
     }
 }

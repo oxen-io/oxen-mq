@@ -19,8 +19,8 @@ public:
     std::string remote; ///< Some sort of remote address from which the request came.  Often "IP" for TCP connections and "localhost:UID:GID:PID" for unix socket connections.
 
     /// Constructor
-    Message(OxenMQ& lmq, ConnectionID cid, Access access, std::string remote)
-        : oxenmq{lmq}, conn{std::move(cid)}, access{std::move(access)}, remote{std::move(remote)} {}
+    Message(OxenMQ& omq, ConnectionID cid, Access access, std::string remote)
+        : oxenmq{omq}, conn{std::move(cid)}, access{std::move(access)}, remote{std::move(remote)} {}
 
     // Non-copyable
     Message(const Message&) = delete;
@@ -49,7 +49,7 @@ public:
     void send_reply(Args&&... args);
 
     /// Sends a request back to whomever sent this message.  This is effectively a wrapper around
-    /// lmq.request() that takes care of setting up the recipient arguments.
+    /// omq.request() that takes care of setting up the recipient arguments.
     template <typename ReplyCallback, typename... Args>
     void send_request(std::string_view command, ReplyCallback&& callback, Args&&... args);
 
