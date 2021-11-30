@@ -8,8 +8,9 @@ oxenmq (1.2.9-1~ubuntu1804) bionic; urgency=medium
   * Allow null logger
   * Propagate proxy thread startup exceptions
   * Bump version
+  * Fix libc++
 
- -- Jason Rhinelander <jason@imaginary.ca>  Tue, 30 Nov 2021 14:25:55 -0400
+ -- Jason Rhinelander <jason@imaginary.ca>  Tue, 30 Nov 2021 14:32:19 -0400
 
 oxenmq (1.2.8-1~ubuntu1804) bionic; urgency=medium
 
