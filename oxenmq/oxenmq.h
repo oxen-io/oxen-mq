@@ -796,7 +796,7 @@ public:
             std::string privkey,
             bool service_node,
             SNRemoteAddress sn_lookup,
-            Logger logger = [](LogLevel, const char*, int, std::string) { },
+            Logger logger = nullptr,
             LogLevel level = LogLevel::warn);
 
     /**
@@ -805,7 +805,7 @@ public:
      * new connections (including reconnections) to service nodes by pubkey.
      */
     explicit OxenMQ(
-            Logger logger = [](LogLevel, const char*, int, std::string) { },
+            Logger logger = nullptr,
             LogLevel level = LogLevel::warn)
         : OxenMQ("", "", false, [](auto) { return ""s; /*no peer lookups*/ }, std::move(logger), level) {}
 
@@ -1779,7 +1779,7 @@ inline std::string_view trim_log_filename(std::string_view local_file) {
 
 template <typename... T>
 void OxenMQ::log(LogLevel lvl, const char* file, int line, const T&... stuff) {
-    if (log_level() < lvl)
+    if (log_level() < lvl || !logger)
         return;
 
     std::ostringstream os;
