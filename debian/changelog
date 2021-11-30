@@ -8,8 +8,9 @@ oxenmq (1.2.9-1~ubuntu2110) impish; urgency=medium
   * Allow null logger
   * Propagate proxy thread startup exceptions
   * Bump version
+  * Fix libc++
 
- -- Jason Rhinelander <jason@imaginary.ca>  Tue, 30 Nov 2021 14:26:00 -0400
+ -- Jason Rhinelander <jason@imaginary.ca>  Tue, 30 Nov 2021 14:32:38 -0400
 
 oxenmq (1.2.8-1~ubuntu2110) impish; urgency=medium
 
