@@ -56,6 +56,10 @@
 #error "ZMQ >= 4.3.0 required"
 #endif
 
+namespace std {
+template <class R> class promise;
+}
+
 namespace oxenmq {
 
 using namespace std::literals;
@@ -467,8 +471,9 @@ private:
     /// processible without having to shove it onto a socket, such as scheduling an internal job).
     bool proxy_skip_one_poll = false;
 
-    /// Does the proxying work
-    void proxy_loop();
+    /// Does the proxying work.  Signals startup success (or failure) via the promise.
+    void proxy_loop(std::promise<void>);
+    void proxy_loop_init();
 
     void proxy_conn_cleanup();
 
@@ -955,6 +960,9 @@ public:
     /**
      * Finish starting up: binds to the bind locations given in the constructor and launches the
      * proxy thread to handle message dispatching between remote nodes and worker threads.
+     *
+     * Raises an exception if the proxy thread cannot be successfully started, such as if a bind
+     * error occurs.
      *
      * Things you want to do before calling this:
      * - Use `add_category`/`add_command` to set up any commands remote connections can invoke.

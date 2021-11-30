@@ -1,6 +1,8 @@
 #include "oxenmq.h"
 #include "oxenmq-internal.h"
 #include "hex.h"
+#include <exception>
+#include <future>
 
 #if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
 extern "C" {
@@ -365,7 +367,7 @@ bool OxenMQ::proxy_bind(bind_data& b, size_t bind_index) {
     return true;
 }
 
-void OxenMQ::proxy_loop() {
+void OxenMQ::proxy_loop_init() {
 
 #if defined(__linux__) || defined(__sun) || defined(__MINGW32__)
     pthread_setname_np(pthread_self(), "omq-proxy");
@@ -420,7 +422,7 @@ void OxenMQ::proxy_loop() {
 
     for (size_t i = 0; i < bind.size(); i++) {
         if (!proxy_bind(bind[i], i)) {
-            OMQ_LOG(warn, "OxenMQ failed to listen on ", bind[i].address);
+            OMQ_LOG(fatal, "OxenMQ failed to listen on ", bind[i].address);
             throw zmq::error_t{};
         }
     }
@@ -451,17 +453,12 @@ void OxenMQ::proxy_loop() {
     if (!timers)
         timers.reset(zmq_timers_new());
 
-    auto do_conn_cleanup = [this] { proxy_conn_cleanup(); };
-    using CleanupLambda = decltype(do_conn_cleanup);
     if (-1 == zmq_timers_add(timers.get(),
             std::chrono::milliseconds{CONN_CHECK_INTERVAL}.count(),
-            // Wrap our lambda into a C function pointer where we pass in the lambda pointer as extra arg
-            [](int /*timer_id*/, void* cleanup) { (*static_cast<CleanupLambda*>(cleanup))(); },
-            &do_conn_cleanup)) {
+            [](int /*timer_id*/, void* self) { static_cast<OxenMQ*>(self)->proxy_conn_cleanup(); },
+            this)) {
         throw zmq::error_t{};
     }
-
-    std::vector<zmq::message_t> parts;
 
     // Wait for tagged worker threads to get ready and connect to us (we get a "STARTING" message)
     // and send them back a "START" to let them know to go ahead with startup.  We need this
@@ -471,7 +468,7 @@ void OxenMQ::proxy_loop() {
         std::unordered_set<std::string_view> waiting_on;
         for (auto& w : tagged_workers)
             waiting_on.emplace(std::get<run_info>(w).worker_routing_id);
-        for (; !waiting_on.empty(); parts.clear()) {
+        for (std::vector<zmq::message_t> parts; !waiting_on.empty(); parts.clear()) {
             recv_message_parts(workers_socket, parts);
             if (parts.size() != 2 || view(parts[1]) != "STARTING"sv) {
                 OMQ_LOG(error, "Received invalid message on worker socket while waiting for tagged thread startup");
@@ -489,6 +486,18 @@ void OxenMQ::proxy_loop() {
             route_control(workers_socket, std::get<run_info>(w).worker_routing_id, "START");
         }
     }
+}
+
+void OxenMQ::proxy_loop(std::promise<void> startup) {
+    try {
+        proxy_loop_init();
+    } catch (...) {
+        startup.set_exception(std::current_exception());
+        return;
+    }
+    startup.set_value();
+
+    std::vector<zmq::message_t> parts;
 
     while (true) {
         std::chrono::milliseconds poll_timeout;

@@ -5,6 +5,7 @@
 #include <random>
 #include <ostream>
 #include <thread>
+#include <future>
 
 extern "C" {
 #include <sodium/core.h>
@@ -244,7 +245,12 @@ void OxenMQ::start() {
     // bound socket, but we do nothing else here: the proxy thread is responsible for everything
     // except binding it.
     command.bind(SN_ADDR_COMMAND);
-    proxy_thread = std::thread{&OxenMQ::proxy_loop, this};
+    std::promise<void> startup_prom;
+    auto proxy_startup = startup_prom.get_future();
+    proxy_thread = std::thread{&OxenMQ::proxy_loop, this, std::move(startup_prom)};
+
+    OMQ_LOG(debug, "Waiting for proxy thread to initialize...");
+    proxy_startup.get(); // Rethrows exceptions from the proxy startup (e.g. failure to bind)
 
     OMQ_LOG(debug, "Waiting for proxy thread to get ready...");
     auto &control = get_control_socket();
