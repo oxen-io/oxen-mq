@@ -110,8 +110,8 @@ dictionaries.  See `oxenmq/bt_serialize.h` if you want a bt serializer/deseriali
 Sending a command to a peer is done by using a connection ID, and generally falls into either a
 `send()` method or a `request()` method.
 
-    lmq.send(conn, "category.command", "some data");
-    lmq.request(conn, "category.command", [](bool success, std::vector<std::string> data) {
+    omq.send(conn, "category.command", "some data");
+    omq.request(conn, "category.command", [](bool success, std::vector<std::string> data) {
         if (success) { std::cout << "Remote replied: " << data.at(0) << "\n"; } });
 
 The connection ID generally has two possible values:
@@ -127,13 +127,13 @@ The connection ID generally has two possible values:
     ```C++
     // Send to a service node, establishing a connection if necessary:
     std::string my_sn = ...; // 32-byte pubkey of a known SN
-    lmq.send(my_sn, "sn.explode", "{ \"seconds\": 30 }");
+    omq.send(my_sn, "sn.explode", "{ \"seconds\": 30 }");
 
     // Connect to a remote by address then send it something
-    auto conn = lmq.connect_remote("tcp://127.0.0.1:4567",
+    auto conn = omq.connect_remote("tcp://127.0.0.1:4567",
         [](ConnectionID c) { std::cout << "Connected!\n"; },
         [](ConnectionID c, string_view f) { std::cout << "Connect failed: " << f << "\n" });
-    lmq.request(conn, "rpc.get_height", [](bool s, std::vector<std::string> d) {
+    omq.request(conn, "rpc.get_height", [](bool s, std::vector<std::string> d) {
         if (s && d.size() == 1)
             std::cout << "Current height: " << d[0] << "\n";
         else
@@ -332,7 +332,7 @@ void start_big_task() {
 
     batch.completion(&continue_big_task);
 
-    lmq.batch(std::move(batch));
+    omq.batch(std::move(batch));
     // ... to be continued in `continue_big_task` after all the jobs finish
 
     // Can do other things here, but note that continue_big_task could run
@@ -347,7 +347,7 @@ going to help you hurt yourself like that.
 
 ### Single-job queuing
 
-As a shortcut there is a `lmq.job(...)` method that schedules a single task (with no return value)
+As a shortcut there is a `omq.job(...)` method that schedules a single task (with no return value)
 in the batch job queue.  This is useful when some event requires triggering some other event, but
 you don't need to wait for or collect its result.  (Internally this is just a convenience method
 around creating a single-job, no-completion Batch job).

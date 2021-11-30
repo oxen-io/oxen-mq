@@ -680,7 +680,7 @@ private:
         Access access;
         std::string remote;
 
-        // Normal ctor for an actual lmq command being processed
+        // Normal ctor for an actual omq command being processed
         pending_command(category& cat, std::string command, std::vector<zmq::message_t> data_parts,
                 const std::pair<CommandCallback, bool>* callback, ConnectionID conn, Access access, std::string remote)
             : cat{cat}, command{std::move(command)}, data_parts{std::move(data_parts)},
@@ -963,7 +963,7 @@ public:
      *   another `set_active_sns()` or a `update_active_sns()` call).  It *is* possible to make the
      *   initial call after calling `start()`, but that creates a window during which incoming
      *   remote SN connections will be erroneously treated as non-SN connections.
-     * - If this LMQ instance should accept incoming connections, set up any listening ports via
+     * - If this OMQ instance should accept incoming connections, set up any listening ports via
      *   `listen_curve()` and/or `listen_plain()`.
      */
     void start();
@@ -1147,13 +1147,13 @@ public:
      * Example:
      *
      *     // Send to a SN, connecting to it if we aren't already connected:
-     *     lmq.send(pubkey, "hello.world", "abc", send_option::hint("tcp://localhost:1234"), "def");
+     *     omq.send(pubkey, "hello.world", "abc", send_option::hint("tcp://localhost:1234"), "def");
      *
      *     // Start connecting to a remote and immediately queue a message for it
-     *     auto conn = lmq.connect_remote("tcp://127.0.0.1:1234",
+     *     auto conn = omq.connect_remote("tcp://127.0.0.1:1234",
      *         [](ConnectionID) { std::cout << "connected\n"; },
      *         [](ConnectionID, string_view why) { std::cout << "connection failed: " << why << \n"; });
-     *     lmq.send(conn, "hello.world", "abc", "def");
+     *     omq.send(conn, "hello.world", "abc", "def");
      *
      * Both of these send the command `hello.world` to the given pubkey, containing additional
      * message parts "abc" and "def".  In the first case, if not currently connected, the given
@@ -1204,7 +1204,7 @@ public:
      * @param category - the category name that should handle the request for the purposes of
      * scheduling the job.  The category must have been added using add_category().  The category
      * can be an actual category with added commands, in which case the injected tasks are queued
-     * along with LMQ requests for that category, or can have no commands to set up a distinct
+     * along with OMQ requests for that category, or can have no commands to set up a distinct
      * category for the injected jobs.
      *
      * @param command - a command name; this is mainly used for debugging and does not need to
@@ -1326,32 +1326,32 @@ public:
 ///
 /// This allows simplifying:
 ///
-/// lmq.add_category("foo", ...);
-/// lmq.add_command("foo", "a", ...);
-/// lmq.add_command("foo", "b", ...);
-/// lmq.add_request_command("foo", "c", ...);
+/// omq.add_category("foo", ...);
+/// omq.add_command("foo", "a", ...);
+/// omq.add_command("foo", "b", ...);
+/// omq.add_request_command("foo", "c", ...);
 ///
 /// to:
 ///
-/// lmq.add_category("foo", ...)
+/// omq.add_category("foo", ...)
 ///     .add_command("a", ...)
 ///     .add_command("b", ...)
 ///     .add_request_command("b", ...)
 ///     ;
 class CatHelper {
-    OxenMQ& lmq;
+    OxenMQ& omq;
     std::string cat;
 
 public:
-    CatHelper(OxenMQ& lmq, std::string cat) : lmq{lmq}, cat{std::move(cat)} {}
+    CatHelper(OxenMQ& omq, std::string cat) : omq{omq}, cat{std::move(cat)} {}
 
     CatHelper& add_command(std::string name, OxenMQ::CommandCallback callback) {
-        lmq.add_command(cat, std::move(name), std::move(callback));
+        omq.add_command(cat, std::move(name), std::move(callback));
         return *this;
     }
 
     CatHelper& add_request_command(std::string name, OxenMQ::CommandCallback callback) {
-        lmq.add_request_command(cat, std::move(name), std::move(callback));
+        omq.add_request_command(cat, std::move(name), std::move(callback));
         return *this;
     }
 };
