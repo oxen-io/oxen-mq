@@ -8,8 +8,9 @@ oxenmq (1.2.9-1) unstable; urgency=medium
   * Allow null logger
   * Propagate proxy thread startup exceptions
   * Bump version
+  * Fix libc++
 
- -- Jason Rhinelander <jason@imaginary.ca>  Tue, 30 Nov 2021 14:25:39 -0400
+ -- Jason Rhinelander <jason@imaginary.ca>  Tue, 30 Nov 2021 14:31:31 -0400
 
 oxenmq (1.2.8-1) unstable; urgency=medium
 
