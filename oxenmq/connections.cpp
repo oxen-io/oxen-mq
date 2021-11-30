@@ -119,10 +119,10 @@ OxenMQ::proxy_connect_sn(std::string_view remote, std::string_view connect_hint,
     }
 
     if (peer) {
-        LMQ_TRACE("proxy asked to connect to ", to_hex(remote), "; reusing existing connection");
+        OMQ_TRACE("proxy asked to connect to ", to_hex(remote), "; reusing existing connection");
         if (peer->route.empty() /* == outgoing*/) {
             if (peer->idle_expiry < keep_alive) {
-                LMQ_LOG(debug, "updating existing outgoing peer connection idle expiry time from ",
+                OMQ_LOG(debug, "updating existing outgoing peer connection idle expiry time from ",
                         peer->idle_expiry.count(), "ms to ", keep_alive.count(), "ms");
                 peer->idle_expiry = keep_alive;
             }
@@ -130,12 +130,12 @@ OxenMQ::proxy_connect_sn(std::string_view remote, std::string_view connect_hint,
         }
         return {&connections[peer->conn_id], peer->route};
     } else if (optional || incoming_only) {
-        LMQ_LOG(debug, "proxy asked for optional or incoming connection, but no appropriate connection exists so aborting connection attempt");
+        OMQ_LOG(debug, "proxy asked for optional or incoming connection, but no appropriate connection exists so aborting connection attempt");
         return {nullptr, ""s};
     }
 
     // No connection so establish a new one
-    LMQ_LOG(debug, "proxy establishing new outbound connection to ", to_hex(remote));
+    OMQ_LOG(debug, "proxy establishing new outbound connection to ", to_hex(remote));
     std::string addr;
     bool to_self = false && remote == pubkey; // FIXME; need to use a separate listening socket for this, otherwise we can't easily
                                               // tell it wasn't from a remote.
@@ -147,15 +147,15 @@ OxenMQ::proxy_connect_sn(std::string_view remote, std::string_view connect_hint,
         if (addr.empty())
             addr = sn_lookup(remote);
         else
-            LMQ_LOG(debug, "using connection hint ", connect_hint);
+            OMQ_LOG(debug, "using connection hint ", connect_hint);
 
         if (addr.empty()) {
-            LMQ_LOG(error, "peer lookup failed for ", to_hex(remote));
+            OMQ_LOG(error, "peer lookup failed for ", to_hex(remote));
             return {nullptr, ""s};
         }
     }
 
-    LMQ_LOG(debug, to_hex(pubkey), " (me) connecting to ", addr, " to reach ", to_hex(remote));
+    OMQ_LOG(debug, to_hex(pubkey), " (me) connecting to ", addr, " to reach ", to_hex(remote));
     zmq::socket_t socket{context, zmq::socket_type::dealer};
     setup_outgoing_socket(socket, remote, use_ephemeral_routing_id);
     try {
@@ -163,7 +163,7 @@ OxenMQ::proxy_connect_sn(std::string_view remote, std::string_view connect_hint,
     } catch (const zmq::error_t& e) {
         // Note that this failure cases indicates something serious went wrong that means zmq isn't
         // even going to try connecting (for example an unparseable remote address).
-        LMQ_LOG(error, "Outgoing connection to ", addr, " failed: ", e.what());
+        OMQ_LOG(error, "Outgoing connection to ", addr, " failed: ", e.what());
         return {nullptr, ""s};
     }
 
@@ -211,10 +211,10 @@ std::pair<zmq::socket_t *, std::string> OxenMQ::proxy_connect_sn(bt_dict_consume
 void OxenMQ::proxy_close_connection(int64_t id, std::chrono::milliseconds linger) {
     auto it = connections.find(id);
     if (it == connections.end()) {
-        LMQ_LOG(warn, "internal error: connection to close (", id, ") doesn't exist!");
+        OMQ_LOG(warn, "internal error: connection to close (", id, ") doesn't exist!");
         return;
     }
-    LMQ_LOG(debug, "Closing conn ", id);
+    OMQ_LOG(debug, "Closing conn ", id);
     it->second.set(zmq::sockopt::linger, linger > 0ms ? (int) linger.count() : 0);
     connections.erase(it);
     connections_updated = true;
@@ -228,13 +228,13 @@ void OxenMQ::proxy_expire_idle_peers() {
         if (info.outgoing()) {
             auto idle = std::chrono::steady_clock::now() - info.last_activity;
             if (idle > info.idle_expiry) {
-                LMQ_LOG(debug, "Closing outgoing connection to ", it->first, ": idle time (",
+                OMQ_LOG(debug, "Closing outgoing connection to ", it->first, ": idle time (",
                         std::chrono::duration_cast<std::chrono::milliseconds>(idle).count(), "ms) reached connection timeout (",
                         info.idle_expiry.count(), "ms)");
                 proxy_close_connection(info.conn_id, CLOSE_LINGER);
                 it = peers.erase(it);
             } else {
-                LMQ_LOG(trace, "Not closing ", it->first, ": ", std::chrono::duration_cast<std::chrono::milliseconds>(idle).count(),
+                OMQ_LOG(trace, "Not closing ", it->first, ": ", std::chrono::duration_cast<std::chrono::milliseconds>(idle).count(),
                         "ms <= ", info.idle_expiry.count(), "ms");
                 ++it;
                 continue;
@@ -246,17 +246,17 @@ void OxenMQ::proxy_expire_idle_peers() {
 }
 
 void OxenMQ::proxy_conn_cleanup() {
-    LMQ_TRACE("starting proxy connections cleanup");
+    OMQ_TRACE("starting proxy connections cleanup");
 
     // Drop idle connections (if we haven't done it in a while)
-    LMQ_TRACE("closing idle connections");
+    OMQ_TRACE("closing idle connections");
     proxy_expire_idle_peers();
 
     auto now = std::chrono::steady_clock::now();
 
     // FIXME - check other outgoing connections to see if they died and if so purge them
 
-    LMQ_TRACE("Timing out pending outgoing connections");
+    OMQ_TRACE("Timing out pending outgoing connections");
     // Check any pending outgoing connections for timeout
     for (auto it = pending_connects.begin(); it != pending_connects.end(); ) {
         auto& pc = *it;
@@ -270,12 +270,12 @@ void OxenMQ::proxy_conn_cleanup() {
         }
     }
 
-    LMQ_TRACE("Timing out pending requests");
+    OMQ_TRACE("Timing out pending requests");
     // Remove any expired pending requests and schedule their callback with a failure
     for (auto it = pending_requests.begin(); it != pending_requests.end(); ) {
         auto& callback = it->second;
         if (callback.first < now) {
-            LMQ_LOG(debug, "pending request ", to_hex(it->first), " expired, invoking callback with failure status and removing");
+            OMQ_LOG(debug, "pending request ", to_hex(it->first), " expired, invoking callback with failure status and removing");
             job([callback = std::move(callback.second)] { callback(false, {{"TIMEOUT"s}}); });
             it = pending_requests.erase(it);
         } else {
@@ -283,7 +283,7 @@ void OxenMQ::proxy_conn_cleanup() {
         }
     }
 
-    LMQ_TRACE("done proxy connections cleanup");
+    OMQ_TRACE("done proxy connections cleanup");
 };
 
 void OxenMQ::proxy_connect_remote(bt_dict_consumer data) {
@@ -318,7 +318,7 @@ void OxenMQ::proxy_connect_remote(bt_dict_consumer data) {
     if (conn_id == -1 || remote.empty())
         throw std::runtime_error("Internal error: CONNECT_REMOTE proxy command missing required 'conn_id' and/or 'remote' value");
 
-    LMQ_LOG(debug, "Establishing remote connection to ", remote, remote_pubkey.empty() ? " (NULL auth)" : " via CURVE expecting pubkey " + to_hex(remote_pubkey));
+    OMQ_LOG(debug, "Establishing remote connection to ", remote, remote_pubkey.empty() ? " (NULL auth)" : " via CURVE expecting pubkey " + to_hex(remote_pubkey));
 
     zmq::socket_t sock{context, zmq::socket_type::dealer};
     try {
@@ -333,7 +333,7 @@ void OxenMQ::proxy_connect_remote(bt_dict_consumer data) {
 
     auto &s = connections.emplace_hint(connections.end(), conn_id, std::move(sock))->second;
     connections_updated = true;
-    LMQ_LOG(debug, "Opened new zmq socket to ", remote, ", conn_id ", conn_id, "; sending HI");
+    OMQ_LOG(debug, "Opened new zmq socket to ", remote, ", conn_id ", conn_id, "; sending HI");
     send_direct_message(s, "HI");
     pending_connects.emplace_back(conn_id, std::chrono::steady_clock::now() + timeout,
             std::move(on_connect), std::move(on_failure));
@@ -363,18 +363,18 @@ void OxenMQ::proxy_disconnect(bt_dict_consumer data) {
     proxy_disconnect(std::move(connid), linger);
 }
 void OxenMQ::proxy_disconnect(ConnectionID conn, std::chrono::milliseconds linger) {
-    LMQ_TRACE("Disconnecting outgoing connection to ", conn);
+    OMQ_TRACE("Disconnecting outgoing connection to ", conn);
     auto pr = peers.equal_range(conn);
     for (auto it = pr.first; it != pr.second; ++it) {
         auto& peer = it->second;
         if (peer.outgoing()) {
-            LMQ_LOG(debug, "Closing outgoing connection to ", conn);
+            OMQ_LOG(debug, "Closing outgoing connection to ", conn);
             proxy_close_connection(peer.conn_id, linger);
             peers.erase(it);
             return;
         }
     }
-    LMQ_LOG(warn, "Failed to disconnect ", conn, ": no such outgoing connection");
+    OMQ_LOG(warn, "Failed to disconnect ", conn, ": no such outgoing connection");
 }
 
 
