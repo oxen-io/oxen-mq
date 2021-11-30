@@ -267,6 +267,11 @@ void OxenMQ::process_zap_requests() {
                 status_text = "Invalid public key size for CURVE authentication";
             } else {
                 auto ip = view(frames[3]);
+                // If we're in dual stack mode IPv4 address might be IPv4-mapped IPv6 address (e.g.
+                // ::ffff:192.168.0.1); if so, remove the prefix to get a proper IPv4 address:
+                if (ip.size() >= 14 && ip.substr(0, 7) == "::ffff:"sv && ip.find_last_not_of("0123456789."sv) == 6)
+                    ip = ip.substr(7);
+
                 std::string_view pubkey;
                 bool sn = false;
                 if (bind[bind_id].curve) {
