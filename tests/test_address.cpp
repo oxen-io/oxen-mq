@@ -129,3 +129,34 @@ TEST_CASE("tcp QR-code friendly addresses", "[address][tcp][qr]") {
     REQUIRE_THROWS_AS(address{"CURVE://PUBLIC.LOKI.FOUNDATION:12345/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}, std::invalid_argument);
 }
 
+TEST_CASE("address hashing", "[address][hash]") {
+    address a{"tcp://public.loki.foundation:12345"};
+    address b{"tcp+curve://public.loki.foundation:12345/" + pk_hex};
+    address c{"ipc:///tmp/some.sock"};
+    address d{"ipc:///tmp/some.other.sock"};
+
+    std::hash<oxenmq::address> hasher{};
+    REQUIRE( hasher(a) != hasher(b) );
+    REQUIRE( hasher(a) != hasher(c) );
+    REQUIRE( hasher(a) != hasher(d) );
+    REQUIRE( hasher(b) != hasher(c) );
+    REQUIRE( hasher(b) != hasher(d) );
+    REQUIRE( hasher(c) != hasher(d) );
+
+    std::unordered_set<oxenmq::address> set;
+    set.insert(a);
+    set.insert(b);
+    set.insert(c);
+    set.insert(d);
+
+    CHECK( set.size() == 4 );
+    std::unordered_map<oxenmq::address, int> count;
+    for (const auto& addr : set)
+        count[addr]++;
+
+    REQUIRE( count.size() == 4 );
+    CHECK( count[a] == 1 );
+    CHECK( count[b] == 1 );
+    CHECK( count[c] == 1 );
+    CHECK( count[d] == 1 );
+}
