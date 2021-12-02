@@ -1,3 +1,10 @@
+oxenmq (1.2.10-1~ubuntu2104) hirsute; urgency=medium
+
+  * 1.2.9 proper release
+  * Disable IPv6 by default
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Thu, 02 Dec 2021 19:11:51 -0400
+
 oxenmq (1.2.9-1~ubuntu2104) hirsute; urgency=medium
 
   * CI tweaks
