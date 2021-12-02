@@ -296,6 +296,15 @@ public:
      */
     int SOCKET_UID = -1;
 
+    /** If true then enable IPv6 connectivity on incoming/outgoing sockets.  This is disabled by
+     * default because enabling it in libzmq breaks IPv4-only clients trying to connect to
+     * dual-stack IPv6+IPv4 hosts by hostname (the client will *only* try IPv6 if it finds an IPv6
+     * address, even if it has no IPv6 connectivity).
+     *
+     * This only has an effect for sockets created *after* it is changed.
+     */
+    bool IPV6 = false;
+
     /// A special TaggedThreadID value that always refers to the proxy thread; the main use of this is
     /// to direct very simple batch completion jobs to be executed directly in the proxy thread.
     inline static constexpr TaggedThreadID run_in_proxy{-1};
