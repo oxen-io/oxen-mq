@@ -40,7 +40,9 @@ void OxenMQ::setup_external_socket(zmq::socket_t& socket) {
     socket.set(zmq::sockopt::reconnect_ivl_max, (int) RECONNECT_INTERVAL_MAX.count());
     socket.set(zmq::sockopt::handshake_ivl, (int) HANDSHAKE_TIME.count());
     socket.set(zmq::sockopt::maxmsgsize, MAX_MSG_SIZE);
-    socket.set(zmq::sockopt::ipv6, 1);
+    if (IPV6)
+        socket.set(zmq::sockopt::ipv6, 1);
+
     if (CONN_HEARTBEAT > 0s) {
         socket.set(zmq::sockopt::heartbeat_ivl, (int) CONN_HEARTBEAT.count());
         if (CONN_HEARTBEAT_TIMEOUT > 0s)
