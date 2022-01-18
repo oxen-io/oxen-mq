@@ -115,7 +115,7 @@ inline AuthLevel auth_from_string(std::string_view a) {
 }
 
 // Extracts and builds the "send" part of a message for proxy_send/proxy_reply
-inline std::list<zmq::message_t> build_send_parts(bt_list_consumer send, std::string_view route) {
+inline std::list<zmq::message_t> build_send_parts(oxenc::bt_list_consumer send, std::string_view route) {
     std::list<zmq::message_t> parts;
     if (!route.empty())
         parts.push_back(create_message(route));

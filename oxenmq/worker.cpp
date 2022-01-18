@@ -8,6 +8,7 @@ extern "C" {
 #include <pthread_np.h>
 }
 #endif
+#include <oxenc/variant.h>
 
 namespace oxenmq {
 
@@ -134,7 +135,7 @@ void OxenMQ::worker_thread(unsigned int index, std::optional<std::string> tagged
                 callback(message);
             }
         }
-        catch (const bt_deserialize_invalid& e) {
+        catch (const oxenc::bt_deserialize_invalid& e) {
             OMQ_LOG(warn, worker_id, " deserialization failed: ", e.what(), "; ignoring request");
         }
 #ifndef BROKEN_APPLE_VARIANT
@@ -185,7 +186,7 @@ void OxenMQ::proxy_worker_message(std::vector<zmq::message_t>& parts) {
     assert(route.size() >= 2 && (route[0] == 'w' || route[0] == 't') && route[1] >= '0' && route[1] <= '9');
     bool tagged_worker = route[0] == 't';
     std::string_view worker_id_str{&route[1], route.size()-1}; // Chop off the leading "w" (or "t")
-    unsigned int worker_id = detail::extract_unsigned(worker_id_str);
+    unsigned int worker_id = oxenc::detail::extract_unsigned(worker_id_str);
     if (!worker_id_str.empty() /* didn't consume everything */ ||
             (tagged_worker
                 ? 0 == worker_id || worker_id > tagged_workers.size() // tagged worker ids are indexed from 1 to N (0 means untagged)
@@ -391,7 +392,7 @@ void OxenMQ::inject_task(const std::string& category, std::string command, std::
     auto it = categories.find(category);
     if (it == categories.end())
         throw std::out_of_range{"Invalid category `" + category + "': category does not exist"};
-    detail::send_control(get_control_socket(), "INJECT", bt_serialize(detail::serialize_object(
+    detail::send_control(get_control_socket(), "INJECT", oxenc::bt_serialize(detail::serialize_object(
                 injected_task{it->second, std::move(command), std::move(remote), std::move(callback)})));
 }
 

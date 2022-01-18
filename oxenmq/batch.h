@@ -273,7 +273,7 @@ void OxenMQ::batch(Batch<R>&& batch) {
         throw std::logic_error("Cannot batch a a job batch with 0 jobs");
     // Need to send this over to the proxy thread via the base class pointer.  It assumes ownership.
     auto* baseptr = static_cast<detail::Batch*>(new Batch<R>(std::move(batch)));
-    detail::send_control(get_control_socket(), "BATCH", bt_serialize(reinterpret_cast<uintptr_t>(baseptr)));
+    detail::send_control(get_control_socket(), "BATCH", oxenc::bt_serialize(reinterpret_cast<uintptr_t>(baseptr)));
 }
 
 }

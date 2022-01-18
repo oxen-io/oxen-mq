@@ -1,5 +1,5 @@
 #include "common.h"
-#include <oxenmq/hex.h>
+#include <oxenc/hex.h>
 #include <map>
 #include <set>
 
@@ -51,7 +51,7 @@ TEST_CASE("basic commands", "[commands]") {
         REQUIRE( got );
         REQUIRE( success );
         REQUIRE_FALSE( failed );
-        REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
+        REQUIRE( oxenc::to_hex(pubkey) == oxenc::to_hex(server.get_pubkey()) );
     }
 
     client.send(c, "public.hello");
@@ -61,7 +61,7 @@ TEST_CASE("basic commands", "[commands]") {
         auto lock = catch_lock();
         REQUIRE( hellos == 1 );
         REQUIRE( his == 1 );
-        REQUIRE( to_hex(client_pubkey) == to_hex(client.get_pubkey()) );
+        REQUIRE( oxenc::to_hex(client_pubkey) == oxenc::to_hex(client.get_pubkey()) );
     }
 
     for (int i = 0; i < 50; i++)
@@ -410,7 +410,7 @@ TEST_CASE("data parts", "[commands][send][data_parts]") {
         REQUIRE( got );
         REQUIRE( success );
         REQUIRE_FALSE( failed );
-        REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
+        REQUIRE( oxenc::to_hex(pubkey) == oxenc::to_hex(server.get_pubkey()) );
     }
 
     std::vector some_data{{"abc"s, "def"s, "omg123\0zzz"s}};
@@ -498,7 +498,7 @@ TEST_CASE("deferred replies", "[commands][send][deferred]") {
         auto lock = catch_lock();
         REQUIRE( connected );
         REQUIRE_FALSE( failed );
-        REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
+        REQUIRE( oxenc::to_hex(pubkey) == oxenc::to_hex(server.get_pubkey()) );
     }
 
     std::unordered_set<std::string> replies;

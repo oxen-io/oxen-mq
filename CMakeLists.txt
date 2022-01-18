@@ -17,7 +17,7 @@ cmake_minimum_required(VERSION 3.7)
 set(CMAKE_OSX_DEPLOYMENT_TARGET 10.12 CACHE STRING "macOS deployment target (Apple clang only)")
 
 project(liboxenmq
-    VERSION 1.2.10
+    VERSION 1.2.11
     LANGUAGES CXX C)
 
 include(GNUInstallDirs)
@@ -56,7 +56,6 @@ endif()
 add_library(oxenmq
     oxenmq/address.cpp
     oxenmq/auth.cpp
-    oxenmq/bt_serialize.cpp
     oxenmq/connections.cpp
     oxenmq/jobs.cpp
     oxenmq/oxenmq.cpp
@@ -68,6 +67,21 @@ set_target_properties(oxenmq PROPERTIES SOVERSION ${OXENMQ_LIBVERSION})
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 target_link_libraries(oxenmq PRIVATE Threads::Threads)
+
+
+if(TARGET oxenc)
+    target_link_libraries(oxenmq PUBLIC oxenc)
+elseif(BUILD_SHARED_LIBS)
+    include(FindPkgConfig)
+    pkg_check_modules(oxenc liboxenc IMPORTED_TARGET)
+
+    if(oxenc_FOUND)
+        target_link_libraries(oxenmq PUBLIC PkgConfig::oxenc)
+    else()
+        add_subdirectory(oxen-encoding)
+        target_link_libraries(oxenmq PUBLIC oxenc)
+    endif()
+endif()
 
 # libzmq is nearly impossible to link statically from a system-installed static library: it depends
 # on a ton of other libraries, some of which are not all statically available.  If the caller wants
