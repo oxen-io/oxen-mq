@@ -81,6 +81,9 @@ elseif(BUILD_SHARED_LIBS)
         add_subdirectory(oxen-encoding)
         target_link_libraries(oxenmq PUBLIC oxenc)
     endif()
+else()
+    add_subdirectory(oxen-encoding)
+    target_link_libraries(oxenmq PUBLIC oxenc)
 endif()
 
 # libzmq is nearly impossible to link statically from a system-installed static library: it depends
