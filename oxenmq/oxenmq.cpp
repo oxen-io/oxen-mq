@@ -12,7 +12,8 @@ extern "C" {
 #include <sodium/crypto_box.h>
 #include <sodium/crypto_scalarmult.h>
 }
-#include "hex.h"
+#include <oxenc/hex.h>
+#include <oxenc/variant.h>
 
 namespace oxenmq {
 
@@ -21,7 +22,7 @@ namespace {
 
 /// Creates a message by bt-serializing the given value (string, number, list, or dict)
 template <typename T>
-zmq::message_t create_bt_message(T&& data) { return create_message(bt_serialize(std::forward<T>(data))); }
+zmq::message_t create_bt_message(T&& data) { return create_message(oxenc::bt_serialize(std::forward<T>(data))); }
 
 template <typename MessageContainer>
 std::vector<std::string> as_strings(const MessageContainer& msgs) {
@@ -62,9 +63,9 @@ std::pair<std::string, AuthLevel> extract_metadata(zmq::message_t& msg) {
         std::string_view pubkey_hex{msg.gets("User-Id")};
         if (pubkey_hex.size() != 64)
             throw std::logic_error("bad user-id");
-        assert(is_hex(pubkey_hex.begin(), pubkey_hex.end()));
+        assert(oxenc::is_hex(pubkey_hex.begin(), pubkey_hex.end()));
         result.first.resize(32, 0);
-        from_hex(pubkey_hex.begin(), pubkey_hex.end(), result.first.begin());
+        oxenc::from_hex(pubkey_hex.begin(), pubkey_hex.end(), result.first.begin());
     } catch (...) {}
 
     try {
@@ -233,7 +234,7 @@ void OxenMQ::start() {
     if (proxy_thread.joinable())
         throw std::logic_error("Cannot call start() multiple times!");
 
-    OMQ_LOG(info, "Initializing OxenMQ ", bind.empty() ? "remote-only" : "listener", " with pubkey ", to_hex(pubkey));
+    OMQ_LOG(info, "Initializing OxenMQ ", bind.empty() ? "remote-only" : "listener", " with pubkey ", oxenc::to_hex(pubkey));
 
     int zmq_socket_limit = context.get(zmq::ctxopt::socket_limit);
     if (MAX_SOCKETS > 1 && MAX_SOCKETS <= zmq_socket_limit)
@@ -273,7 +274,7 @@ void OxenMQ::listen_curve(std::string bind_addr, AllowFunc allow_connection, std
     if (!allow_connection) allow_connection = [](auto&&...) { return AuthLevel::none; };
     bind_data d{std::move(bind_addr), true, std::move(allow_connection), std::move(on_bind)};
     if (proxy_thread.joinable())
-        detail::send_control(get_control_socket(), "BIND", bt_serialize(detail::serialize_object(std::move(d))));
+        detail::send_control(get_control_socket(), "BIND", oxenc::bt_serialize(detail::serialize_object(std::move(d))));
     else
         bind.push_back(std::move(d));
 }
@@ -284,7 +285,7 @@ void OxenMQ::listen_plain(std::string bind_addr, AllowFunc allow_connection, std
     if (!allow_connection) allow_connection = [](auto&&...) { return AuthLevel::none; };
     bind_data d{std::move(bind_addr), false, std::move(allow_connection), std::move(on_bind)};
     if (proxy_thread.joinable())
-        detail::send_control(get_control_socket(), "BIND", bt_serialize(detail::serialize_object(std::move(d))));
+        detail::send_control(get_control_socket(), "BIND", oxenc::bt_serialize(detail::serialize_object(std::move(d))));
     else
         bind.push_back(std::move(d));
 }

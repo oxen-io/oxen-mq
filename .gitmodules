@@ -4,3 +4,6 @@
 [submodule "Catch2"]
 	path = tests/Catch2
 	url = https://github.com/catchorg/Catch2.git
+[submodule "oxen-encoding"]
+	path = oxen-encoding
+	url = https://github.com/oxen-io/oxen-encoding.git
