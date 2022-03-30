@@ -4,7 +4,7 @@ local distro_docker = 'registry.oxen.rocks/lokinet-ci-ubuntu-' + distro + '-buil
 
 local apt_get_quiet = 'apt-get -o=Dpkg::Use-Pty=0 -q';
 
-local repo_suffix = '';  // can be /beta or /staging for non-primary repo deps
+local repo_suffix = '/staging';  // can be /beta or /staging for non-primary repo deps
 
 local submodules = {
   name: 'submodules',
