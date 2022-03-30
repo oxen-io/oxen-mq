@@ -1,6 +1,6 @@
 local docker_base = 'registry.oxen.rocks/lokinet-ci-';
 
-local default_deps_nocxx = ['libsodium-dev', 'libzmq3-dev'];
+local default_deps_nocxx = ['libsodium-dev', 'libzmq3-dev', 'liboxenc-dev'];
 
 local submodule_commands = ['git fetch --tags', 'git submodule update --init --recursive --depth=1'];
 
@@ -12,7 +12,14 @@ local submodules = {
 
 local apt_get_quiet = 'apt-get -o=Dpkg::Use-Pty=0 -q ';
 
-local debian_pipeline(name, image, arch='amd64', deps=['g++'] + default_deps_nocxx, cmake_extra='', build_type='Release', extra_cmds=[], allow_fail=false) = {
+local debian_pipeline(name,
+                      image,
+                      arch='amd64',
+                      deps=['g++'] + default_deps_nocxx,
+                      cmake_extra='',
+                      build_type='Release',
+                      extra_cmds=[],
+                      allow_fail=false) = {
   kind: 'pipeline',
   type: 'docker',
   name: name,
@@ -30,6 +37,10 @@ local debian_pipeline(name, image, arch='amd64', deps=['g++'] + default_deps_noc
         'echo "man-db man-db/auto-update boolean false" | debconf-set-selections',
         apt_get_quiet + 'update',
         apt_get_quiet + 'install -y eatmydata',
+        'eatmydata ' + apt_get_quiet + ' install --no-install-recommends -y lsb-release',
+        'cp contrib/deb.oxen.io.gpg /etc/apt/trusted.gpg.d',
+        'echo deb http://deb.oxen.io $$(lsb_release -sc) main >/etc/apt/sources.list.d/oxen.list',
+        'eatmydata ' + apt_get_quiet + ' update',
         'eatmydata ' + apt_get_quiet + 'dist-upgrade -y',
         'eatmydata ' + apt_get_quiet + 'install -y cmake git ninja-build pkg-config ccache ' + std.join(' ', deps),
         'mkdir build',
