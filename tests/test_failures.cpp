@@ -1,5 +1,4 @@
 #include "common.h"
-#include <oxenmq/hex.h>
 #include <map>
 #include <set>
 

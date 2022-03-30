@@ -5,9 +5,9 @@
 #include <utility>
 #include <stdexcept>
 #include <ostream>
-#include "hex.h"
-#include "base32z.h"
-#include "base64.h"
+#include <oxenc/hex.h>
+#include <oxenc/base32z.h>
+#include <oxenc/base64.h>
 
 namespace oxenmq {
 
@@ -23,14 +23,14 @@ constexpr size_t enc_length(address::encoding enc) {
 // given: for QR-friendly we only accept hex or base32z (since QR cannot handle base64's alphabet).
 std::string decode_pubkey(std::string_view& in, bool qr) {
     std::string pubkey;
-    if (in.size() >= 64 && is_hex(in.substr(0, 64))) {
-        pubkey = from_hex(in.substr(0, 64));
+    if (in.size() >= 64 && oxenc::is_hex(in.substr(0, 64))) {
+        pubkey = oxenc::from_hex(in.substr(0, 64));
         in.remove_prefix(64);
-    } else if (in.size() >= 52 && is_base32z(in.substr(0, 52))) {
-        pubkey = from_base32z(in.substr(0, 52));
+    } else if (in.size() >= 52 && oxenc::is_base32z(in.substr(0, 52))) {
+        pubkey = oxenc::from_base32z(in.substr(0, 52));
         in.remove_prefix(52);
-    } else if (!qr && in.size() >= 43 && is_base64(in.substr(0, 43))) {
-        pubkey = from_base64(in.substr(0, 43));
+    } else if (!qr && in.size() >= 43 && oxenc::is_base64(in.substr(0, 43))) {
+        pubkey = oxenc::from_base64(in.substr(0, 43));
         in.remove_prefix(43);
         if (!in.empty() && in.front() == '=')
             in.remove_prefix(1); // allow (and eat) a padding byte at the end
@@ -116,15 +116,15 @@ std::pair<std::string, std::string> parse_unix(std::string_view& addr, bool expe
     std::pair<std::string, std::string> result;
     if (expect_pubkey) {
         size_t b64_len = addr.size() > 0 && addr.back() == '=' ? 44 : 43;
-        if (addr.size() > 64 && addr[addr.size() - 65] == '/' && is_hex(addr.substr(addr.size() - 64))) {
+        if (addr.size() > 64 && addr[addr.size() - 65] == '/' && oxenc::is_hex(addr.substr(addr.size() - 64))) {
             result.first = std::string{addr.substr(0, addr.size() - 65)};
-            result.second = from_hex(addr.substr(addr.size() - 64));
-        } else if (addr.size() > 52 && addr[addr.size() - 53] == '/' && is_base32z(addr.substr(addr.size() - 52))) {
+            result.second = oxenc::from_hex(addr.substr(addr.size() - 64));
+        } else if (addr.size() > 52 && addr[addr.size() - 53] == '/' && oxenc::is_base32z(addr.substr(addr.size() - 52))) {
             result.first = std::string{addr.substr(0, addr.size() - 53)};
-            result.second = from_base32z(addr.substr(addr.size() - 52));
-        } else if (addr.size() > b64_len && addr[addr.size() - b64_len - 1] == '/' && is_base64(addr.substr(addr.size() - b64_len))) {
+            result.second = oxenc::from_base32z(addr.substr(addr.size() - 52));
+        } else if (addr.size() > b64_len && addr[addr.size() - b64_len - 1] == '/' && oxenc::is_base64(addr.substr(addr.size() - b64_len))) {
             result.first = std::string{addr.substr(0, addr.size() - b64_len - 1)};
-            result.second = from_base64(addr.substr(addr.size() - b64_len));
+            result.second = oxenc::from_base64(addr.substr(addr.size() - b64_len));
         } else {
             throw std::invalid_argument{"icp+curve:// requires a trailing /PUBKEY value, got: " + std::string{addr}};
         }
@@ -198,16 +198,16 @@ address& address::set_pubkey(std::string_view pk) {
 std::string address::encode_pubkey(encoding enc) const {
     std::string pk;
     if (enc == encoding::hex)
-        pk = to_hex(pubkey);
+        pk = oxenc::to_hex(pubkey);
     else if (enc == encoding::base32z)
-        pk = to_base32z(pubkey);
+        pk = oxenc::to_base32z(pubkey);
     else if (enc == encoding::BASE32Z) {
-        pk = to_base32z(pubkey);
+        pk = oxenc::to_base32z(pubkey);
         for (char& c : pk)
             if (c >= 'a' && c <= 'z')
                 c = c - 'a' + 'A';
     } else if (enc == encoding::base64) {
-        pk = to_base64(pubkey);
+        pk = oxenc::to_base64(pubkey);
         if (pk.size() == 44 && pk.back() == '=')
             pk.resize(43);
     } else {

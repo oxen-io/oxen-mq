@@ -1,5 +1,5 @@
 #include "common.h"
-#include <oxenmq/hex.h>
+#include <oxenc/hex.h>
 
 using namespace oxenmq;
 
@@ -39,7 +39,7 @@ TEST_CASE("basic requests", "[requests]") {
         auto lock = catch_lock();
         REQUIRE( connected );
         REQUIRE_FALSE( failed );
-        REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
+        REQUIRE( oxenc::to_hex(pubkey) == oxenc::to_hex(server.get_pubkey()) );
     }
 
     std::atomic<bool> got_reply{false};
@@ -102,7 +102,7 @@ TEST_CASE("request from server to client", "[requests]") {
         REQUIRE( connected.load() );
         REQUIRE( !failed.load() );
         REQUIRE( i <= 1 );
-        REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
+        REQUIRE( oxenc::to_hex(pubkey) == oxenc::to_hex(server.get_pubkey()) );
     }
 
     std::atomic<bool> got_reply{false};
@@ -157,7 +157,7 @@ TEST_CASE("request timeouts", "[requests][timeout]") {
 
     REQUIRE( connected );
     REQUIRE_FALSE( failed );
-    REQUIRE( to_hex(pubkey) == to_hex(server.get_pubkey()) );
+    REQUIRE( oxenc::to_hex(pubkey) == oxenc::to_hex(server.get_pubkey()) );
 
     std::atomic<bool> got_triggered{false};
     bool success;

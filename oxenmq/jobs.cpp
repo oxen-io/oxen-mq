@@ -32,7 +32,7 @@ void OxenMQ::job(std::function<void()> f, std::optional<TaggedThreadID> thread) 
     auto* b = new Batch<void>;
     b->add_job(std::move(f), thread);
     auto* baseptr = static_cast<detail::Batch*>(b);
-    detail::send_control(get_control_socket(), "BATCH", bt_serialize(reinterpret_cast<uintptr_t>(baseptr)));
+    detail::send_control(get_control_socket(), "BATCH", oxenc::bt_serialize(reinterpret_cast<uintptr_t>(baseptr)));
 }
 
 void OxenMQ::proxy_schedule_reply_job(std::function<void()> f) {
@@ -68,7 +68,7 @@ void OxenMQ::proxy_timer(int id, std::function<void()> job, std::chrono::millise
     timer_zmq_id[id] = zmq_timer_id;
 }
 
-void OxenMQ::proxy_timer(bt_list_consumer timer_data) {
+void OxenMQ::proxy_timer(oxenc::bt_list_consumer timer_data) {
     auto timer_id = timer_data.consume_integer<int>();
     std::unique_ptr<std::function<void()>> func{reinterpret_cast<std::function<void()>*>(timer_data.consume_integer<uintptr_t>())};
     auto interval = std::chrono::milliseconds{timer_data.consume_integer<uint64_t>()};
@@ -124,7 +124,7 @@ void OxenMQ::add_timer(TimerID& timer, std::function<void()> job, std::chrono::m
     int th_id = thread ? thread->_id : 0;
     timer._id = next_timer_id++;
     if (proxy_thread.joinable()) {
-        detail::send_control(get_control_socket(), "TIMER", bt_serialize(bt_list{{
+        detail::send_control(get_control_socket(), "TIMER", oxenc::bt_serialize(oxenc::bt_list{{
                     timer._id,
                     detail::serialize_object(std::move(job)),
                     interval.count(),
@@ -153,7 +153,7 @@ void OxenMQ::proxy_timer_del(int id) {
 
 void OxenMQ::cancel_timer(TimerID timer_id) {
     if (proxy_thread.joinable()) {
-        detail::send_control(get_control_socket(), "TIMER_DEL", bt_serialize(timer_id._id));
+        detail::send_control(get_control_socket(), "TIMER_DEL", oxenc::bt_serialize(timer_id._id));
     } else {
         proxy_timer_del(timer_id._id);
     }
