@@ -47,7 +47,7 @@
 #include <future>
 #include "zmq.hpp"
 #include "address.h"
-#include "bt_serialize.h"
+#include <oxenc/bt_serialize.h>
 #include "connections.h"
 #include "message.h"
 #include "auth.h"
@@ -558,22 +558,22 @@ private:
     /// CONNECT_SN command telling us to connect to a new pubkey.  Returns the socket (which could
     /// be existing or a new one).  This basically just unpacks arguments and passes them on to
     /// proxy_connect_sn().
-    std::pair<zmq::socket_t*, std::string> proxy_connect_sn(bt_dict_consumer data);
+    std::pair<zmq::socket_t*, std::string> proxy_connect_sn(oxenc::bt_dict_consumer data);
 
     /// Opens a new connection to a remote, with callbacks.  This is the proxy-side implementation
     /// of the `connect_remote()` call.
-    void proxy_connect_remote(bt_dict_consumer data);
+    void proxy_connect_remote(oxenc::bt_dict_consumer data);
 
     /// Called to disconnect our remote connection to the given id (if we have one).
-    void proxy_disconnect(bt_dict_consumer data);
+    void proxy_disconnect(oxenc::bt_dict_consumer data);
     void proxy_disconnect(ConnectionID conn, std::chrono::milliseconds linger);
 
     /// SEND command.  Does a connect first, if necessary.
-    void proxy_send(bt_dict_consumer data);
+    void proxy_send(oxenc::bt_dict_consumer data);
 
     /// REPLY command.  Like SEND, but only has a listening socket route to send back to and so is
     /// weaker (i.e. it cannot reconnect to the SN if the connection is no longer open).
-    void proxy_reply(bt_dict_consumer data);
+    void proxy_reply(oxenc::bt_dict_consumer data);
 
     /// Currently active batch/reply jobs; this is the container that owns the Batch instances
     std::unordered_set<detail::Batch*> batches;
@@ -595,7 +595,7 @@ private:
     /// TIMER command.  Called with a serialized list containing: our local timer_id, function
     /// pointer to assume ownership of, an interval count (in ms), and whether or not jobs should be
     /// squelched (see `add_timer()`).
-    void proxy_timer(bt_list_consumer timer_data);
+    void proxy_timer(oxenc::bt_list_consumer timer_data);
 
     /// Same, but deserialized
     void proxy_timer(int timer_id, std::function<void()> job, std::chrono::milliseconds interval, bool squelch, int thread);
@@ -671,7 +671,7 @@ private:
     /// Resets or updates the stored set of active SN pubkeys
     void proxy_set_active_sns(std::string_view data);
     void proxy_set_active_sns(pubkey_set pubkeys);
-    void proxy_update_active_sns(bt_list_consumer data);
+    void proxy_update_active_sns(oxenc::bt_list_consumer data);
     void proxy_update_active_sns(pubkey_set added, pubkey_set removed);
     void proxy_update_active_sns_clean(pubkey_set added, pubkey_set removed);
 
@@ -1563,64 +1563,64 @@ template <typename T> T deserialize_object(uintptr_t ptrval) {
 void send_control(zmq::socket_t& sock, std::string_view cmd, std::string data = {});
 
 /// Base case: takes a string-like value and appends it to the message parts
-inline void apply_send_option(bt_list& parts, bt_dict&, std::string_view arg) {
+inline void apply_send_option(oxenc::bt_list& parts, oxenc::bt_dict&, std::string_view arg) {
     parts.emplace_back(arg);
 }
 
 /// std::optional<T>: if the optional is set, we unwrap it and apply as a send_option, otherwise we
 /// ignore it.
 template <typename T>
-inline void apply_send_option(bt_list& parts, bt_dict& control_data, const std::optional<T>& opt) {
+inline void apply_send_option(oxenc::bt_list& parts, oxenc::bt_dict& control_data, const std::optional<T>& opt) {
     if (opt) apply_send_option(parts, control_data, *opt);
 }
 
 /// `data_parts` specialization: appends a range of serialized data parts to the parts to send
 template <typename InputIt>
-void apply_send_option(bt_list& parts, bt_dict&, const send_option::data_parts_impl<InputIt> data) {
+void apply_send_option(oxenc::bt_list& parts, oxenc::bt_dict&, const send_option::data_parts_impl<InputIt> data) {
     for (auto it = data.begin; it != data.end; ++it)
         parts.emplace_back(*it);
 }
 
 /// `hint` specialization: sets the hint in the control data
-inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::hint& hint) {
+inline void apply_send_option(oxenc::bt_list&, oxenc::bt_dict& control_data, const send_option::hint& hint) {
     if (hint.connect_hint.empty()) return;
     control_data["hint"] = hint.connect_hint;
 }
 
 /// `optional` specialization: sets the optional flag in the control data
-inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::optional& o) {
+inline void apply_send_option(oxenc::bt_list&, oxenc::bt_dict& control_data, const send_option::optional& o) {
     control_data["optional"] = o.is_optional;
 }
 
 /// `incoming` specialization: sets the incoming-only flag in the control data
-inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::incoming& i) {
+inline void apply_send_option(oxenc::bt_list&, oxenc::bt_dict& control_data, const send_option::incoming& i) {
     control_data["incoming"] = i.is_incoming;
 }
 
 /// `outgoing` specialization: sets the outgoing-only flag in the control data
-inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::outgoing& o) {
+inline void apply_send_option(oxenc::bt_list&, oxenc::bt_dict& control_data, const send_option::outgoing& o) {
     control_data["outgoing"] = o.is_outgoing;
 }
 
 /// `keep_alive` specialization: increases the outgoing socket idle timeout (if shorter)
-inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::keep_alive& timeout) {
+inline void apply_send_option(oxenc::bt_list&, oxenc::bt_dict& control_data, const send_option::keep_alive& timeout) {
     if (timeout.time >= 0ms)
         control_data["keep_alive"] = timeout.time.count();
 }
 
 /// `request_timeout` specialization: set the timeout time for a request
-inline void apply_send_option(bt_list&, bt_dict& control_data, const send_option::request_timeout& timeout) {
+inline void apply_send_option(oxenc::bt_list&, oxenc::bt_dict& control_data, const send_option::request_timeout& timeout) {
     if (timeout.time >= 0ms)
         control_data["request_timeout"] = timeout.time.count();
 }
 
 /// `queue_failure` specialization
-inline void apply_send_option(bt_list&, bt_dict& control_data, send_option::queue_failure f) {
+inline void apply_send_option(oxenc::bt_list&, oxenc::bt_dict& control_data, send_option::queue_failure f) {
     control_data["send_fail"] = serialize_object(std::move(f.callback));
 }
 
 /// `queue_full` specialization
-inline void apply_send_option(bt_list&, bt_dict& control_data, send_option::queue_full f) {
+inline void apply_send_option(oxenc::bt_list&, oxenc::bt_dict& control_data, send_option::queue_full f) {
     control_data["send_full_q"] = serialize_object(std::move(f.callback));
 }
 
@@ -1628,9 +1628,9 @@ inline void apply_send_option(bt_list&, bt_dict& control_data, send_option::queu
 std::pair<std::string, AuthLevel> extract_metadata(zmq::message_t& msg);
 
 template <typename... T>
-bt_dict build_send(ConnectionID to, std::string_view cmd, T&&... opts) {
-    bt_dict control_data;
-    bt_list parts{{cmd}};
+oxenc::bt_dict build_send(ConnectionID to, std::string_view cmd, T&&... opts) {
+    oxenc::bt_dict control_data;
+    oxenc::bt_list parts{{cmd}};
     (detail::apply_send_option(parts, control_data, std::forward<T>(opts)),...);
 
     if (to.sn())
@@ -1644,34 +1644,34 @@ bt_dict build_send(ConnectionID to, std::string_view cmd, T&&... opts) {
 
 }
 
-inline void apply_connect_option(OxenMQ& omq, bool remote, bt_dict& opts, const AuthLevel& auth) {
+inline void apply_connect_option(OxenMQ& omq, bool remote, oxenc::bt_dict& opts, const AuthLevel& auth) {
     if (remote) opts["auth_level"] = static_cast<std::underlying_type_t<AuthLevel>>(auth);
     else omq.log(LogLevel::warn, __FILE__, __LINE__, "AuthLevel ignored for connect_sn(...)");
 }
-inline void apply_connect_option(OxenMQ&, bool, bt_dict& opts, const connect_option::ephemeral_routing_id& er) {
+inline void apply_connect_option(OxenMQ&, bool, oxenc::bt_dict& opts, const connect_option::ephemeral_routing_id& er) {
     opts["ephemeral_rid"] = er.use_ephemeral_routing_id;
 }
-inline void apply_connect_option(OxenMQ& omq, bool remote, bt_dict& opts, const connect_option::timeout& timeout) {
+inline void apply_connect_option(OxenMQ& omq, bool remote, oxenc::bt_dict& opts, const connect_option::timeout& timeout) {
     if (remote) opts["timeout"] = timeout.time.count();
     else omq.log(LogLevel::warn, __FILE__, __LINE__, "connect_option::timeout ignored for connect_sn(...)");
 }
-inline void apply_connect_option(OxenMQ& omq, bool remote, bt_dict& opts, const connect_option::keep_alive& ka) {
+inline void apply_connect_option(OxenMQ& omq, bool remote, oxenc::bt_dict& opts, const connect_option::keep_alive& ka) {
     if (ka.time < 0ms) return;
     else if (!remote) opts["keep_alive"] = ka.time.count();
     else omq.log(LogLevel::warn, __FILE__, __LINE__, "connect_option::keep_alive ignored for connect_remote(...)");
 }
-inline void apply_connect_option(OxenMQ& omq, bool remote, bt_dict& opts, const connect_option::hint& hint) {
+inline void apply_connect_option(OxenMQ& omq, bool remote, oxenc::bt_dict& opts, const connect_option::hint& hint) {
     if (hint.address.empty()) return;
     if (!remote) opts["hint"] = hint.address;
     else omq.log(LogLevel::warn, __FILE__, __LINE__, "connect_option::hint ignored for connect_remote(...)");
 }
 [[deprecated("use oxenmq::connect_option::keep_alive or ::timeout instead")]]
-inline void apply_connect_option(OxenMQ&, bool remote, bt_dict& opts, std::chrono::milliseconds time) {
+inline void apply_connect_option(OxenMQ&, bool remote, oxenc::bt_dict& opts, std::chrono::milliseconds time) {
     if (remote) opts["timeout"] = time.count();
     else opts["keep_alive"] = time.count();
 }
 [[deprecated("use oxenmq::connect_option::hint{hint} instead of a direct string argument")]]
-inline void apply_connect_option(OxenMQ& omq, bool remote, bt_dict& opts, std::string_view hint) {
+inline void apply_connect_option(OxenMQ& omq, bool remote, oxenc::bt_dict& opts, std::string_view hint) {
     if (!remote) opts["hint"] = hint;
     else omq.log(LogLevel::warn, __FILE__, __LINE__, "string argument ignored for connect_remote(...)");
 }
@@ -1681,7 +1681,7 @@ inline void apply_connect_option(OxenMQ& omq, bool remote, bt_dict& opts, std::s
 template <typename... Option>
 ConnectionID OxenMQ::connect_remote(const address& remote, ConnectSuccess on_connect, ConnectFailure on_failure,
             const Option&... options) {
-    bt_dict opts;
+    oxenc::bt_dict opts;
     (detail::apply_connect_option(*this, true, opts, options), ...);
 
     auto id = next_conn_id++;
@@ -1691,14 +1691,14 @@ ConnectionID OxenMQ::connect_remote(const address& remote, ConnectSuccess on_con
     if (remote.curve()) opts["pubkey"] = remote.pubkey;
     opts["remote"] = remote.zmq_address();
 
-    detail::send_control(get_control_socket(), "CONNECT_REMOTE", bt_serialize(opts));
+    detail::send_control(get_control_socket(), "CONNECT_REMOTE", oxenc::bt_serialize(opts));
 
     return id;
 }
 
 template <typename... Option>
 ConnectionID OxenMQ::connect_sn(std::string_view pubkey, const Option&... options) {
-    bt_dict opts{
+    oxenc::bt_dict opts{
         {"keep_alive", std::chrono::microseconds{DEFAULT_CONNECT_SN_KEEP_ALIVE}.count()},
         {"ephemeral_rid", EPHEMERAL_ROUTING_ID},
     };
@@ -1707,7 +1707,7 @@ ConnectionID OxenMQ::connect_sn(std::string_view pubkey, const Option&... option
 
     opts["pubkey"] = pubkey;
 
-    detail::send_control(get_control_socket(), "CONNECT_SN", bt_serialize(opts));
+    detail::send_control(get_control_socket(), "CONNECT_SN", oxenc::bt_serialize(opts));
 
     return pubkey;
 }
@@ -1715,7 +1715,7 @@ ConnectionID OxenMQ::connect_sn(std::string_view pubkey, const Option&... option
 template <typename... Option>
 ConnectionID OxenMQ::connect_inproc(ConnectSuccess on_connect, ConnectFailure on_failure,
             const Option&... options) {
-    bt_dict opts{
+    oxenc::bt_dict opts{
         {"timeout", INPROC_CONNECT_TIMEOUT.count()},
         {"auth_level", static_cast<std::underlying_type_t<AuthLevel>>(AuthLevel::admin)}
     };
@@ -1728,7 +1728,7 @@ ConnectionID OxenMQ::connect_inproc(ConnectSuccess on_connect, ConnectFailure on
     opts["failure"] = detail::serialize_object(std::move(on_failure));
     opts["remote"] = "inproc://sn-self";
 
-    detail::send_control(get_control_socket(), "CONNECT_REMOTE", bt_serialize(opts));
+    detail::send_control(get_control_socket(), "CONNECT_REMOTE", oxenc::bt_serialize(opts));
 
     return id;
 }
@@ -1736,7 +1736,7 @@ ConnectionID OxenMQ::connect_inproc(ConnectSuccess on_connect, ConnectFailure on
 template <typename... T>
 void OxenMQ::send(ConnectionID to, std::string_view cmd, const T&... opts) {
     detail::send_control(get_control_socket(), "SEND",
-            bt_serialize(detail::build_send(std::move(to), cmd, opts...)));
+            oxenc::bt_serialize(detail::build_send(std::move(to), cmd, opts...)));
 }
 
 std::string make_random_string(size_t size);
@@ -1744,11 +1744,11 @@ std::string make_random_string(size_t size);
 template <typename... T>
 void OxenMQ::request(ConnectionID to, std::string_view cmd, ReplyCallback callback, const T &...opts) {
     const auto reply_tag = make_random_string(15); // 15 random bytes is lots and should keep us in most stl implementations' small string optimization
-    bt_dict control_data = detail::build_send(std::move(to), cmd, reply_tag, opts...);
+    oxenc::bt_dict control_data = detail::build_send(std::move(to), cmd, reply_tag, opts...);
     control_data["request"] = true;
     control_data["request_callback"] = detail::serialize_object(std::move(callback));
     control_data["request_tag"] = std::string_view{reply_tag};
-    detail::send_control(get_control_socket(), "SEND", bt_serialize(std::move(control_data)));
+    detail::send_control(get_control_socket(), "SEND", oxenc::bt_serialize(std::move(control_data)));
 }
 
 template <typename... Args>
