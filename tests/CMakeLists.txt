@@ -5,10 +5,8 @@ add_executable(tests
     main.cpp
     test_address.cpp
     test_batch.cpp
-    test_bt.cpp
     test_connect.cpp
     test_commands.cpp
-    test_encoding.cpp
     test_failures.cpp
     test_inject.cpp
     test_requests.cpp
