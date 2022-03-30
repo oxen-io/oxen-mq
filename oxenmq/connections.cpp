@@ -1,12 +1,12 @@
 #include "oxenmq.h"
 #include "oxenmq-internal.h"
-#include "hex.h"
+#include <oxenc/hex.h>
 
 namespace oxenmq {
 
 std::ostream& operator<<(std::ostream& o, const ConnectionID& conn) {
     if (!conn.pk.empty())
-        return o << (conn.sn() ? "SN " : "non-SN authenticated remote ") << to_hex(conn.pk);
+        return o << (conn.sn() ? "SN " : "non-SN authenticated remote ") << oxenc::to_hex(conn.pk);
     else
         return o << "unauthenticated remote [" << conn.id << "]";
 }
@@ -75,7 +75,7 @@ void OxenMQ::setup_incoming_socket(zmq::socket_t& listener, bool curve, std::str
 
     setup_external_socket(listener);
 
-    listener.set(zmq::sockopt::zap_domain, bt_serialize(bind_index));
+    listener.set(zmq::sockopt::zap_domain, oxenc::bt_serialize(bind_index));
     if (curve) {
         listener.set(zmq::sockopt::curve_server, true);
         listener.set(zmq::sockopt::curve_publickey, pubkey);
@@ -100,7 +100,7 @@ ConnectionID OxenMQ::connect_remote(std::string_view remote, ConnectSuccess on_c
 }
 
 void OxenMQ::disconnect(ConnectionID id, std::chrono::milliseconds linger) {
-    detail::send_control(get_control_socket(), "DISCONNECT", bt_serialize<bt_dict>({
+    detail::send_control(get_control_socket(), "DISCONNECT", oxenc::bt_serialize<oxenc::bt_dict>({
             {"conn_id", id.id},
             {"linger_ms", linger.count()},
             {"pubkey", id.pk},
@@ -122,7 +122,7 @@ OxenMQ::proxy_connect_sn(std::string_view remote, std::string_view connect_hint,
     }
 
     if (peer) {
-        OMQ_TRACE("proxy asked to connect to ", to_hex(remote), "; reusing existing connection");
+        OMQ_TRACE("proxy asked to connect to ", oxenc::to_hex(remote), "; reusing existing connection");
         if (peer->route.empty() /* == outgoing*/) {
             if (peer->idle_expiry < keep_alive) {
                 OMQ_LOG(debug, "updating existing outgoing peer connection idle expiry time from ",
@@ -138,7 +138,7 @@ OxenMQ::proxy_connect_sn(std::string_view remote, std::string_view connect_hint,
     }
 
     // No connection so establish a new one
-    OMQ_LOG(debug, "proxy establishing new outbound connection to ", to_hex(remote));
+    OMQ_LOG(debug, "proxy establishing new outbound connection to ", oxenc::to_hex(remote));
     std::string addr;
     bool to_self = false && remote == pubkey; // FIXME; need to use a separate listening socket for this, otherwise we can't easily
                                               // tell it wasn't from a remote.
@@ -153,12 +153,12 @@ OxenMQ::proxy_connect_sn(std::string_view remote, std::string_view connect_hint,
             OMQ_LOG(debug, "using connection hint ", connect_hint);
 
         if (addr.empty()) {
-            OMQ_LOG(error, "peer lookup failed for ", to_hex(remote));
+            OMQ_LOG(error, "peer lookup failed for ", oxenc::to_hex(remote));
             return {nullptr, ""s};
         }
     }
 
-    OMQ_LOG(debug, to_hex(pubkey), " (me) connecting to ", addr, " to reach ", to_hex(remote));
+    OMQ_LOG(debug, oxenc::to_hex(pubkey), " (me) connecting to ", addr, " to reach ", oxenc::to_hex(remote));
     zmq::socket_t socket{context, zmq::socket_type::dealer};
     setup_outgoing_socket(socket, remote, use_ephemeral_routing_id);
     try {
@@ -183,7 +183,7 @@ OxenMQ::proxy_connect_sn(std::string_view remote, std::string_view connect_hint,
     return {&it->second, ""s};
 }
 
-std::pair<zmq::socket_t *, std::string> OxenMQ::proxy_connect_sn(bt_dict_consumer data) {
+std::pair<zmq::socket_t *, std::string> OxenMQ::proxy_connect_sn(oxenc::bt_dict_consumer data) {
     std::string_view hint, remote_pk;
     std::chrono::milliseconds keep_alive;
     bool optional = false, incoming_only = false, outgoing_only = false, ephemeral_rid = EPHEMERAL_ROUTING_ID;
@@ -278,7 +278,7 @@ void OxenMQ::proxy_conn_cleanup() {
     for (auto it = pending_requests.begin(); it != pending_requests.end(); ) {
         auto& callback = it->second;
         if (callback.first < now) {
-            OMQ_LOG(debug, "pending request ", to_hex(it->first), " expired, invoking callback with failure status and removing");
+            OMQ_LOG(debug, "pending request ", oxenc::to_hex(it->first), " expired, invoking callback with failure status and removing");
             job([callback = std::move(callback.second)] { callback(false, {{"TIMEOUT"s}}); });
             it = pending_requests.erase(it);
         } else {
@@ -289,7 +289,7 @@ void OxenMQ::proxy_conn_cleanup() {
     OMQ_TRACE("done proxy connections cleanup");
 };
 
-void OxenMQ::proxy_connect_remote(bt_dict_consumer data) {
+void OxenMQ::proxy_connect_remote(oxenc::bt_dict_consumer data) {
     AuthLevel auth_level = AuthLevel::none;
     long long conn_id = -1;
     ConnectSuccess on_connect;
@@ -321,7 +321,8 @@ void OxenMQ::proxy_connect_remote(bt_dict_consumer data) {
     if (conn_id == -1 || remote.empty())
         throw std::runtime_error("Internal error: CONNECT_REMOTE proxy command missing required 'conn_id' and/or 'remote' value");
 
-    OMQ_LOG(debug, "Establishing remote connection to ", remote, remote_pubkey.empty() ? " (NULL auth)" : " via CURVE expecting pubkey " + to_hex(remote_pubkey));
+    OMQ_LOG(debug, "Establishing remote connection to ", remote,
+            remote_pubkey.empty() ? " (NULL auth)" : " via CURVE expecting pubkey " + oxenc::to_hex(remote_pubkey));
 
     zmq::socket_t sock{context, zmq::socket_type::dealer};
     try {
@@ -349,7 +350,7 @@ void OxenMQ::proxy_connect_remote(bt_dict_consumer data) {
     peer.activity();
 }
 
-void OxenMQ::proxy_disconnect(bt_dict_consumer data) {
+void OxenMQ::proxy_disconnect(oxenc::bt_dict_consumer data) {
     ConnectionID connid{-1};
     std::chrono::milliseconds linger = 1s;
 

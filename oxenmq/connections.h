@@ -1,6 +1,6 @@
 #pragma once
 #include "auth.h"
-#include "bt_value.h"
+#include <oxenc/bt_value.h>
 #include <string_view>
 #include <iosfwd>
 #include <stdexcept>
@@ -14,7 +14,7 @@ struct ConnectionID;
 
 namespace detail {
 template <typename... T>
-bt_dict build_send(ConnectionID to, std::string_view cmd, T&&... opts);
+oxenc::bt_dict build_send(ConnectionID to, std::string_view cmd, T&&... opts);
 }
 
 /// Opaque data structure representing a connection which supports ==, !=, < and std::hash.  For
@@ -80,7 +80,7 @@ private:
     friend class OxenMQ;
     friend struct std::hash<ConnectionID>;
     template <typename... T>
-    friend bt_dict detail::build_send(ConnectionID to, std::string_view cmd, T&&... opts);
+    friend oxenc::bt_dict detail::build_send(ConnectionID to, std::string_view cmd, T&&... opts);
     friend std::ostream& operator<<(std::ostream& o, const ConnectionID& conn);
 };
 
