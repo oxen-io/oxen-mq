@@ -1,5 +1,5 @@
 #include "oxenmq.h"
-#include "hex.h"
+#include <oxenc/hex.h>
 #include "oxenmq-internal.h"
 #include <ostream>
 #include <sstream>
@@ -37,23 +37,23 @@ bool OxenMQ::proxy_check_auth(int64_t conn_id, bool outgoing, const peer_info& p
     std::string reply;
 
     if (!cat_call.first) {
-        OMQ_LOG(warn, "Invalid command '", command, "' sent by remote [", to_hex(peer.pubkey), "]/", peer_address(cmd));
+        OMQ_LOG(warn, "Invalid command '", command, "' sent by remote [", oxenc::to_hex(peer.pubkey), "]/", peer_address(cmd));
         reply = "UNKNOWNCOMMAND";
     } else if (peer.auth_level < cat_call.first->access.auth) {
-        OMQ_LOG(warn, "Access denied to ", command, " for peer [", to_hex(peer.pubkey), "]/", peer_address(cmd),
+        OMQ_LOG(warn, "Access denied to ", command, " for peer [", oxenc::to_hex(peer.pubkey), "]/", peer_address(cmd),
                 ": peer auth level ", peer.auth_level, " < ", cat_call.first->access.auth);
         reply = "FORBIDDEN";
     } else if (cat_call.first->access.local_sn && !local_service_node) {
-        OMQ_LOG(warn, "Access denied to ", command, " for peer [", to_hex(peer.pubkey), "]/", peer_address(cmd),
+        OMQ_LOG(warn, "Access denied to ", command, " for peer [", oxenc::to_hex(peer.pubkey), "]/", peer_address(cmd),
                 ": that command is only available when this OxenMQ is running in service node mode");
         reply = "NOT_A_SERVICE_NODE";
     } else if (cat_call.first->access.remote_sn && !peer.service_node) {
-        OMQ_LOG(warn, "Access denied to ", command, " for peer [", to_hex(peer.pubkey), "]/", peer_address(cmd),
+        OMQ_LOG(warn, "Access denied to ", command, " for peer [", oxenc::to_hex(peer.pubkey), "]/", peer_address(cmd),
                 ": remote is not recognized as a service node");
         reply = "FORBIDDEN_SN";
     } else if (cat_call.second->second /*is_request*/ && data.empty()) {
         OMQ_LOG(warn, "Received an invalid request for '", command, "' with no reply tag from remote [",
-                to_hex(peer.pubkey), "]/", peer_address(cmd));
+                oxenc::to_hex(peer.pubkey), "]/", peer_address(cmd));
         reply = "NO_REPLY_TAG";
     } else {
         return true;
@@ -75,7 +75,7 @@ bool OxenMQ::proxy_check_auth(int64_t conn_id, bool outgoing, const peer_info& p
         send_message_parts(connections.at(conn_id), msgs);
     } catch (const zmq::error_t& err) {
         /* can't send: possibly already disconnected.  Ignore. */
-        OMQ_LOG(debug, "Couldn't send auth failure message ", reply, " to peer [", to_hex(peer.pubkey), "]/", peer_address(cmd), ": ", err.what());
+        OMQ_LOG(debug, "Couldn't send auth failure message ", reply, " to peer [", oxenc::to_hex(peer.pubkey), "]/", peer_address(cmd), ": ", err.what());
     }
 
     return false;
@@ -83,21 +83,21 @@ bool OxenMQ::proxy_check_auth(int64_t conn_id, bool outgoing, const peer_info& p
 
 void OxenMQ::set_active_sns(pubkey_set pubkeys) {
     if (proxy_thread.joinable()) {
-        auto data = bt_serialize(detail::serialize_object(std::move(pubkeys)));
+        auto data = oxenc::bt_serialize(detail::serialize_object(std::move(pubkeys)));
         detail::send_control(get_control_socket(), "SET_SNS", data);
     } else {
         proxy_set_active_sns(std::move(pubkeys));
     }
 }
 void OxenMQ::proxy_set_active_sns(std::string_view data) {
-    proxy_set_active_sns(detail::deserialize_object<pubkey_set>(bt_deserialize<uintptr_t>(data)));
+    proxy_set_active_sns(detail::deserialize_object<pubkey_set>(oxenc::bt_deserialize<uintptr_t>(data)));
 }
 void OxenMQ::proxy_set_active_sns(pubkey_set pubkeys) {
     pubkey_set added, removed;
     for (auto it = pubkeys.begin(); it != pubkeys.end(); ) {
         auto& pk = *it;
         if (pk.size() != 32) {
-            OMQ_LOG(warn, "Invalid private key of length ", pk.size(), " (", to_hex(pk), ") passed to set_active_sns");
+            OMQ_LOG(warn, "Invalid private key of length ", pk.size(), " (", oxenc::to_hex(pk), ") passed to set_active_sns");
             it = pubkeys.erase(it);
             continue;
         }
@@ -123,12 +123,12 @@ void OxenMQ::update_active_sns(pubkey_set added, pubkey_set removed) {
         std::array<uintptr_t, 2> data;
         data[0] = detail::serialize_object(std::move(added));
         data[1] = detail::serialize_object(std::move(removed));
-        detail::send_control(get_control_socket(), "UPDATE_SNS", bt_serialize(data));
+        detail::send_control(get_control_socket(), "UPDATE_SNS", oxenc::bt_serialize(data));
     } else {
         proxy_update_active_sns(std::move(added), std::move(removed));
     }
 }
-void OxenMQ::proxy_update_active_sns(bt_list_consumer data) {
+void OxenMQ::proxy_update_active_sns(oxenc::bt_list_consumer data) {
     auto added = detail::deserialize_object<pubkey_set>(data.consume_integer<uintptr_t>());
     auto remed = detail::deserialize_object<pubkey_set>(data.consume_integer<uintptr_t>());
     proxy_update_active_sns(std::move(added), std::move(remed));
@@ -141,7 +141,7 @@ void OxenMQ::proxy_update_active_sns(pubkey_set added, pubkey_set removed) {
     for (auto it = removed.begin(); it != removed.end(); ) {
         const auto& pk = *it;
         if (pk.size() != 32) {
-            OMQ_LOG(warn, "Invalid private key of length ", pk.size(), " (", to_hex(pk), ") passed to update_active_sns (removed)");
+            OMQ_LOG(warn, "Invalid private key of length ", pk.size(), " (", oxenc::to_hex(pk), ") passed to update_active_sns (removed)");
             it = removed.erase(it);
         } else if (!active_service_nodes.count(pk) || added.count(pk) /* added wins if in both */) {
             it = removed.erase(it);
@@ -153,7 +153,7 @@ void OxenMQ::proxy_update_active_sns(pubkey_set added, pubkey_set removed) {
     for (auto it = added.begin(); it != added.end(); ) {
         const auto& pk = *it;
         if (pk.size() != 32) {
-            OMQ_LOG(warn, "Invalid private key of length ", pk.size(), " (", to_hex(pk), ") passed to update_active_sns (added)");
+            OMQ_LOG(warn, "Invalid private key of length ", pk.size(), " (", oxenc::to_hex(pk), ") passed to update_active_sns (added)");
             it = added.erase(it);
         } else if (active_service_nodes.count(pk)) {
             it = added.erase(it);
@@ -200,7 +200,7 @@ void OxenMQ::process_zap_requests() {
                 o << "\n[" << i << "]: ";
                 auto v = view(frames[i]);
                 if (i == 1 || i == 6)
-                    o << to_hex(v);
+                    o << oxenc::to_hex(v);
                 else
                     o << v;
             }
@@ -247,7 +247,7 @@ void OxenMQ::process_zap_requests() {
             auto auth_domain = view(frames[2]);
             size_t bind_id = (size_t) -1;
             try {
-                bind_id = bt_deserialize<size_t>(view(frames[2]));
+                bind_id = oxenc::bt_deserialize<size_t>(view(frames[2]));
             } catch (...) {}
 
             if (bind_id >= bind.size()) {
@@ -282,7 +282,7 @@ void OxenMQ::process_zap_requests() {
                 auto& user_id = response_vals[4];
                 if (bind[bind_id].curve) {
                     user_id.reserve(64);
-                    to_hex(pubkey.begin(), pubkey.end(), std::back_inserter(user_id));
+                    oxenc::to_hex(pubkey.begin(), pubkey.end(), std::back_inserter(user_id));
                 }
 
                 if (auth <= AuthLevel::denied || auth > AuthLevel::admin) {

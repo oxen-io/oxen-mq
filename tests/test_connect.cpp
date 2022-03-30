@@ -1,5 +1,4 @@
 #include "common.h"
-#include <oxenmq/hex.h>
 extern "C" {
 #include <sodium.h>
 }
