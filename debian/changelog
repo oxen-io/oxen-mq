@@ -1,3 +1,10 @@
+oxenmq (1.2.11-2~deb10) buster; urgency=medium
+
+  * cmake work-around for cmake < 3.21
+  * Set compiler flags to enable Pi zero CPU support
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Fri, 29 Apr 2022 18:08:28 -0300
+
 oxenmq (1.2.11-1~deb10) buster; urgency=medium
 
   * Use oxen-encoding and add compatibility shim headers
