@@ -1,3 +1,10 @@
+oxenmq (1.2.11-2~ubuntu2110) impish; urgency=medium
+
+  * cmake work-around for cmake < 3.21
+  * Set compiler flags to enable Pi zero CPU support
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Fri, 29 Apr 2022 18:09:42 -0300
+
 oxenmq (1.2.11-1~ubuntu2110) impish; urgency=medium
 
   * Use oxen-encoding and add compatibility shim headers
