@@ -45,6 +45,7 @@
 #include <cassert>
 #include <cstdint>
 #include <future>
+#include <variant>
 #include "zmq.hpp"
 #include "address.h"
 #include <oxenc/bt_serialize.h>
