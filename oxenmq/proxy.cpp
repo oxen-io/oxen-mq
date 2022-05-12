@@ -271,14 +271,14 @@ void OxenMQ::proxy_reply(oxenc::bt_dict_consumer data) {
     }
 }
 
-void OxenMQ::proxy_control_message(std::vector<zmq::message_t>& parts) {
+void OxenMQ::proxy_control_message(OxenMQ::control_message_array& parts, size_t len) {
     // We throw an uncaught exception here because we only generate control messages internally in
     // oxenmq code: if one of these condition fail it's a oxenmq bug.
-    if (parts.size() < 2)
+    if (len < 2)
         throw std::logic_error("OxenMQ bug: Expected 2-3 message parts for a proxy control message");
     auto route = view(parts[0]), cmd = view(parts[1]);
     OMQ_TRACE("control message: ", cmd);
-    if (parts.size() == 3) {
+    if (len == 3) {
         OMQ_TRACE("...: ", parts[2]);
         auto data = view(parts[2]);
         if (cmd == "SEND") {
@@ -315,7 +315,7 @@ void OxenMQ::proxy_control_message(std::vector<zmq::message_t>& parts) {
                 bind.push_back(std::move(b));
             return;
         }
-    } else if (parts.size() == 2) {
+    } else if (len == 2) {
         if (cmd == "START") {
             // Command send by the owning thread during startup; we send back a simple READY reply to
             // let it know we are running.
@@ -335,7 +335,7 @@ void OxenMQ::proxy_control_message(std::vector<zmq::message_t>& parts) {
         }
     }
     throw std::runtime_error("OxenMQ bug: Proxy received invalid control command: " +
-            std::string{cmd} + " (" + std::to_string(parts.size()) + ")");
+            std::string{cmd} + " (" + std::to_string(len) + ")");
 }
 
 bool OxenMQ::proxy_bind(bind_data& b, size_t bind_index) {
@@ -497,6 +497,10 @@ void OxenMQ::proxy_loop(std::promise<void> startup) {
     }
     startup.set_value();
 
+    // Fixed array used for worker and control messages: these are never longer than 3 parts:
+    std::array<zmq::message_t, 3> control_parts;
+
+    // General vector for handling incoming messages:
     std::vector<zmq::message_t> parts;
 
     while (true) {
@@ -529,13 +533,13 @@ void OxenMQ::proxy_loop(std::promise<void> startup) {
 
         OMQ_TRACE("processing control messages");
         // Retrieve any waiting incoming control messages
-        for (parts.clear(); recv_message_parts(command, parts, zmq::recv_flags::dontwait); parts.clear()) {
-            proxy_control_message(parts);
+        while (size_t len = recv_message_parts(command, control_parts, zmq::recv_flags::dontwait)) {
+            proxy_control_message(control_parts, len);
         }
 
         OMQ_TRACE("processing worker messages");
-        for (parts.clear(); recv_message_parts(workers_socket, parts, zmq::recv_flags::dontwait); parts.clear()) {
-            proxy_worker_message(parts);
+        while (size_t len = recv_message_parts(workers_socket, control_parts, zmq::recv_flags::dontwait)) {
+            proxy_worker_message(control_parts, len);
         }
 
         OMQ_TRACE("processing timers");

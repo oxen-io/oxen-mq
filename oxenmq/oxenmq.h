@@ -484,7 +484,9 @@ private:
 
     void proxy_conn_cleanup();
 
-    void proxy_worker_message(std::vector<zmq::message_t>& parts);
+    using control_message_array = std::array<zmq::message_t, 3>;
+
+    void proxy_worker_message(control_message_array& parts, size_t len);
 
     void proxy_process_queue();
 
@@ -608,7 +610,7 @@ private:
     void process_zap_requests();
 
     /// Handles a control message from some outer thread to the proxy
-    void proxy_control_message(std::vector<zmq::message_t>& parts);
+    void proxy_control_message(control_message_array& parts, size_t len);
 
     /// Closing any idle connections that have outlived their idle time.  Note that this only
     /// affects outgoing connections; incomings connections are the responsibility of the other end.

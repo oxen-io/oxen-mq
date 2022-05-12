@@ -177,10 +177,10 @@ OxenMQ::run_info& OxenMQ::get_idle_worker() {
     return workers[id];
 }
 
-void OxenMQ::proxy_worker_message(std::vector<zmq::message_t>& parts) {
+void OxenMQ::proxy_worker_message(OxenMQ::control_message_array& parts, size_t len) {
     // Process messages sent by workers
-    if (parts.size() != 2) {
-        OMQ_LOG(error, "Received send invalid ", parts.size(), "-part message");
+    if (len != 2) {
+        OMQ_LOG(error, "Received send invalid ", len, "-part message");
         return;
     }
     auto route = view(parts[0]), cmd = view(parts[1]);
