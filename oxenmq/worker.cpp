@@ -162,9 +162,8 @@ void OxenMQ::worker_thread(unsigned int index, std::optional<std::string> tagged
 
 
 OxenMQ::run_info& OxenMQ::get_idle_worker() {
-    if (idle_workers.empty()) {
-        size_t id = workers.size();
-        assert(workers.capacity() > id);
+    if (idle_worker_count == 0) {
+        uint32_t id = workers.size();
         workers.emplace_back();
         auto& r = workers.back();
         r.worker_id = id;
@@ -172,8 +171,7 @@ OxenMQ::run_info& OxenMQ::get_idle_worker() {
         r.worker_routing_name = "w" + std::to_string(id);
         return r;
     }
-    size_t id = idle_workers.back();
-    idle_workers.pop_back();
+    size_t id = idle_workers[--idle_worker_count];
     return workers[id];
 }
 
@@ -259,7 +257,7 @@ void OxenMQ::proxy_worker_message(OxenMQ::control_message_array& parts, size_t l
             OMQ_TRACE("Telling worker ", route, " to quit");
             route_control(workers_socket, route, "QUIT");
         } else if (!tagged_worker) {
-            idle_workers.push_back(worker_id);
+            idle_workers[idle_worker_count++] = worker_id;
         }
     } else if (cmd == "QUITTING"sv) {
         run.worker_thread.join();

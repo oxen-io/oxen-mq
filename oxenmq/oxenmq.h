@@ -456,8 +456,9 @@ private:
     /// Router socket to reach internal worker threads from proxy
     zmq::socket_t workers_socket{context, zmq::socket_type::router};
 
-    /// indices of idle, active workers
+    /// indices of idle, active workers; note that this vector is usually oversized
     std::vector<unsigned int> idle_workers;
+    size_t idle_worker_count = 0; // Actual # elements of idle_workers in use
 
     /// Maximum number of general task workers, specified by set_general_threads()
     int general_workers = std::max<int>(1, std::thread::hardware_concurrency());
@@ -469,7 +470,7 @@ private:
     int max_workers;
 
     /// Number of active workers
-    int active_workers() const { return workers.size() - idle_workers.size(); }
+    int active_workers() const { return workers.size() - idle_worker_count; }
 
     /// Worker thread loop.  Tagged and start are provided for a tagged worker thread.
     void worker_thread(unsigned int index, std::optional<std::string> tagged = std::nullopt, std::function<void()> start = nullptr);

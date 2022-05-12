@@ -325,9 +325,9 @@ void OxenMQ::proxy_control_message(OxenMQ::control_message_array& parts, size_t 
             // close workers as they come back to READY status, and then close external
             // connections once all workers are done.
             max_workers = 0;
-            for (const auto &route : idle_workers)
-                route_control(workers_socket, workers[route].worker_routing_id, "QUIT");
-            idle_workers.clear();
+            for (size_t i = 0; i < idle_worker_count; i++)
+                route_control(workers_socket, workers[idle_workers[i]].worker_routing_id, "QUIT");
+            idle_worker_count = 0;
             for (auto& [run, busy, queue] : tagged_workers)
                 if (!busy)
                     route_control(workers_socket, run.worker_routing_id, "QUIT");
@@ -404,6 +404,7 @@ void OxenMQ::proxy_loop_init() {
     }
 
     workers.reserve(max_workers);
+    idle_workers.resize(max_workers);
     if (!workers.empty())
         throw std::logic_error("Internal error: proxy thread started with active worker threads");
 
