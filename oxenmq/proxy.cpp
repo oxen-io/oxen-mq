@@ -482,7 +482,7 @@ void OxenMQ::proxy_loop_init() {
         }
 
         for (auto&w : tagged_workers) {
-            OMQ_LOG(debug, "Telling tagged thread worker ", std::get<run_info>(w).worker_routing_id, " to finish startup");
+            OMQ_LOG(debug, "Telling tagged thread worker ", std::get<run_info>(w).worker_routing_name, " to finish startup");
             route_control(workers_socket, std::get<run_info>(w).worker_routing_id, "START");
         }
     }

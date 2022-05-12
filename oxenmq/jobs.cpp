@@ -170,8 +170,9 @@ TaggedThreadID OxenMQ::add_tagged_thread(std::string name, std::function<void()>
     auto& [run, busy, queue] = tagged_workers.emplace_back();
     busy = false;
     run.worker_id = tagged_workers.size(); // We want index + 1 (b/c 0 is used for non-tagged jobs)
-    run.worker_routing_id = "t" + std::to_string(run.worker_id);
-    OMQ_TRACE("Created new tagged thread ", name, " with routing id ", run.worker_routing_id);
+    run.worker_routing_name = "t" + std::to_string(run.worker_id);
+    run.worker_routing_id = "t" + std::string{reinterpret_cast<const char*>(&run.worker_id), sizeof(run.worker_id)};
+    OMQ_TRACE("Created new tagged thread ", name, " with routing id ", run.worker_routing_name);
 
     run.worker_thread = std::thread{&OxenMQ::worker_thread, this, run.worker_id, name, std::move(start)};
 

@@ -744,8 +744,9 @@ private:
 
         // These belong to the proxy thread and must not be accessed by a worker:
         std::thread worker_thread;
-        size_t worker_id; // The index in `workers` (0-n) or index+1 in `tagged_workers` (1-n)
-        std::string worker_routing_id; // "w123" where 123 == worker_id; "n123" for tagged threads.
+        uint32_t worker_id; // The index in `workers` (0-n) or index+1 in `tagged_workers` (1-n)
+        std::string worker_routing_id; // "wXXXX" where XXXX is the raw bytes of worker_id, or tXXXX for tagged threads.
+        std::string worker_routing_name; // "w123" or "t123" -- human readable version of worker_routing_id
 
         /// Loads the run info with an incoming command
         run_info& load(category* cat, std::string command, ConnectionID conn, Access access, std::string remote,
