@@ -29,17 +29,15 @@ void OxenMQ::proxy_batch(detail::Batch* batch) {
 void OxenMQ::job(std::function<void()> f, std::optional<TaggedThreadID> thread) {
     if (thread && thread->_id == -1)
         throw std::logic_error{"job() cannot be used to queue an in-proxy job"};
-    auto* b = new Batch<void>;
-    b->add_job(std::move(f), thread);
-    auto* baseptr = static_cast<detail::Batch*>(b);
+    auto* j = new Job(std::move(f), thread);
+    auto* baseptr = static_cast<detail::Batch*>(j);
     detail::send_control(get_control_socket(), "BATCH", oxenc::bt_serialize(reinterpret_cast<uintptr_t>(baseptr)));
 }
 
 void OxenMQ::proxy_schedule_reply_job(std::function<void()> f) {
-    auto* b = new Batch<void>;
-    b->add_job(std::move(f));
-    batches.insert(b);
-    reply_jobs.emplace(static_cast<detail::Batch*>(b), 0);
+    auto* j = new Job(std::move(f));
+    reply_jobs.emplace_back(static_cast<detail::Batch*>(j), 0);
+    batches.insert(j);
     proxy_skip_one_poll = true;
 }
 
@@ -98,11 +96,12 @@ void OxenMQ::_queue_timer_job(int timer_id) {
         return;
     }
 
-    auto* b = new Batch<void>;
-    b->add_job(func, thread);
+    detail::Batch* b;
     if (squelch) {
+        auto* bv = new Batch<void>;
+        bv->add_job(func, thread);
         running = true;
-        b->completion([this,timer_id](auto results) {
+        bv->completion([this,timer_id](auto results) {
             try { results[0].get(); }
             catch (const std::exception &e) { OMQ_LOG(warn, "timer job ", timer_id, " raised an exception: ", e.what()); }
             catch (...) { OMQ_LOG(warn, "timer job ", timer_id, " raised a non-std exception"); }
@@ -110,6 +109,9 @@ void OxenMQ::_queue_timer_job(int timer_id) {
             if (it != timer_jobs.end())
                 it->second.running = false;
         }, OxenMQ::run_in_proxy);
+        b = bv;
+    } else {
+        b = new Job(func, thread);
     }
     batches.insert(b);
     OMQ_TRACE("b: ", b->size().first, ", ", b->size().second, "; thread = ", thread);

@@ -106,6 +106,7 @@ private:
     explicit constexpr TaggedThreadID(int id) : _id{id} {}
     friend class OxenMQ;
     template <typename R> friend class Batch;
+    friend class Job;
 };
 
 /// Opaque handler for a timer constructed by add_timer(...).  Safe (and cheap) to copy.  The only
