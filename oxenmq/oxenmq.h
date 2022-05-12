@@ -579,13 +579,14 @@ private:
     /// Individual batch jobs waiting to run; .second is the 0-n batch number or -1 for the
     /// completion job
     using batch_job = std::pair<detail::Batch*, int>;
-    std::queue<batch_job> batch_jobs, reply_jobs;
+    using batch_queue = std::deque<batch_job>;
+    batch_queue batch_jobs, reply_jobs;
     int batch_jobs_active = 0;
     int reply_jobs_active = 0;
     int batch_jobs_reserved = -1;
     int reply_jobs_reserved = -1;
     /// Runs any queued batch jobs
-    void proxy_run_batch_jobs(std::queue<batch_job>& jobs, int reserved, int& active, bool reply);
+    void proxy_run_batch_jobs(batch_queue& jobs, int reserved, int& active, bool reply);
 
     /// BATCH command.  Called with a Batch<R> (see oxenmq/batch.h) object pointer for the proxy to
     /// take over and queue batch jobs.
@@ -768,7 +769,7 @@ private:
     /// Workers that are reserved for tagged thread tasks (as created with add_tagged_thread).  The
     /// queue here is similar to worker_jobs, but contains only the tagged thread's jobs.  The bool
     /// is whether the worker is currently busy (true) or available (false).
-    std::vector<std::tuple<run_info, bool, std::queue<batch_job>>> tagged_workers;
+    std::vector<std::tuple<run_info, bool, batch_queue>> tagged_workers;
 
 public:
     /**

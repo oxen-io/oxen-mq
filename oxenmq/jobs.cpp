@@ -9,16 +9,16 @@ void OxenMQ::proxy_batch(detail::Batch* batch) {
     OMQ_TRACE("proxy queuing batch job with ", jobs, " jobs", tagged_threads ? " (job uses tagged thread(s))" : "");
     if (!tagged_threads) {
         for (size_t i = 0; i < jobs; i++)
-            batch_jobs.emplace(batch, i);
+            batch_jobs.emplace_back(batch, i);
     } else {
         // Some (or all) jobs have a specific thread target so queue any such jobs in the tagged
         // worker queue.
         auto threads = batch->threads();
         for (size_t i = 0; i < jobs; i++) {
             auto& jobs = threads[i] > 0
-                ? std::get<std::queue<batch_job>>(tagged_workers[threads[i] - 1])
+                ? std::get<batch_queue>(tagged_workers[threads[i] - 1])
                 : batch_jobs;
-            jobs.emplace(batch, i);
+            jobs.emplace_back(batch, i);
         }
     }
 
@@ -39,11 +39,11 @@ void OxenMQ::proxy_schedule_reply_job(std::function<void()> f) {
     proxy_skip_one_poll = true;
 }
 
-void OxenMQ::proxy_run_batch_jobs(std::queue<batch_job>& jobs, const int reserved, int& active, bool reply) {
+void OxenMQ::proxy_run_batch_jobs(batch_queue& jobs, const int reserved, int& active, bool reply) {
     while (!jobs.empty() && active_workers() < max_workers &&
             (active < reserved || active_workers() < general_workers)) {
         proxy_run_worker(get_idle_worker().load(std::move(jobs.front()), reply));
-        jobs.pop();
+        jobs.pop_front();
         active++;
     }
 }
@@ -114,9 +114,9 @@ void OxenMQ::_queue_timer_job(int timer_id) {
     OMQ_TRACE("b: ", b->size().first, ", ", b->size().second, "; thread = ", thread);
     assert(b->size() == std::make_pair(size_t{1}, thread > 0));
     auto& queue = thread > 0
-        ? std::get<std::queue<batch_job>>(tagged_workers[thread - 1])
+        ? std::get<batch_queue>(tagged_workers[thread - 1])
         : batch_jobs;
-    queue.emplace(static_cast<detail::Batch*>(b), 0);
+    queue.emplace_back(static_cast<detail::Batch*>(b), 0);
 }
 
 void OxenMQ::add_timer(TimerID& timer, std::function<void()> job, std::chrono::milliseconds interval, bool squelch, std::optional<TaggedThreadID> thread) {

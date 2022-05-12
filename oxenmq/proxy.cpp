@@ -731,7 +731,7 @@ void OxenMQ::proxy_process_queue() {
         if (!busy && !queue.empty()) {
             busy = true;
             proxy_run_worker(run.load(std::move(queue.front()), false, run.worker_id));
-            queue.pop();
+            queue.pop_front();
         }
     }
 

@@ -233,11 +233,11 @@ void OxenMQ::proxy_worker_message(std::vector<zmq::message_t>& parts) {
                     } else {
                         auto& jobs =
                             thread > 0
-                            ? std::get<std::queue<batch_job>>(tagged_workers[thread - 1]) // run in tagged thread
+                            ? std::get<batch_queue>(tagged_workers[thread - 1]) // run in tagged thread
                             : run.is_reply_job
                               ? reply_jobs
                               : batch_jobs;
-                        jobs.emplace(batch, -1);
+                        jobs.emplace_back(batch, -1);
                     }
                 } else if (state == detail::BatchState::done) {
                     // No completion job
