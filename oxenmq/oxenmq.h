@@ -576,8 +576,6 @@ private:
     /// weaker (i.e. it cannot reconnect to the SN if the connection is no longer open).
     void proxy_reply(oxenc::bt_dict_consumer data);
 
-    /// Currently active batch/reply jobs; this is the container that owns the Batch instances
-    std::unordered_set<detail::Batch*> batches;
     /// Individual batch jobs waiting to run; .second is the 0-n batch number or -1 for the
     /// completion job
     using batch_job = std::pair<detail::Batch*, int>;

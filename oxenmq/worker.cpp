@@ -247,7 +247,6 @@ void OxenMQ::proxy_worker_message(std::vector<zmq::message_t>& parts) {
             }
 
             if (clear_job) {
-                batches.erase(batch);
                 delete batch;
                 run.to_run = static_cast<detail::Batch*>(nullptr);
             }

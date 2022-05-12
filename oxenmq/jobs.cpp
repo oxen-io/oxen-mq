@@ -5,7 +5,6 @@
 namespace oxenmq {
 
 void OxenMQ::proxy_batch(detail::Batch* batch) {
-    batches.insert(batch);
     const auto [jobs, tagged_threads] = batch->size();
     OMQ_TRACE("proxy queuing batch job with ", jobs, " jobs", tagged_threads ? " (job uses tagged thread(s))" : "");
     if (!tagged_threads) {
@@ -37,7 +36,6 @@ void OxenMQ::job(std::function<void()> f, std::optional<TaggedThreadID> thread) 
 void OxenMQ::proxy_schedule_reply_job(std::function<void()> f) {
     auto* j = new Job(std::move(f));
     reply_jobs.emplace_back(static_cast<detail::Batch*>(j), 0);
-    batches.insert(j);
     proxy_skip_one_poll = true;
 }
 
@@ -113,7 +111,6 @@ void OxenMQ::_queue_timer_job(int timer_id) {
     } else {
         b = new Job(func, thread);
     }
-    batches.insert(b);
     OMQ_TRACE("b: ", b->size().first, ", ", b->size().second, "; thread = ", thread);
     assert(b->size() == std::make_pair(size_t{1}, thread > 0));
     auto& queue = thread > 0
