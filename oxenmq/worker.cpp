@@ -247,7 +247,6 @@ void OxenMQ::proxy_worker_message(OxenMQ::control_message_array& parts, size_t l
 
             if (clear_job) {
                 delete batch;
-                run.to_run = static_cast<detail::Batch*>(nullptr);
             }
         } else {
             assert(run.cat->active_threads > 0);
