@@ -7,7 +7,7 @@ Subject: Fully version library
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index baef9ef..26942e1 100644
+index b214872..e018faa 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -24,7 +24,7 @@ include(GNUInstallDirs)
