@@ -1,3 +1,28 @@
+oxenmq (1.2.12-1~ubuntu2004) focal; urgency=medium
+
+  [ Jason Rhinelander ]
+  * cmake work-around for cmake < 3.21
+  * Use liboxenc-dev in ci jobs
+
+  [ xutaxkamay ]
+  * Fix libzmq library linking
+
+  [ Jason Rhinelander ]
+  * Fix cmake compilation properties
+  * Add simpler Job subclass of Batch for simple jobs
+  * Eliminate useless unordered_set
+  * Change std::queue to std::deque typedef
+  * Use raw index bytes in worker router
+  * Use fixed array for known-small internal messages
+  * Use fixed vector for idle workers
+  * Add missing header
+  * Avoid unnecessary nullptr assignment
+  * Bump version & embedded oxenc version
+  * new gbp compatibility
+  * Rediff patches
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Mon, 30 May 2022 11:13:46 -0300
+
 oxenmq (1.2.11-2~ubuntu2004) focal; urgency=medium
 
   * cmake work-around for cmake < 3.21
