@@ -48,10 +48,11 @@ bool worker_wait_for(OxenMQ& omq, zmq::socket_t& sock, std::vector<zmq::message_
 }
 
 void OxenMQ::worker_thread(unsigned int index, std::optional<std::string> tagged, std::function<void()> start) {
-    std::string routing_id = (tagged ? "t" : "w") + std::to_string(index); // for routing
-    std::string_view worker_id{tagged ? *tagged : routing_id};              // for debug
+    std::string routing_id = (tagged ? "t" : "w") +
+        std::string(reinterpret_cast<const char*>(&index), sizeof(index)); // for routing
+    std::string worker_id{tagged ? *tagged : "w" + std::to_string(index)}; // for debug
 
-    [[maybe_unused]] std::string thread_name = tagged.value_or("omq-" + routing_id);
+    [[maybe_unused]] std::string thread_name = tagged.value_or("omq-" + worker_id);
 #if defined(__linux__) || defined(__sun) || defined(__MINGW32__)
     if (thread_name.size() > 15) thread_name.resize(15);
     pthread_setname_np(pthread_self(), thread_name.c_str());
@@ -161,39 +162,37 @@ void OxenMQ::worker_thread(unsigned int index, std::optional<std::string> tagged
 
 
 OxenMQ::run_info& OxenMQ::get_idle_worker() {
-    if (idle_workers.empty()) {
-        size_t id = workers.size();
-        assert(workers.capacity() > id);
+    if (idle_worker_count == 0) {
+        uint32_t id = workers.size();
         workers.emplace_back();
         auto& r = workers.back();
         r.worker_id = id;
-        r.worker_routing_id = "w" + std::to_string(id);
+        r.worker_routing_id = "w" + std::string(reinterpret_cast<const char*>(&id), sizeof(id));
+        r.worker_routing_name = "w" + std::to_string(id);
         return r;
     }
-    size_t id = idle_workers.back();
-    idle_workers.pop_back();
+    size_t id = idle_workers[--idle_worker_count];
     return workers[id];
 }
 
-void OxenMQ::proxy_worker_message(std::vector<zmq::message_t>& parts) {
+void OxenMQ::proxy_worker_message(OxenMQ::control_message_array& parts, size_t len) {
     // Process messages sent by workers
-    if (parts.size() != 2) {
-        OMQ_LOG(error, "Received send invalid ", parts.size(), "-part message");
+    if (len != 2) {
+        OMQ_LOG(error, "Received send invalid ", len, "-part message");
         return;
     }
     auto route = view(parts[0]), cmd = view(parts[1]);
-    OMQ_TRACE("worker message from ", route);
-    assert(route.size() >= 2 && (route[0] == 'w' || route[0] == 't') && route[1] >= '0' && route[1] <= '9');
+    if (route.size() != 5 || (route[0] != 'w' && route[0] != 't')) {
+        OMQ_LOG(error, "Received malformed worker id in worker message; unable to process worker command");
+        return;
+    }
     bool tagged_worker = route[0] == 't';
-    std::string_view worker_id_str{&route[1], route.size()-1}; // Chop off the leading "w" (or "t")
-    unsigned int worker_id = oxenc::detail::extract_unsigned(worker_id_str);
-    if (!worker_id_str.empty() /* didn't consume everything */ ||
-            (tagged_worker
-                ? 0 == worker_id || worker_id > tagged_workers.size() // tagged worker ids are indexed from 1 to N (0 means untagged)
-                : worker_id >= workers.size() // regular worker ids are indexed from 0 to N-1
-            )
-    ) {
-        OMQ_LOG(error, "Worker id '", route, "' is invalid, unable to process worker command");
+    uint32_t worker_id;
+    std::memcpy(&worker_id, route.data() + 1, 4);
+    if (tagged_worker
+            ? 0 == worker_id || worker_id > tagged_workers.size() // tagged worker ids are indexed from 1 to N (0 means untagged)
+            : worker_id >= workers.size()) { // regular worker ids are indexed from 0 to N-1
+        OMQ_LOG(error, "Received invalid worker id w" + std::to_string(worker_id) + " in worker message; unable to process worker command");
         return;
     }
 
@@ -233,11 +232,11 @@ void OxenMQ::proxy_worker_message(std::vector<zmq::message_t>& parts) {
                     } else {
                         auto& jobs =
                             thread > 0
-                            ? std::get<std::queue<batch_job>>(tagged_workers[thread - 1]) // run in tagged thread
+                            ? std::get<batch_queue>(tagged_workers[thread - 1]) // run in tagged thread
                             : run.is_reply_job
                               ? reply_jobs
                               : batch_jobs;
-                        jobs.emplace(batch, -1);
+                        jobs.emplace_back(batch, -1);
                     }
                 } else if (state == detail::BatchState::done) {
                     // No completion job
@@ -247,9 +246,7 @@ void OxenMQ::proxy_worker_message(std::vector<zmq::message_t>& parts) {
             }
 
             if (clear_job) {
-                batches.erase(batch);
                 delete batch;
-                run.to_run = static_cast<detail::Batch*>(nullptr);
             }
         } else {
             assert(run.cat->active_threads > 0);
@@ -259,7 +256,7 @@ void OxenMQ::proxy_worker_message(std::vector<zmq::message_t>& parts) {
             OMQ_TRACE("Telling worker ", route, " to quit");
             route_control(workers_socket, route, "QUIT");
         } else if (!tagged_worker) {
-            idle_workers.push_back(worker_id);
+            idle_workers[idle_worker_count++] = worker_id;
         }
     } else if (cmd == "QUITTING"sv) {
         run.worker_thread.join();
@@ -381,7 +378,7 @@ void OxenMQ::proxy_to_worker(int64_t conn_id, zmq::socket_t& sock, std::vector<z
         peer->activity(); // outgoing connection activity, pump the activity timer
 
     OMQ_TRACE("Forwarding incoming ", run.command, " from ", run.conn, " @ ", peer_address(parts[command_part_index]),
-            " to worker ", run.worker_routing_id);
+            " to worker ", run.worker_routing_name);
 
     proxy_run_worker(run);
     category.active_threads++;
@@ -412,7 +409,7 @@ void OxenMQ::proxy_inject_task(injected_task task) {
     }
 
     auto& run = get_idle_worker();
-    OMQ_TRACE("Forwarding incoming injected task ", task.command, " from ", task.remote, " to worker ", run.worker_routing_id);
+    OMQ_TRACE("Forwarding incoming injected task ", task.command, " from ", task.remote, " to worker ", run.worker_routing_name);
     run.load(&category, std::move(task.command), std::move(task.remote), std::move(task.callback));
 
     proxy_run_worker(run);
