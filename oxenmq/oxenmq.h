@@ -45,6 +45,7 @@
 #include <cassert>
 #include <cstdint>
 #include <future>
+#include <variant>
 #include "zmq.hpp"
 #include "address.h"
 #include <oxenc/bt_serialize.h>
@@ -106,6 +107,7 @@ private:
     explicit constexpr TaggedThreadID(int id) : _id{id} {}
     friend class OxenMQ;
     template <typename R> friend class Batch;
+    friend class Job;
 };
 
 /// Opaque handler for a timer constructed by add_timer(...).  Safe (and cheap) to copy.  The only
@@ -455,8 +457,9 @@ private:
     /// Router socket to reach internal worker threads from proxy
     zmq::socket_t workers_socket{context, zmq::socket_type::router};
 
-    /// indices of idle, active workers
+    /// indices of idle, active workers; note that this vector is usually oversized
     std::vector<unsigned int> idle_workers;
+    size_t idle_worker_count = 0; // Actual # elements of idle_workers in use
 
     /// Maximum number of general task workers, specified by set_general_threads()
     int general_workers = std::max<int>(1, std::thread::hardware_concurrency());
@@ -468,7 +471,7 @@ private:
     int max_workers;
 
     /// Number of active workers
-    int active_workers() const { return workers.size() - idle_workers.size(); }
+    int active_workers() const { return workers.size() - idle_worker_count; }
 
     /// Worker thread loop.  Tagged and start are provided for a tagged worker thread.
     void worker_thread(unsigned int index, std::optional<std::string> tagged = std::nullopt, std::function<void()> start = nullptr);
@@ -483,7 +486,9 @@ private:
 
     void proxy_conn_cleanup();
 
-    void proxy_worker_message(std::vector<zmq::message_t>& parts);
+    using control_message_array = std::array<zmq::message_t, 3>;
+
+    void proxy_worker_message(control_message_array& parts, size_t len);
 
     void proxy_process_queue();
 
@@ -575,18 +580,17 @@ private:
     /// weaker (i.e. it cannot reconnect to the SN if the connection is no longer open).
     void proxy_reply(oxenc::bt_dict_consumer data);
 
-    /// Currently active batch/reply jobs; this is the container that owns the Batch instances
-    std::unordered_set<detail::Batch*> batches;
     /// Individual batch jobs waiting to run; .second is the 0-n batch number or -1 for the
     /// completion job
     using batch_job = std::pair<detail::Batch*, int>;
-    std::queue<batch_job> batch_jobs, reply_jobs;
+    using batch_queue = std::deque<batch_job>;
+    batch_queue batch_jobs, reply_jobs;
     int batch_jobs_active = 0;
     int reply_jobs_active = 0;
     int batch_jobs_reserved = -1;
     int reply_jobs_reserved = -1;
     /// Runs any queued batch jobs
-    void proxy_run_batch_jobs(std::queue<batch_job>& jobs, int reserved, int& active, bool reply);
+    void proxy_run_batch_jobs(batch_queue& jobs, int reserved, int& active, bool reply);
 
     /// BATCH command.  Called with a Batch<R> (see oxenmq/batch.h) object pointer for the proxy to
     /// take over and queue batch jobs.
@@ -608,7 +612,7 @@ private:
     void process_zap_requests();
 
     /// Handles a control message from some outer thread to the proxy
-    void proxy_control_message(std::vector<zmq::message_t>& parts);
+    void proxy_control_message(control_message_array& parts, size_t len);
 
     /// Closing any idle connections that have outlived their idle time.  Note that this only
     /// affects outgoing connections; incomings connections are the responsibility of the other end.
@@ -744,8 +748,9 @@ private:
 
         // These belong to the proxy thread and must not be accessed by a worker:
         std::thread worker_thread;
-        size_t worker_id; // The index in `workers` (0-n) or index+1 in `tagged_workers` (1-n)
-        std::string worker_routing_id; // "w123" where 123 == worker_id; "n123" for tagged threads.
+        uint32_t worker_id; // The index in `workers` (0-n) or index+1 in `tagged_workers` (1-n)
+        std::string worker_routing_id; // "wXXXX" where XXXX is the raw bytes of worker_id, or tXXXX for tagged threads.
+        std::string worker_routing_name; // "w123" or "t123" -- human readable version of worker_routing_id
 
         /// Loads the run info with an incoming command
         run_info& load(category* cat, std::string command, ConnectionID conn, Access access, std::string remote,
@@ -769,7 +774,7 @@ private:
     /// Workers that are reserved for tagged thread tasks (as created with add_tagged_thread).  The
     /// queue here is similar to worker_jobs, but contains only the tagged thread's jobs.  The bool
     /// is whether the worker is currently busy (true) or available (false).
-    std::vector<std::tuple<run_info, bool, std::queue<batch_job>>> tagged_workers;
+    std::vector<std::tuple<run_info, bool, batch_queue>> tagged_workers;
 
 public:
     /**
