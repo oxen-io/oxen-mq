@@ -5,21 +5,20 @@
 namespace oxenmq {
 
 void OxenMQ::proxy_batch(detail::Batch* batch) {
-    batches.insert(batch);
     const auto [jobs, tagged_threads] = batch->size();
     OMQ_TRACE("proxy queuing batch job with ", jobs, " jobs", tagged_threads ? " (job uses tagged thread(s))" : "");
     if (!tagged_threads) {
         for (size_t i = 0; i < jobs; i++)
-            batch_jobs.emplace(batch, i);
+            batch_jobs.emplace_back(batch, i);
     } else {
         // Some (or all) jobs have a specific thread target so queue any such jobs in the tagged
         // worker queue.
         auto threads = batch->threads();
         for (size_t i = 0; i < jobs; i++) {
             auto& jobs = threads[i] > 0
-                ? std::get<std::queue<batch_job>>(tagged_workers[threads[i] - 1])
+                ? std::get<batch_queue>(tagged_workers[threads[i] - 1])
                 : batch_jobs;
-            jobs.emplace(batch, i);
+            jobs.emplace_back(batch, i);
         }
     }
 
@@ -29,25 +28,22 @@ void OxenMQ::proxy_batch(detail::Batch* batch) {
 void OxenMQ::job(std::function<void()> f, std::optional<TaggedThreadID> thread) {
     if (thread && thread->_id == -1)
         throw std::logic_error{"job() cannot be used to queue an in-proxy job"};
-    auto* b = new Batch<void>;
-    b->add_job(std::move(f), thread);
-    auto* baseptr = static_cast<detail::Batch*>(b);
+    auto* j = new Job(std::move(f), thread);
+    auto* baseptr = static_cast<detail::Batch*>(j);
     detail::send_control(get_control_socket(), "BATCH", oxenc::bt_serialize(reinterpret_cast<uintptr_t>(baseptr)));
 }
 
 void OxenMQ::proxy_schedule_reply_job(std::function<void()> f) {
-    auto* b = new Batch<void>;
-    b->add_job(std::move(f));
-    batches.insert(b);
-    reply_jobs.emplace(static_cast<detail::Batch*>(b), 0);
+    auto* j = new Job(std::move(f));
+    reply_jobs.emplace_back(static_cast<detail::Batch*>(j), 0);
     proxy_skip_one_poll = true;
 }
 
-void OxenMQ::proxy_run_batch_jobs(std::queue<batch_job>& jobs, const int reserved, int& active, bool reply) {
+void OxenMQ::proxy_run_batch_jobs(batch_queue& jobs, const int reserved, int& active, bool reply) {
     while (!jobs.empty() && active_workers() < max_workers &&
             (active < reserved || active_workers() < general_workers)) {
         proxy_run_worker(get_idle_worker().load(std::move(jobs.front()), reply));
-        jobs.pop();
+        jobs.pop_front();
         active++;
     }
 }
@@ -98,11 +94,12 @@ void OxenMQ::_queue_timer_job(int timer_id) {
         return;
     }
 
-    auto* b = new Batch<void>;
-    b->add_job(func, thread);
+    detail::Batch* b;
     if (squelch) {
+        auto* bv = new Batch<void>;
+        bv->add_job(func, thread);
         running = true;
-        b->completion([this,timer_id](auto results) {
+        bv->completion([this,timer_id](auto results) {
             try { results[0].get(); }
             catch (const std::exception &e) { OMQ_LOG(warn, "timer job ", timer_id, " raised an exception: ", e.what()); }
             catch (...) { OMQ_LOG(warn, "timer job ", timer_id, " raised a non-std exception"); }
@@ -110,14 +107,16 @@ void OxenMQ::_queue_timer_job(int timer_id) {
             if (it != timer_jobs.end())
                 it->second.running = false;
         }, OxenMQ::run_in_proxy);
+        b = bv;
+    } else {
+        b = new Job(func, thread);
     }
-    batches.insert(b);
     OMQ_TRACE("b: ", b->size().first, ", ", b->size().second, "; thread = ", thread);
     assert(b->size() == std::make_pair(size_t{1}, thread > 0));
     auto& queue = thread > 0
-        ? std::get<std::queue<batch_job>>(tagged_workers[thread - 1])
+        ? std::get<batch_queue>(tagged_workers[thread - 1])
         : batch_jobs;
-    queue.emplace(static_cast<detail::Batch*>(b), 0);
+    queue.emplace_back(static_cast<detail::Batch*>(b), 0);
 }
 
 void OxenMQ::add_timer(TimerID& timer, std::function<void()> job, std::chrono::milliseconds interval, bool squelch, std::optional<TaggedThreadID> thread) {
@@ -171,8 +170,9 @@ TaggedThreadID OxenMQ::add_tagged_thread(std::string name, std::function<void()>
     auto& [run, busy, queue] = tagged_workers.emplace_back();
     busy = false;
     run.worker_id = tagged_workers.size(); // We want index + 1 (b/c 0 is used for non-tagged jobs)
-    run.worker_routing_id = "t" + std::to_string(run.worker_id);
-    OMQ_TRACE("Created new tagged thread ", name, " with routing id ", run.worker_routing_id);
+    run.worker_routing_name = "t" + std::to_string(run.worker_id);
+    run.worker_routing_id = "t" + std::string{reinterpret_cast<const char*>(&run.worker_id), sizeof(run.worker_id)};
+    OMQ_TRACE("Created new tagged thread ", name, " with routing id ", run.worker_routing_name);
 
     run.worker_thread = std::thread{&OxenMQ::worker_thread, this, run.worker_id, name, std::move(start)};
 

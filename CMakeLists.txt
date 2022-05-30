@@ -17,7 +17,7 @@ cmake_minimum_required(VERSION 3.7)
 set(CMAKE_OSX_DEPLOYMENT_TARGET 10.12 CACHE STRING "macOS deployment target (Apple clang only)")
 
 project(liboxenmq
-    VERSION 1.2.11
+    VERSION 1.2.12
     LANGUAGES CXX C)
 
 include(GNUInstallDirs)
@@ -140,8 +140,12 @@ if(WARNINGS_AS_ERRORS)
     target_compile_options(oxenmq PRIVATE -Werror)
 endif()
 
-target_compile_features(oxenmq PUBLIC cxx_std_17)
-set_target_properties(oxenmq PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(oxenmq PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
 
 function(link_dep_libs target linktype libdirs)
     foreach(lib ${ARGN})
