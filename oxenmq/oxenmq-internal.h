@@ -86,6 +86,21 @@ inline bool recv_message_parts(zmq::socket_t& sock, std::vector<zmq::message_t>&
     return true;
 }
 
+// Same as above, but using a fixed sized array; this is only used for internal jobs (e.g. control
+// messages) where we know the message parts should never exceed a given size (this function does
+// not bounds check except in debug builds).  Returns the number of message parts received, or 0 on
+// read error.
+template <size_t N>
+inline size_t recv_message_parts(zmq::socket_t& sock, std::array<zmq::message_t, N>& parts, const zmq::recv_flags flags = zmq::recv_flags::none) {
+    for (size_t count = 0; ; count++) {
+        assert(count < N);
+        if (!sock.recv(parts[count], flags))
+            return 0;
+        if (!parts[count].more())
+            return count + 1;
+    }
+}
+
 inline const char* peer_address(zmq::message_t& msg) {
     try { return msg.gets("Peer-Address"); } catch (...) {}
     return "(unknown)";
