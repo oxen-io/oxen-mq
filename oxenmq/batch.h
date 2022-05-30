@@ -266,6 +266,52 @@ private:
     }
 };
 
+// Similar to Batch<void>, but doesn't support a completion function and only handles a single task.
+class Job final : private detail::Batch {
+    friend class OxenMQ;
+public:
+    /// Constructs the Job to run a single task.  Takes any callable invokable with no arguments and
+    /// having no return value.  The task will be scheduled and run when the next worker thread is
+    /// available.  Any exceptions thrown by the job will be caught and squelched (the exception
+    /// terminates/completes the job).
+
+    explicit Job(std::function<void()> f, std::optional<TaggedThreadID> thread = std::nullopt)
+        : Job{std::move(f), thread ? thread->_id : 0}
+    {
+        if (thread && thread->_id == -1)
+            // There are some special case internal jobs where we allow this, but they use the
+            // private ctor below that doesn't have this check.
+            throw std::logic_error{"Cannot add a proxy thread job -- this makes no sense"};
+    }
+
+    // movable
+    Job(Job&&) = default;
+    Job &operator=(Job&&) = default;
+
+    // non-copyable
+    Job(const Job&) = delete;
+    Job &operator=(const Job&) = delete;
+
+private:
+    explicit Job(std::function<void()> f, int thread_id)
+        : job{std::move(f), thread_id} {}
+
+    std::pair<std::function<void()>, int> job;
+    bool done = false;
+
+    std::pair<size_t, bool> size() const override { return {1, job.second != 0}; }
+    std::vector<int> threads() const override { return {job.second}; }
+
+    void run_job(const int /*i*/) override {
+        try { job.first(); }
+        catch (...) {}
+    }
+
+    detail::BatchStatus job_finished() override { return {detail::BatchState::done, 0}; }
+
+    void job_completion() override {} // Never called because we return ::done (not ::complete) above.
+
+};
 
 template <typename R>
 void OxenMQ::batch(Batch<R>&& batch) {
