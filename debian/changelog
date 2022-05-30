@@ -19,9 +19,11 @@ oxenmq (1.2.12-1~ubuntu2004) focal; urgency=medium
   * Avoid unnecessary nullptr assignment
   * Bump version & embedded oxenc version
   * new gbp compatibility
+  * Fix use of parent oxenc::oxenc target
+  * fix linkage for submodule dep use
   * Rediff patches
 
- -- Jason Rhinelander <jason@imaginary.ca>  Mon, 30 May 2022 11:13:46 -0300
+ -- Jason Rhinelander <jason@imaginary.ca>  Mon, 30 May 2022 16:42:37 -0300
 
 oxenmq (1.2.11-2~ubuntu2004) focal; urgency=medium
 
