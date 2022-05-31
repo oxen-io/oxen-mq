@@ -1,4 +1,4 @@
-oxenmq (1.2.12-1) unstable; urgency=medium
+oxenmq (1.2.12-1~deb12) bookworm; urgency=medium
 
   [ Jason Rhinelander ]
   * cmake work-around for cmake < 3.21
