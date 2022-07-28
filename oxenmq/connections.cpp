@@ -5,10 +5,7 @@
 namespace oxenmq {
 
 std::ostream& operator<<(std::ostream& o, const ConnectionID& conn) {
-    if (!conn.pk.empty())
-        return o << (conn.sn() ? "SN " : "non-SN authenticated remote ") << oxenc::to_hex(conn.pk);
-    else
-        return o << "unauthenticated remote [" << conn.id << "]";
+    return o << conn.to_string();
 }
 
 namespace {
@@ -381,7 +378,12 @@ void OxenMQ::proxy_disconnect(ConnectionID conn, std::chrono::milliseconds linge
     OMQ_LOG(warn, "Failed to disconnect ", conn, ": no such outgoing connection");
 }
 
-
+std::string ConnectionID::to_string() const {
+    if (!pk.empty())
+        return (sn() ? std::string("SN ") : std::string("non-SN authenticated remote ")) + oxenc::to_hex(pk);
+    else
+        return std::string("unauthenticated remote [") + std::to_string(id) + "]";
+}
 
 
 }
