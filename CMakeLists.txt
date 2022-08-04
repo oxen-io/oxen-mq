@@ -212,6 +212,7 @@ if(OXENMQ_INSTALL)
         oxenmq/bt_serialize.h
         oxenmq/bt_value.h
         oxenmq/connections.h
+        oxenmq/fmt.h
         oxenmq/hex.h
         oxenmq/oxenmq.h
         oxenmq/message.h

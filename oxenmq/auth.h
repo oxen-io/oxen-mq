@@ -51,5 +51,23 @@ struct already_hashed {
 /// pubkeys and a terrible hash choice for anything else).
 using pubkey_set = std::unordered_set<std::string, already_hashed>;
 
+inline constexpr std::string_view to_string(AuthLevel a) {
+    switch (a) {
+        case AuthLevel::denied: return "denied";
+        case AuthLevel::none:   return "none";
+        case AuthLevel::basic:  return "basic";
+        case AuthLevel::admin:  return "admin";
+        default:                return "(unknown)";
+    }
+}
+
+inline AuthLevel auth_from_string(std::string_view a) {
+    if (a == "none") return AuthLevel::none;
+    if (a == "basic") return AuthLevel::basic;
+    if (a == "admin") return AuthLevel::admin;
+    return AuthLevel::denied;
+}
+
+
 
 }

@@ -112,23 +112,6 @@ inline std::string_view view(const zmq::message_t& m) {
     return {m.data<char>(), m.size()};
 }
 
-inline std::string to_string(AuthLevel a) {
-    switch (a) {
-        case AuthLevel::denied: return "denied";
-        case AuthLevel::none:   return "none";
-        case AuthLevel::basic:  return "basic";
-        case AuthLevel::admin:  return "admin";
-        default:                return "(unknown)";
-    }
-}
-
-inline AuthLevel auth_from_string(std::string_view a) {
-    if (a == "none") return AuthLevel::none;
-    if (a == "basic") return AuthLevel::basic;
-    if (a == "admin") return AuthLevel::admin;
-    return AuthLevel::denied;
-}
-
 // Extracts and builds the "send" part of a message for proxy_send/proxy_reply
 inline std::list<zmq::message_t> build_send_parts(oxenc::bt_list_consumer send, std::string_view route) {
     std::list<zmq::message_t> parts;
