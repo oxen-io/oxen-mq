@@ -1,3 +1,11 @@
+oxenmq (1.2.13-2~ubuntu1804) bionic; urgency=medium
+
+  * Drop bionic arm builds
+  * Ubuntu cmake hack
+  * Bump oxen-encoding dep
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Wed, 31 Aug 2022 13:47:56 -0300
+
 oxenmq (1.2.13-1~ubuntu1804) bionic; urgency=medium
 
   [ Jason Rhinelander ]
