@@ -17,7 +17,7 @@ cmake_minimum_required(VERSION 3.7)
 set(CMAKE_OSX_DEPLOYMENT_TARGET 10.12 CACHE STRING "macOS deployment target (Apple clang only)")
 
 project(liboxenmq
-    VERSION 1.2.12
+    VERSION 1.2.13
     LANGUAGES CXX C)
 
 include(GNUInstallDirs)
@@ -212,6 +212,7 @@ if(OXENMQ_INSTALL)
         oxenmq/bt_serialize.h
         oxenmq/bt_value.h
         oxenmq/connections.h
+        oxenmq/fmt.h
         oxenmq/hex.h
         oxenmq/oxenmq.h
         oxenmq/message.h
