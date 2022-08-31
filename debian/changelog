@@ -1,3 +1,10 @@
+oxenmq (1.2.13-2~ubuntu2210) kinetic; urgency=medium
+
+  * Kinetic workaround
+  * Bump oxen-encoding dep
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Wed, 31 Aug 2022 13:48:01 -0300
+
 oxenmq (1.2.13-1~ubuntu2210) kinetic; urgency=medium
 
   [ Jason Rhinelander ]
