@@ -103,6 +103,7 @@ local full_llvm(version) = debian_pipeline(
         commands: [
           'mkdir build',
           'cd build',
+          'ulimit -n 1024',  // Because macOS has a stupid tiny default ulimit
           'cmake .. -G Ninja -DCMAKE_CXX_FLAGS=-fcolor-diagnostics -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER_LAUNCHER=ccache',
           'ninja -v',
           './tests/tests --use-colour yes',

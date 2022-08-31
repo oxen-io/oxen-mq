@@ -1,6 +1,7 @@
 #include "oxenmq.h"
 #include "oxenmq-internal.h"
 #include <oxenc/hex.h>
+#include <optional>
 
 namespace oxenmq {
 
@@ -156,10 +157,11 @@ OxenMQ::proxy_connect_sn(std::string_view remote, std::string_view connect_hint,
     }
 
     OMQ_LOG(debug, oxenc::to_hex(pubkey), " (me) connecting to ", addr, " to reach ", oxenc::to_hex(remote));
-    zmq::socket_t socket{context, zmq::socket_type::dealer};
-    setup_outgoing_socket(socket, remote, use_ephemeral_routing_id);
+    std::optional<zmq::socket_t> socket;
     try {
-        socket.connect(addr);
+        socket.emplace(context, zmq::socket_type::dealer);
+        setup_outgoing_socket(*socket, remote, use_ephemeral_routing_id);
+        socket->connect(addr);
     } catch (const zmq::error_t& e) {
         // Note that this failure cases indicates something serious went wrong that means zmq isn't
         // even going to try connecting (for example an unparseable remote address).
@@ -175,7 +177,7 @@ OxenMQ::proxy_connect_sn(std::string_view remote, std::string_view connect_hint,
     p.activity();
     connections_updated = true;
     outgoing_sn_conns.emplace_hint(outgoing_sn_conns.end(), p.conn_id, ConnectionID{remote});
-    auto it = connections.emplace_hint(connections.end(), p.conn_id, std::move(socket));
+    auto it = connections.emplace_hint(connections.end(), p.conn_id, *std::move(socket));
 
     return {&it->second, ""s};
 }
@@ -321,10 +323,11 @@ void OxenMQ::proxy_connect_remote(oxenc::bt_dict_consumer data) {
     OMQ_LOG(debug, "Establishing remote connection to ", remote,
             remote_pubkey.empty() ? " (NULL auth)" : " via CURVE expecting pubkey " + oxenc::to_hex(remote_pubkey));
 
-    zmq::socket_t sock{context, zmq::socket_type::dealer};
+    std::optional<zmq::socket_t> sock;
     try {
-        setup_outgoing_socket(sock, remote_pubkey, ephemeral_rid);
-        sock.connect(remote);
+        sock.emplace(context, zmq::socket_type::dealer);
+        setup_outgoing_socket(*sock, remote_pubkey, ephemeral_rid);
+        sock->connect(remote);
     } catch (const zmq::error_t &e) {
         proxy_schedule_reply_job([conn_id, on_failure=std::move(on_failure), what="connect() failed: "s+e.what()] {
                 on_failure(conn_id, std::move(what));
@@ -332,7 +335,7 @@ void OxenMQ::proxy_connect_remote(oxenc::bt_dict_consumer data) {
         return;
     }
 
-    auto &s = connections.emplace_hint(connections.end(), conn_id, std::move(sock))->second;
+    auto &s = connections.emplace_hint(connections.end(), conn_id, std::move(*sock))->second;
     connections_updated = true;
     OMQ_LOG(debug, "Opened new zmq socket to ", remote, ", conn_id ", conn_id, "; sending HI");
     send_direct_message(s, "HI");
