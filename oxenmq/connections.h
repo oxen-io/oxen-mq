@@ -68,6 +68,9 @@ struct ConnectionID {
     // Returns a copy of the ConnectionID with the route set to empty.
     ConnectionID unrouted() { return ConnectionID{id, pk, ""}; }
 
+    std::string to_string() const;
+
+
 private:
     ConnectionID(int64_t id) : id{id} {}
     ConnectionID(int64_t id, std::string pubkey, std::string route = "")
@@ -93,4 +96,3 @@ namespace std {
         }
     };
 } // namespace std
-
