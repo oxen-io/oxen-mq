@@ -29,7 +29,7 @@ local deb_pipeline(image, buildarch='amd64', debarch='amd64', jobs=6) = {
         'echo deb http://deb.loki.network' + repo_suffix + ' ' + distro + ' main >/etc/apt/sources.list.d/loki.list',
         apt_get_quiet + ' update',
         apt_get_quiet + ' install -y eatmydata',
-        'eatmydata ' + apt_get_quiet + ' dist-upgrade -y',
+        'eatmydata ' + apt_get_quiet + ' dist-upgrade -y --no-install-recommends',
         'eatmydata ' + apt_get_quiet + ' install --no-install-recommends -y git-buildpackage devscripts equivs g++ ccache openssh-client',
         'eatmydata dpkg-reconfigure ccache',
         'cd debian',
