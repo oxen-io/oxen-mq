@@ -62,7 +62,22 @@ void OxenMQ::worker_thread(unsigned int index, std::optional<std::string> tagged
     pthread_setname_np(thread_name.c_str());
 #endif
 
-    zmq::socket_t sock{context, zmq::socket_type::dealer};
+    std::optional<zmq::socket_t> tagged_socket;
+    if (tagged) {
+        // If we're a tagged worker then we got started up before OxenMQ started, so we need to wait
+        // for an all-clear signal from OxenMQ first, then we fire our `start` callback, then we can
+        // start waiting for commands in the main loop further down.  (We also can't get the
+        // reference to our `tagged_workers` element or create a socket until the main proxy thread
+        // is running).
+        {
+            std::unique_lock lock{tagged_startup_mutex};
+            tagged_cv.wait(lock, [this] { return tagged_go; });
+        }
+        if (!proxy_thread.joinable()) // OxenMQ destroyed without starting
+            return;
+        tagged_socket.emplace(context, zmq::socket_type::dealer);
+    }
+    auto& sock = tagged ? *tagged_socket : worker_sockets[index];
     sock.set(zmq::sockopt::routing_id, routing_id);
     OMQ_LOG(debug, "New worker thread ", worker_id, " (", routing_id, ") started");
     sock.connect(SN_ADDR_WORKERS);
@@ -74,11 +89,6 @@ void OxenMQ::worker_thread(unsigned int index, std::optional<std::string> tagged
 
     bool waiting_for_command;
     if (tagged) {
-        // If we're a tagged worker then we got started up before OxenMQ started, so we need to wait
-        // for an all-clear signal from OxenMQ first, then we fire our `start` callback, then we can
-        // start waiting for commands in the main loop further down.  (We also can't get the
-        // reference to our `tagged_workers` element until the main proxy threads is running).
-
         waiting_for_command = true;
 
         if (!worker_wait_for(*this, sock, parts, worker_id, "START"sv))
@@ -268,7 +278,7 @@ void OxenMQ::proxy_worker_message(OxenMQ::control_message_array& parts, size_t l
 
 void OxenMQ::proxy_run_worker(run_info& run) {
     if (!run.worker_thread.joinable())
-        run.worker_thread = std::thread{[this, id=run.worker_id] { worker_thread(id); }};
+        run.worker_thread = std::thread{&OxenMQ::worker_thread, this, run.worker_id, std::nullopt, nullptr};
     else
         send_routed_message(workers_socket, run.worker_routing_id, "RUN");
 }
