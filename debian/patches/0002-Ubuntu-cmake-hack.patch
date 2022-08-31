@@ -1,0 +1,23 @@
+From: Jason Rhinelander <jason@imaginary.ca>
+Date: Wed, 31 Aug 2022 13:37:18 -0300
+Subject: Ubuntu cmake hack
+
+---
+ CMakeLists.txt | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index f6e6dcb..7b162e6 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -70,9 +70,7 @@ target_link_libraries(oxenmq PRIVATE Threads::Threads)
+ 
+ 
+ if(TARGET oxenc::oxenc)
+-    add_library(_oxenmq_external_oxenc INTERFACE IMPORTED)
+-    target_link_libraries(_oxenmq_external_oxenc INTERFACE oxenc::oxenc)
+-    target_link_libraries(oxenmq PUBLIC _oxenmq_external_oxenc)
++    target_link_libraries(oxenmq PUBLIC oxenc::oxenc)
+     message(STATUS "using pre-existing oxenc::oxenc target")
+ elseif(BUILD_SHARED_LIBS)
+     include(FindPkgConfig)
