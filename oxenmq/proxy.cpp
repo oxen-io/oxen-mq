@@ -377,36 +377,23 @@ void OxenMQ::proxy_loop_init() {
     pthread_setname_np("omq-proxy");
 #endif
 
+    zap_auth = zmq::socket_t{context, zmq::socket_type::rep};
     zap_auth.set(zmq::sockopt::linger, 0);
     zap_auth.bind(ZMQ_ADDR_ZAP);
 
+    workers_socket = zmq::socket_t{context, zmq::socket_type::router};
     workers_socket.set(zmq::sockopt::router_mandatory, true);
     workers_socket.bind(SN_ADDR_WORKERS);
 
-    assert(general_workers > 0);
-    if (batch_jobs_reserved < 0)
-        batch_jobs_reserved = (general_workers + 1) / 2;
-    if (reply_jobs_reserved < 0)
-        reply_jobs_reserved = (general_workers + 7) / 8;
-
-    max_workers = general_workers + batch_jobs_reserved + reply_jobs_reserved;
-    for (const auto& cat : categories) {
-        max_workers += cat.second.reserved_threads;
-    }
-
-    if (log_level() >= LogLevel::debug) {
-        OMQ_LOG(debug, "Reserving space for ", max_workers, " max workers = ", general_workers, " general plus reservations for:");
-        for (const auto& cat : categories)
-            OMQ_LOG(debug, "    - ", cat.first, ": ", cat.second.reserved_threads);
-        OMQ_LOG(debug, "    - (batch jobs): ", batch_jobs_reserved);
-        OMQ_LOG(debug, "    - (reply jobs): ", reply_jobs_reserved);
-        OMQ_LOG(debug, "Plus ", tagged_workers.size(), " tagged worker threads");
-    }
-
     workers.reserve(max_workers);
     idle_workers.resize(max_workers);
-    if (!workers.empty())
+    if (!workers.empty() || !worker_sockets.empty())
         throw std::logic_error("Internal error: proxy thread started with active worker threads");
+    worker_sockets.reserve(max_workers);
+    // Pre-initialize these worker sockets rather than creating during thread initialization so that
+    // we can't hit the zmq socket limit during worker thread startup.
+    for (int i = 0; i < max_workers; i++)
+        worker_sockets.emplace_back(context, zmq::socket_type::dealer);
 
 #ifndef _WIN32
     int saved_umask = -1;
@@ -466,6 +453,11 @@ void OxenMQ::proxy_loop_init() {
     // synchronization dance to guarantee that the workers are routable before we can proceed.
     if (!tagged_workers.empty()) {
         OMQ_LOG(debug, "Waiting for tagged workers");
+        {
+            std::unique_lock lock{tagged_startup_mutex};
+            tagged_go = true;
+        }
+        tagged_cv.notify_all();
         std::unordered_set<std::string_view> waiting_on;
         for (auto& w : tagged_workers)
             waiting_on.emplace(std::get<run_info>(w).worker_routing_id);

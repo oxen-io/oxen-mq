@@ -28,6 +28,7 @@
 
 #pragma once
 
+#include <condition_variable>
 #include <string>
 #include <string_view>
 #include <list>
@@ -237,7 +238,9 @@ public:
 
     /** Maximum open sockets, passed to the ZMQ context during start().  The default here is 10k,
      * designed to be enough to be more than enough to allow a full-mesh SN layer connection if
-     * necessary for the forseeable future. */
+     * necessary for the forseeable future. The actual value passed to ZMQ will be slightly higher,
+     * to allow for internal inter-thread communication sockets. Set to 0 to explicitly avoid
+     * setting the value; set to -1 to use the maximum supported by ZMQ. */
     int MAX_SOCKETS = 10000;
 
     /** Minimum reconnect interval: when a connection fails or dies, wait this long before
@@ -332,7 +335,7 @@ private:
 
     /// The socket we listen on for handling ZAP authentication requests (the other end is internal
     /// to zmq which sends requests to us as needed).
-    zmq::socket_t zap_auth{context, zmq::socket_type::rep};
+    zmq::socket_t zap_auth;
 
     struct bind_data {
         std::string address;
@@ -436,7 +439,7 @@ private:
     /// internal "control" connection (returned by `get_control_socket()`) to this socket used to
     /// give instructions to the proxy such as instructing it to initiate a connection to a remote
     /// or send a message.
-    zmq::socket_t command{context, zmq::socket_type::router};
+    zmq::socket_t command;
 
     /// Timers.  TODO: once cppzmq adds an interface around the zmq C timers API then switch to it.
     struct TimersDeleter { void operator()(void* timers); };
@@ -455,7 +458,7 @@ public:
 private:
 
     /// Router socket to reach internal worker threads from proxy
-    zmq::socket_t workers_socket{context, zmq::socket_type::router};
+    zmq::socket_t workers_socket;
 
     /// indices of idle, active workers; note that this vector is usually oversized
     std::vector<unsigned int> idle_workers;
@@ -474,7 +477,7 @@ private:
     int active_workers() const { return workers.size() - idle_worker_count; }
 
     /// Worker thread loop.  Tagged and start are provided for a tagged worker thread.
-    void worker_thread(unsigned int index, std::optional<std::string> tagged = std::nullopt, std::function<void()> start = nullptr);
+    void worker_thread(unsigned int index, std::optional<std::string> tagged, std::function<void()> start);
 
     /// If set, skip polling for one proxy loop iteration (set when we know we have something
     /// processible without having to shove it onto a socket, such as scheduling an internal job).
@@ -771,10 +774,22 @@ private:
     /// change it.
     std::vector<run_info> workers;
 
+    /// Dealer sockets for workers to use to talk to the proxy thread.  These are initialized during
+    /// start(), and after that belong exclusively to the worker thread with the same index as used
+    /// in `workers`.
+    std::vector<zmq::socket_t> worker_sockets;
+
     /// Workers that are reserved for tagged thread tasks (as created with add_tagged_thread).  The
     /// queue here is similar to worker_jobs, but contains only the tagged thread's jobs.  The bool
     /// is whether the worker is currently busy (true) or available (false).
     std::vector<std::tuple<run_info, bool, batch_queue>> tagged_workers;
+
+    /// Startup signalling for tagged workers; the tagged threads get initialized before startup,
+    /// then wait via this bool/c.v. to synchronize startup with the proxy thread.  This mutex isn't
+    /// used after startup is complete.
+    std::mutex tagged_startup_mutex;
+    bool tagged_go{false};
+    std::condition_variable tagged_cv;
 
 public:
     /**
