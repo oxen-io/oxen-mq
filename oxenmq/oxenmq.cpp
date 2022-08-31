@@ -2,6 +2,7 @@
 #include "oxenmq-internal.h"
 #include "zmq.hpp"
 #include <map>
+#include <mutex>
 #include <random>
 #include <ostream>
 #include <thread>
@@ -236,15 +237,42 @@ void OxenMQ::start() {
 
     OMQ_LOG(info, "Initializing OxenMQ ", bind.empty() ? "remote-only" : "listener", " with pubkey ", oxenc::to_hex(pubkey));
 
-    int zmq_socket_limit = context.get(zmq::ctxopt::socket_limit);
-    if (MAX_SOCKETS > 1 && MAX_SOCKETS <= zmq_socket_limit)
-        context.set(zmq::ctxopt::max_sockets, MAX_SOCKETS);
-    else
-        OMQ_LOG(error, "Not applying OxenMQ::MAX_SOCKETS setting: ", MAX_SOCKETS, " must be in [1, ", zmq_socket_limit, "]");
+    assert(general_workers > 0);
+    if (batch_jobs_reserved < 0)
+        batch_jobs_reserved = (general_workers + 1) / 2;
+    if (reply_jobs_reserved < 0)
+        reply_jobs_reserved = (general_workers + 7) / 8;
+
+    max_workers = general_workers + batch_jobs_reserved + reply_jobs_reserved;
+    for (const auto& cat : categories) {
+        max_workers += cat.second.reserved_threads;
+    }
+
+    if (log_level() >= LogLevel::debug) {
+        OMQ_LOG(debug, "Reserving space for ", max_workers, " max workers = ", general_workers, " general plus reservations for:");
+        for (const auto& cat : categories)
+            OMQ_LOG(debug, "    - ", cat.first, ": ", cat.second.reserved_threads);
+        OMQ_LOG(debug, "    - (batch jobs): ", batch_jobs_reserved);
+        OMQ_LOG(debug, "    - (reply jobs): ", reply_jobs_reserved);
+        OMQ_LOG(debug, "Plus ", tagged_workers.size(), " tagged worker threads");
+    }
+
+    if (MAX_SOCKETS != 0) {
+        // The max sockets setting we apply to the context here is used during zmq context
+        // initialization, which happens when the first socket is constructed using this context:
+        // hence we set this *before* constructing any socket_t on the context.
+        int zmq_socket_limit = context.get(zmq::ctxopt::socket_limit);
+        int want_sockets = MAX_SOCKETS < 0 ? zmq_socket_limit :
+            std::min<int>(zmq_socket_limit,
+                    MAX_SOCKETS + max_workers + tagged_workers.size()
+                    + 4 /* zap_auth, workers_socket, command, inproc_listener */);
+        context.set(zmq::ctxopt::max_sockets, want_sockets);
+    }
 
     // We bind `command` here so that the `get_control_socket()` below is always connecting to a
     // bound socket, but we do nothing else here: the proxy thread is responsible for everything
     // except binding it.
+    command = zmq::socket_t{context, zmq::socket_type::router};
     command.bind(SN_ADDR_COMMAND);
     std::promise<void> startup_prom;
     auto proxy_startup = startup_prom.get_future();
@@ -399,23 +427,13 @@ OxenMQ::run_info& OxenMQ::run_info::load(batch_job&& bj, bool reply_job, int tag
 OxenMQ::~OxenMQ() {
     if (!proxy_thread.joinable()) {
         if (!tagged_workers.empty()) {
-            // This is a bit icky: we have tagged workers that are waiting for a signal on
-            // workers_socket, but the listening end of workers_socket doesn't get set up until the
-            // proxy thread starts (and we're getting destructed here without a proxy thread).  So
-            // we need to start listening on it here in the destructor so that we establish a
-            // connection and send the QUITs to the tagged worker threads.
-            workers_socket.set(zmq::sockopt::router_mandatory, true);
-            workers_socket.bind(SN_ADDR_WORKERS);
-            for (auto& [run, busy, queue] : tagged_workers) {
-                while (true) {
-                    try {
-                        route_control(workers_socket, run.worker_routing_id, "QUIT");
-                        break;
-                    } catch (const zmq::error_t&) {
-                        std::this_thread::sleep_for(5ms);
-                    }
-                }
+            // We have tagged workers that are waiting on a signal for startup, but we didn't start
+            // up, so signal them so that they can end themselves.
+            {
+                std::lock_guard lock{tagged_startup_mutex};
+                tagged_go = true;
             }
+            tagged_cv.notify_all();
             for (auto& [run, busy, queue] : tagged_workers)
                 run.worker_thread.join();
         }
