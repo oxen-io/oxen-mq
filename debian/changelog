@@ -1,3 +1,19 @@
+oxenmq (1.2.13-1~deb10) buster; urgency=medium
+
+  [ Jason Rhinelander ]
+  * Update oxenc so that oxenc::oxenc target exists
+
+  [ Sean Darcy ]
+  * adds custom formatter for OMQ structs that have to_string member
+
+  [ Jason Rhinelander ]
+  * Fix zmq socket limit setting
+  * Increase ulimit on macos
+  * oxen-encoding submodule to latest tagged release
+  * Rediff patches
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Wed, 31 Aug 2022 12:52:39 -0300
+
 oxenmq (1.2.12-1~deb10) buster; urgency=medium
 
   [ Jason Rhinelander ]
