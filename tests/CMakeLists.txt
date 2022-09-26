@@ -9,6 +9,7 @@ add_executable(tests
     test_commands.cpp
     test_failures.cpp
     test_inject.cpp
+    test_pubsub.cpp
     test_requests.cpp
     test_socket_limit.cpp
     test_tagged_threads.cpp
