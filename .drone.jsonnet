@@ -19,6 +19,7 @@ local debian_pipeline(name,
                       cmake_extra='',
                       build_type='Release',
                       extra_cmds=[],
+                      distro='$$(lsb_release -sc)',
                       allow_fail=false) = {
   kind: 'pipeline',
   type: 'docker',
@@ -39,7 +40,7 @@ local debian_pipeline(name,
         apt_get_quiet + 'install -y eatmydata',
         'eatmydata ' + apt_get_quiet + ' install --no-install-recommends -y lsb-release',
         'cp contrib/deb.oxen.io.gpg /etc/apt/trusted.gpg.d',
-        'echo deb http://deb.oxen.io $$(lsb_release -sc) main >/etc/apt/sources.list.d/oxen.list',
+        'echo deb http://deb.oxen.io ' + distro + ' main >/etc/apt/sources.list.d/oxen.list',
         'eatmydata ' + apt_get_quiet + ' update',
         'eatmydata ' + apt_get_quiet + 'dist-upgrade -y',
         'eatmydata ' + apt_get_quiet + 'install -y cmake git ninja-build pkg-config ccache ' + std.join(' ', deps),
@@ -56,6 +57,7 @@ local debian_pipeline(name,
 local clang(version) = debian_pipeline(
   'Debian sid/clang-' + version + ' (amd64)',
   docker_base + 'debian-sid-clang',
+  distro='sid',
   deps=['clang-' + version] + default_deps_nocxx,
   cmake_extra='-DCMAKE_C_COMPILER=clang-' + version + ' -DCMAKE_CXX_COMPILER=clang++-' + version + ' '
 );
@@ -63,6 +65,7 @@ local clang(version) = debian_pipeline(
 local full_llvm(version) = debian_pipeline(
   'Debian sid/llvm-' + version + ' (amd64)',
   docker_base + 'debian-sid-clang',
+  distro='sid',
   deps=['clang-' + version, 'lld-' + version, 'libc++-' + version + '-dev', 'libc++abi-' + version + '-dev']
        + default_deps_nocxx,
   cmake_extra='-DCMAKE_C_COMPILER=clang-' + version +
@@ -76,13 +79,13 @@ local full_llvm(version) = debian_pipeline(
 
 
 [
-  debian_pipeline('Debian sid (amd64)', docker_base + 'debian-sid'),
-  debian_pipeline('Debian sid/Debug (amd64)', docker_base + 'debian-sid', build_type='Debug'),
-  clang(13),
-  full_llvm(13),
+  debian_pipeline('Debian sid (amd64)', docker_base + 'debian-sid', distro='sid'),
+  debian_pipeline('Debian sid/Debug (amd64)', docker_base + 'debian-sid', build_type='Debug', distro='sid'),
+  clang(14),
+  full_llvm(14),
   debian_pipeline('Debian buster (amd64)', docker_base + 'debian-buster'),
   debian_pipeline('Debian stable (i386)', docker_base + 'debian-stable/i386'),
-  debian_pipeline('Debian sid (ARM64)', docker_base + 'debian-sid', arch='arm64'),
+  debian_pipeline('Debian sid (ARM64)', docker_base + 'debian-sid', arch='arm64', distro='sid'),
   debian_pipeline('Debian stable (armhf)', docker_base + 'debian-stable/arm32v7', arch='arm64'),
   debian_pipeline('Debian buster (armhf)', docker_base + 'debian-buster/arm32v7', arch='arm64'),
   debian_pipeline('Ubuntu focal (amd64)', docker_base + 'ubuntu-focal'),
