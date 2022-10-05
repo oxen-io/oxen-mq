@@ -17,7 +17,7 @@ cmake_minimum_required(VERSION 3.7)
 set(CMAKE_OSX_DEPLOYMENT_TARGET 10.12 CACHE STRING "macOS deployment target (Apple clang only)")
 
 project(liboxenmq
-    VERSION 1.2.13
+    VERSION 1.2.14
     LANGUAGES CXX C)
 
 include(GNUInstallDirs)
@@ -42,15 +42,11 @@ endif()
 option(OXENMQ_BUILD_TESTS "Building and perform oxenmq tests" ${oxenmq_IS_TOPLEVEL_PROJECT})
 option(OXENMQ_INSTALL "Add oxenmq libraries and headers to cmake install target; defaults to ON if BUILD_SHARED_LIBS is enabled or we are the top-level project; OFF for a static subdirectory build" ${oxenmq_INSTALL_DEFAULT})
 option(OXENMQ_INSTALL_CPPZMQ "Install cppzmq header with oxenmq/ headers (requires OXENMQ_INSTALL)" ON)
-option(OXENMQ_LOKIMQ_COMPAT "Install lokimq compatibility headers and pkg-config for rename migration" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 configure_file(oxenmq/version.h.in oxenmq/version.h @ONLY)
 configure_file(liboxenmq.pc.in liboxenmq.pc @ONLY)
-if(OXENMQ_LOKIMQ_COMPAT)
-    configure_file(liblokimq.pc.in liblokimq.pc @ONLY)
-endif()
 
 
 add_library(oxenmq
@@ -186,9 +182,6 @@ else()
 endif()
 
 add_library(oxenmq::oxenmq ALIAS oxenmq)
-if(OXENMQ_LOKIMQ_COMPAT)
-    add_library(lokimq::lokimq ALIAS oxenmq)
-endif()
 
 export(
     TARGETS oxenmq
@@ -233,31 +226,6 @@ if(OXENMQ_INSTALL)
         FILES ${CMAKE_CURRENT_BINARY_DIR}/liboxenmq.pc
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
     )
-
-    if(OXENMQ_LOKIMQ_COMPAT)
-        install(
-            FILES lokimq/address.h
-            lokimq/auth.h
-            lokimq/base32z.h
-            lokimq/base64.h
-            lokimq/batch.h
-            lokimq/bt_serialize.h
-            lokimq/bt_value.h
-            lokimq/connections.h
-            lokimq/hex.h
-            lokimq/lokimq.h
-            lokimq/message.h
-            lokimq/variant.h
-            lokimq/version.h
-            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lokimq
-            )
-
-        install(
-            FILES ${CMAKE_CURRENT_BINARY_DIR}/liblokimq.pc
-            DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
-            )
-    endif()
-
 
 endif()
 
