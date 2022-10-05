@@ -431,7 +431,7 @@ OxenMQ::~OxenMQ() {
             // up, so signal them so that they can end themselves.
             {
                 std::lock_guard lock{tagged_startup_mutex};
-                tagged_go = true;
+                tagged_go = tagged_go_mode::SHUTDOWN;
             }
             tagged_cv.notify_all();
             for (auto& [run, busy, queue] : tagged_workers)
