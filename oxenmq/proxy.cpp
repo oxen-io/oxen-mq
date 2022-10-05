@@ -455,7 +455,7 @@ void OxenMQ::proxy_loop_init() {
         OMQ_LOG(debug, "Waiting for tagged workers");
         {
             std::unique_lock lock{tagged_startup_mutex};
-            tagged_go = true;
+            tagged_go = tagged_go_mode::GO;
         }
         tagged_cv.notify_all();
         std::unordered_set<std::string_view> waiting_on;
