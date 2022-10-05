@@ -71,9 +71,9 @@ void OxenMQ::worker_thread(unsigned int index, std::optional<std::string> tagged
         // is running).
         {
             std::unique_lock lock{tagged_startup_mutex};
-            tagged_cv.wait(lock, [this] { return tagged_go; });
+            tagged_cv.wait(lock, [this] { return tagged_go != tagged_go_mode::WAIT; });
         }
-        if (!proxy_thread.joinable()) // OxenMQ destroyed without starting
+        if (tagged_go == tagged_go_mode::SHUTDOWN) // OxenMQ destroyed without starting
             return;
         tagged_socket.emplace(context, zmq::socket_type::dealer);
     }
