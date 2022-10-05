@@ -9,7 +9,7 @@ Homepage: https://github.com/oxen-io/oxen-mq
 Package: liboxenmq-dev
 Section: libdevel
 Architecture: any
-Depends: liboxenmq1.2.13 (= ${binary:Version}), ${misc:Depends}, libzmq3-dev (>= 4.3), liboxenc-dev (>= 1.0.4)
+Depends: liboxenmq1.2.14 (= ${binary:Version}), ${misc:Depends}, libzmq3-dev (>= 4.3), liboxenc-dev (>= 1.0.4)
 Description: zeromq-based Oxen message passing library (headers)
  This C++17 library contains an abstraction layer around ZeroMQ to support
  integration with Oxen authentication, RPC, and message passing.  It is
@@ -22,7 +22,7 @@ Description: zeromq-based Oxen message passing library (headers)
  This package contains the library headers and other development files needed
  to build software using oxenmq.
 
-Package: liboxenmq1.2.13
+Package: liboxenmq1.2.14
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: zeromq-based Oxen message passing library
