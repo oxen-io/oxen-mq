@@ -7,10 +7,10 @@ Subject: Ubuntu cmake hack
  1 file changed, 1 insertion(+), 3 deletions(-)
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index f6e6dcb..7b162e6 100644
+index 5a7cdfb..2e6dbb5 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -70,9 +70,7 @@ target_link_libraries(oxenmq PRIVATE Threads::Threads)
+@@ -66,9 +66,7 @@ target_link_libraries(oxenmq PRIVATE Threads::Threads)
  
  
  if(TARGET oxenc::oxenc)
