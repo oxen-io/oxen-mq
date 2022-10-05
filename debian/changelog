@@ -1,3 +1,20 @@
+oxenmq (1.2.14-1~deb11) bullseye; urgency=medium
+
+  [ Jason Rhinelander ]
+  * oxen-encoding submodule to latest tagged release
+  * Remove deprecated code
+  * Add sid workaround
+
+  [ Thomas Winget ]
+  * initial implementation of generic pub/sub management
+
+  [ Jason Rhinelander ]
+  * Fix a race condition with tagged thread startup
+  * Fix installed headers
+  * Rediff patches
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Wed, 05 Oct 2022 20:32:39 -0300
+
 oxenmq (1.2.13-2~deb11) bullseye; urgency=medium
 
   * Bump oxen-encoding dep
