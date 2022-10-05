@@ -788,7 +788,8 @@ private:
     /// then wait via this bool/c.v. to synchronize startup with the proxy thread.  This mutex isn't
     /// used after startup is complete.
     std::mutex tagged_startup_mutex;
-    bool tagged_go{false};
+    enum class tagged_go_mode { WAIT, GO, SHUTDOWN };
+    tagged_go_mode tagged_go = tagged_go_mode::WAIT;
     std::condition_variable tagged_cv;
 
 public:
