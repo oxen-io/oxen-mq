@@ -35,14 +35,3 @@ Description: zeromq-based Oxen message passing library
  scheduling within a process.
  .
  This package contains the library file needed by software built using oxenmq.
-
-Package: liblokimq-dev
-Section: libdevel
-Architecture: any
-Depends: liboxenmq-dev, ${misc:Depends}
-Description: transitional package
- This is a transitional package that contains compatibility headers and
- pkg-config data for applications still relying on the old lokimq API
- namespace and package name.
- .
- It can be safely removed.
