@@ -199,17 +199,12 @@ if(OXENMQ_INSTALL)
     install(
         FILES oxenmq/address.h
         oxenmq/auth.h
-        oxenmq/base32z.h
-        oxenmq/base64.h
         oxenmq/batch.h
-        oxenmq/bt_serialize.h
-        oxenmq/bt_value.h
         oxenmq/connections.h
         oxenmq/fmt.h
-        oxenmq/hex.h
-        oxenmq/oxenmq.h
         oxenmq/message.h
-        oxenmq/variant.h
+        oxenmq/oxenmq.h
+        oxenmq/pubsub.h
         ${CMAKE_CURRENT_BINARY_DIR}/oxenmq/version.h
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/oxenmq
         )
