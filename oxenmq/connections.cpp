@@ -3,11 +3,46 @@
 #include <oxenc/hex.h>
 #include <optional>
 
+#ifdef OXENMQ_USE_EPOLL
+extern "C" {
+#include <sys/epoll.h>
+#include <unistd.h>
+}
+#endif
+
 namespace oxenmq {
 
 std::ostream& operator<<(std::ostream& o, const ConnectionID& conn) {
     return o << conn.to_string();
 }
+
+#ifdef OXENMQ_USE_EPOLL
+
+void OxenMQ::rebuild_pollitems() {
+
+    if (epoll_fd != -1)
+        close(epoll_fd);
+    epoll_fd = epoll_create1(0);
+
+    struct epoll_event ev;
+    ev.events = EPOLLIN | EPOLLET;
+    ev.data.u64 = EPOLL_COMMAND_ID;
+    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, command.get(zmq::sockopt::fd), &ev);
+
+    ev.data.u64 = EPOLL_WORKER_ID;
+    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, workers_socket.get(zmq::sockopt::fd), &ev);
+
+    ev.data.u64 = EPOLL_ZAP_ID;
+    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, zap_auth.get(zmq::sockopt::fd), &ev);
+
+    for (auto& [id, s] : connections) {
+        ev.data.u64 = id;
+        epoll_ctl(epoll_fd, EPOLL_CTL_ADD, s.get(zmq::sockopt::fd), &ev);
+    }
+    connections_updated = false;
+}
+
+#else // !OXENMQ_USE_EPOLL
 
 namespace {
 
@@ -32,6 +67,8 @@ void OxenMQ::rebuild_pollitems() {
         add_pollitem(pollitems, s);
     connections_updated = false;
 }
+
+#endif // OXENMQ_USE_EPOLL
 
 void OxenMQ::setup_external_socket(zmq::socket_t& socket) {
     socket.set(zmq::sockopt::reconnect_ivl, (int) RECONNECT_INTERVAL.count());

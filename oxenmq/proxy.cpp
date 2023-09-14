@@ -11,6 +11,10 @@ extern "C" {
 }
 #endif
 
+#ifdef OXENMQ_USE_EPOLL
+#include <sys/epoll.h>
+#endif
+
 #ifndef _WIN32
 extern "C" {
 #include <sys/stat.h>
@@ -496,6 +500,12 @@ void OxenMQ::proxy_loop(std::promise<void> startup) {
     // General vector for handling incoming messages:
     std::vector<zmq::message_t> parts;
 
+    std::vector<std::pair<const int64_t, zmq::socket_t>*> queue; // Used as a circular buffer
+
+#ifdef OXENMQ_USE_EPOLL
+    std::vector<struct epoll_event> evs;
+#endif
+
     while (true) {
         std::chrono::milliseconds poll_timeout;
         if (max_workers == 0) { // Will be 0 only if we are quitting
@@ -509,9 +519,48 @@ void OxenMQ::proxy_loop(std::promise<void> startup) {
             poll_timeout = std::chrono::milliseconds{zmq_timers_timeout(timers.get())};
         }
 
-        if (connections_updated)
+        if (connections_updated) {
             rebuild_pollitems();
+            // If we just rebuilt the queue then do a full check of everything, because we might
+            // have sockets that already edge-triggered that we need to fully drain before we start
+            // polling.
+            proxy_skip_one_poll = true;
+        }
 
+        // We round-robin connections when pulling off pending messages one-by-one rather than
+        // pulling off all messages from one connection before moving to the next; thus in cases of
+        // contention we end up fairly distributing.
+        queue.reserve(connections.size() + 1);
+
+#ifdef OXENMQ_USE_EPOLL
+        bool process_control = false, process_worker = false, process_zap = false, process_all = false;
+
+        if (proxy_skip_one_poll) {
+            proxy_skip_one_poll = false;
+            process_all = true;
+        }
+        else {
+            OMQ_TRACE("polling for new messages via epoll");
+
+            evs.resize(3 + connections.size());
+            const int max = epoll_wait(epoll_fd, evs.data(), evs.size(), poll_timeout.count());
+
+            queue.clear();
+            for (int i = 0; i < max; i++) {
+                const auto conn_id = evs[i].data.u64;
+                if (conn_id == EPOLL_COMMAND_ID)
+                    process_control = true;
+                else if (conn_id == EPOLL_WORKER_ID)
+                    process_worker = true;
+                else if (conn_id == EPOLL_ZAP_ID)
+                    process_zap = true;
+                else if (auto it = connections.find(conn_id); it != connections.end())
+                    queue.push_back(&*it);
+            }
+            queue.push_back(nullptr);
+        }
+
+#else
         if (proxy_skip_one_poll)
             proxy_skip_one_poll = false;
         else {
@@ -524,23 +573,32 @@ void OxenMQ::proxy_loop(std::promise<void> startup) {
             zmq::poll(pollitems.data(), pollitems.size(), poll_timeout);
         }
 
-        OMQ_TRACE("processing control messages");
-        // Retrieve any waiting incoming control messages
-        while (size_t len = recv_message_parts(command, control_parts, zmq::recv_flags::dontwait)) {
-            proxy_control_message(control_parts, len);
+        constexpr bool process_control = true, process_worker = true, process_zap = true, process_all = true;
+#endif
+
+        if (process_control || process_all) {
+            OMQ_TRACE("processing control messages");
+            // Retrieve any waiting incoming control messages
+            while (size_t len = recv_message_parts(command, control_parts, zmq::recv_flags::dontwait)) {
+                proxy_control_message(control_parts, len);
+            }
         }
 
-        OMQ_TRACE("processing worker messages");
-        while (size_t len = recv_message_parts(workers_socket, control_parts, zmq::recv_flags::dontwait)) {
-            proxy_worker_message(control_parts, len);
+        if (process_worker || process_all) {
+            OMQ_TRACE("processing worker messages");
+            while (size_t len = recv_message_parts(workers_socket, control_parts, zmq::recv_flags::dontwait)) {
+                proxy_worker_message(control_parts, len);
+            }
         }
 
         OMQ_TRACE("processing timers");
         zmq_timers_execute(timers.get());
 
-        // Handle any zap authentication
-        OMQ_TRACE("processing zap requests");
-        process_zap_requests();
+        if (process_zap || process_all) {
+            // Handle any zap authentication
+            OMQ_TRACE("processing zap requests");
+            process_zap_requests();
+        }
 
         // See if we can drain anything from the current queue before we potentially add to it
         // below.
@@ -548,15 +606,14 @@ void OxenMQ::proxy_loop(std::promise<void> startup) {
         proxy_process_queue();
 
         OMQ_TRACE("processing new incoming messages");
+        if (process_all) {
+            queue.resize(connections.size() + 1);
+            int i = 0;
+            for (auto& id_sock : connections)
+                queue[i++] = &id_sock;
+            queue[i] = nullptr;
+        }
 
-        // We round-robin connections when pulling off pending messages one-by-one rather than
-        // pulling off all messages from one connection before moving to the next; thus in cases of
-        // contention we end up fairly distributing.
-        std::vector<std::pair<const int64_t, zmq::socket_t>*> queue; // Used as a circular buffer
-        queue.reserve(connections.size() + 1);
-        for (auto& id_sock : connections)
-            queue.push_back(&id_sock);
-        queue.push_back(nullptr);
         size_t end = queue.size() - 1;
 
         for (size_t pos = 0; pos != end; ++pos %= queue.size()) {
@@ -580,8 +637,8 @@ void OxenMQ::proxy_loop(std::promise<void> startup) {
                 proxy_to_worker(id, sock, parts);
 
             if (connections_updated) {
-                // If connections got updated then our points are stale, to restart the proxy loop;
-                // if there are still messages waiting we'll end up right back here.
+                // If connections got updated then our points are stale, so restart the proxy loop;
+                // we'll immediately end up right back here at least once before we resume polling.
                 OMQ_TRACE("connections became stale; short-circuiting incoming message loop");
                 break;
             }
