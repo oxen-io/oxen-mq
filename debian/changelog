@@ -1,3 +1,14 @@
+oxenmq (1.2.16-0pre1-1) unstable; urgency=medium
+
+  * Fix installed headers
+  * Redo random string generation
+  * Bump version
+  * Update oxen-encoding submodule
+  * Add epoll support for Linux
+  * Rediff patches
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Thu, 14 Sep 2023 16:25:51 -0300
+
 oxenmq (1.2.14-1) unstable; urgency=medium
 
   [ Jason Rhinelander ]
