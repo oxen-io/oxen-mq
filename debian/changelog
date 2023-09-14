@@ -1,3 +1,14 @@
+oxenmq (1.2.16-0pre1-1~deb12) bookworm; urgency=medium
+
+  * Drop long-deprecated liblokimq-dev package
+  * Redo random string generation
+  * Bump version
+  * Update oxen-encoding submodule
+  * Add epoll support for Linux
+  * Rediff patches
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Thu, 14 Sep 2023 16:28:36 -0300
+
 oxenmq (1.2.14-1~deb12) bookworm; urgency=medium
 
   [ Jason Rhinelander ]
