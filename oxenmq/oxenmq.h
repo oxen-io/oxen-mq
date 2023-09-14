@@ -420,7 +420,13 @@ private:
     /// sockets for inter-thread communication followed by a pollitem for every connection (both
     /// incoming and outgoing) in `connections`.  We rebuild this from `connections` whenever
     /// `connections_updated` is set to true.
+    ///
+    /// On Linux, when using epoll, this is not used.
     std::vector<zmq::pollitem_t> pollitems;
+
+    /// On Linux, when using epoll, this tracks the epoll file descriptor.  Otherwise it does
+    /// nothing.
+    int epoll_fd = -1;
 
     /// Rebuilds pollitems to include the internal sockets + all incoming/outgoing sockets.
     void rebuild_pollitems();
