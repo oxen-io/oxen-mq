@@ -1,3 +1,9 @@
+oxenmq (1.2.16-0pre2-1~deb12) bookworm; urgency=medium
+
+  * epoll: always retrieve events from triggered sockets
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Fri, 15 Sep 2023 16:12:20 -0300
+
 oxenmq (1.2.16-0pre1-1~deb12) bookworm; urgency=medium
 
   * Drop long-deprecated liblokimq-dev package
