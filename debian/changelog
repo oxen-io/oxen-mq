@@ -1,3 +1,9 @@
+oxenmq (1.2.16-0pre2-1~deb13) trixie; urgency=medium
+
+  * trixie deb
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Wed, 27 Sep 2023 20:00:11 -0300
+
 oxenmq (1.2.16-0pre2-1) unstable; urgency=medium
 
   * epoll: always retrieve events from triggered sockets
