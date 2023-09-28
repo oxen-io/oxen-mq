@@ -1,3 +1,9 @@
+oxenmq (1.2.16-1~deb12) bookworm; urgency=medium
+
+  * 1.2.16 release
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Thu, 28 Sep 2023 11:15:09 -0300
+
 oxenmq (1.2.16~pre2-1~deb12) bookworm; urgency=medium
 
   * epoll: always retrieve events from triggered sockets
