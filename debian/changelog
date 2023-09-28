@@ -1,5 +1,11 @@
 oxenmq (1.2.16-1~deb10) buster; urgency=medium
 
+  * 1.2.16 release
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Thu, 28 Sep 2023 11:14:56 -0300
+
+oxenmq (1.2.16-1~deb10) buster; urgency=medium
+
   * Drop long-deprecated liblokimq-dev package
   * Redo random string generation
   * Bump version
