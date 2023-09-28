@@ -1,3 +1,14 @@
+oxenmq (1.2.16-1~ubuntu2310) mantic; urgency=medium
+
+  * Redo random string generation
+  * Bump version
+  * Update oxen-encoding submodule
+  * Add epoll support for Linux
+  * epoll: fix hang on heavily loaded sockets
+  * Rediff patches
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Thu, 28 Sep 2023 11:15:45 -0300
+
 oxenmq (1.2.14-1~ubuntu2310) mantic; urgency=medium
 
   * rebuild for mantic
