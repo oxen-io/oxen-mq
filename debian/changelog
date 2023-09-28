@@ -1,5 +1,11 @@
 oxenmq (1.2.16-1~deb11) bullseye; urgency=medium
 
+  * 1.2.16 release
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Thu, 28 Sep 2023 11:15:02 -0300
+
+oxenmq (1.2.16-1~deb11) bullseye; urgency=medium
+
   * Drop long-deprecated liblokimq-dev package
   * Redo random string generation
   * Bump version
