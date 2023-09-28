@@ -17,7 +17,7 @@ cmake_minimum_required(VERSION 3.7)
 set(CMAKE_OSX_DEPLOYMENT_TARGET 10.12 CACHE STRING "macOS deployment target (Apple clang only)")
 
 project(liboxenmq
-    VERSION 1.2.15
+    VERSION 1.2.16
     LANGUAGES CXX C)
 
 include(GNUInstallDirs)
@@ -39,9 +39,15 @@ set(oxenmq_INSTALL_DEFAULT OFF)
 if(BUILD_SHARED_LIBS OR oxenmq_IS_TOPLEVEL_PROJECT)
     set(oxenmq_INSTALL_DEFAULT ON)
 endif()
+set(oxenmq_EPOLL_DEFAULT OFF)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_CROSSCOMPILING)
+    set(oxenmq_EPOLL_DEFAULT ON)
+endif()
+
 option(OXENMQ_BUILD_TESTS "Building and perform oxenmq tests" ${oxenmq_IS_TOPLEVEL_PROJECT})
 option(OXENMQ_INSTALL "Add oxenmq libraries and headers to cmake install target; defaults to ON if BUILD_SHARED_LIBS is enabled or we are the top-level project; OFF for a static subdirectory build" ${oxenmq_INSTALL_DEFAULT})
 option(OXENMQ_INSTALL_CPPZMQ "Install cppzmq header with oxenmq/ headers (requires OXENMQ_INSTALL)" ON)
+option(OXENMQ_USE_EPOLL "Use epoll for socket polling (requires Linux)" ${oxenmq_EPOLL_DEFAULT})
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -59,6 +65,9 @@ add_library(oxenmq
     oxenmq/worker.cpp
 )
 set_target_properties(oxenmq PROPERTIES SOVERSION ${OXENMQ_LIBVERSION})
+if(OXENMQ_USE_EPOLL)
+    target_compile_definitions(oxenmq PRIVATE OXENMQ_USE_EPOLL)
+endif()
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
