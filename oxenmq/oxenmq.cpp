@@ -460,11 +460,12 @@ std::ostream &operator<<(std::ostream &os, LogLevel lvl) {
 
 std::string make_random_string(size_t size) {
     static thread_local std::mt19937_64 rng{std::random_device{}()};
-    static thread_local std::uniform_int_distribution<char> dist{std::numeric_limits<char>::min(), std::numeric_limits<char>::max()};
     std::string rando;
     rando.reserve(size);
-    for (size_t i = 0; i < size; i++)
-        rando += dist(rng);
+    while (rando.size() < size) {
+        uint64_t x = rng();
+        rando.append(reinterpret_cast<const char*>(&x), std::min<size_t>(size - rando.size(), 8));
+    }
     return rando;
 }
 
