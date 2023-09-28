@@ -1,4 +1,5 @@
 #pragma once
+#include <limits>
 #include "oxenmq.h"
 
 // Inside some method:
@@ -19,6 +20,14 @@ constexpr char SN_ADDR_COMMAND[] = "inproc://sn-command";
 constexpr char SN_ADDR_WORKERS[] = "inproc://sn-workers";
 constexpr char SN_ADDR_SELF[] = "inproc://sn-self";
 constexpr char ZMQ_ADDR_ZAP[] = "inproc://zeromq.zap.01";
+
+#ifdef OXENMQ_USE_EPOLL
+
+constexpr auto EPOLL_COMMAND_ID = std::numeric_limits<uint64_t>::max();
+constexpr auto EPOLL_WORKER_ID = std::numeric_limits<uint64_t>::max() - 1;
+constexpr auto EPOLL_ZAP_ID = std::numeric_limits<uint64_t>::max() - 2;
+
+#endif
 
 /// Destructor for create_message(std::string&&) that zmq calls when it's done with the message.
 extern "C" inline void message_buffer_destroy(void*, void* hint) {
