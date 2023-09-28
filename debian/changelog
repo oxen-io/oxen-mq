@@ -1,3 +1,9 @@
+oxenmq (1.2.16-1~deb13) trixie; urgency=medium
+
+  * 1.2.16 release
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Thu, 28 Sep 2023 11:15:14 -0300
+
 oxenmq (1.2.16~0pre2-1~deb13) trixie; urgency=medium
 
   * trixie deb
