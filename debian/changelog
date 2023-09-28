@@ -1,3 +1,15 @@
+oxenmq (1.2.16-1~ubuntu2004) focal; urgency=medium
+
+  * Drop long-deprecated liblokimq-dev package
+  * Redo random string generation
+  * Bump version
+  * Update oxen-encoding submodule
+  * Add epoll support for Linux
+  * epoll: fix hang on heavily loaded sockets
+  * Rediff patches
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Thu, 28 Sep 2023 11:15:32 -0300
+
 oxenmq (1.2.14-1~ubuntu2004) focal; urgency=medium
 
   [ Jason Rhinelander ]
