@@ -22,6 +22,8 @@ project(liboxenmq
 
 include(GNUInstallDirs)
 
+include(cmake/libatomic.cmake)
+
 message(STATUS "oxenmq v${PROJECT_VERSION}")
 
 set(OXENMQ_LIBVERSION 0)
