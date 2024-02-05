@@ -1,3 +1,9 @@
+oxenmq (1.2.16-1~ubuntu2404) noble; urgency=medium
+
+  * noble deb
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Sun, 04 Feb 2024 22:26:27 -0400
+
 oxenmq (1.2.16-1~ubuntu2310) mantic; urgency=medium
 
   * Redo random string generation
