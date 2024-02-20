@@ -1,3 +1,10 @@
+oxenmq (1.2.17-1~ubuntu2204) jammy; urgency=medium
+
+  * Make epoll runtime configurable and disable by default
+  * Rediff patches
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Tue, 20 Feb 2024 16:42:42 -0400
+
 oxenmq (1.2.16-1~ubuntu2204) jammy; urgency=medium
 
   * Drop long-deprecated liblokimq-dev package
