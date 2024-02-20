@@ -237,6 +237,13 @@ void OxenMQ::start() {
 
     OMQ_LOG(info, "Initializing OxenMQ ", bind.empty() ? "remote-only" : "listener", " with pubkey ", oxenc::to_hex(pubkey));
 
+#ifdef OXENMQ_USE_EPOLL
+    using_epoll = USE_EPOLL;
+    OMQ_LOG(debug, "epoll ", using_epoll ? "enabled" : "disabled");
+#else
+    using_epoll = false;
+#endif
+
     assert(general_workers > 0);
     if (batch_jobs_reserved < 0)
         batch_jobs_reserved = (general_workers + 1) / 2;
