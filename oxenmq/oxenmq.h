@@ -284,6 +284,13 @@ public:
      */
     std::chrono::milliseconds CONN_HEARTBEAT_TIMEOUT = 30s;
 
+    /** Whether to use epoll instead of regular ZMQ polling.  Has no effect if epoll is not
+     * supported.  Disabled by default; this can improve performance in cases where there are a very
+     * large number (i.e. many hundreds) of simultaneous outbound connections.  Not recommended
+     * otherwise.  This must be set *before* calling `start()`.
+     */
+    bool USE_EPOLL = false;
+
     /// Allows you to set options on the internal zmq context object.  For advanced use only.
     void set_zmq_context_option(zmq::ctxopt option, int value);
 
@@ -423,6 +430,10 @@ private:
     ///
     /// On Linux, when using epoll, this is not used.
     std::vector<zmq::pollitem_t> pollitems;
+
+    /// True if USE_EPOLL was set (before start()), to attempt to use epoll if supported.  Must not
+    /// be changed after `start()`.
+    bool using_epoll = false;
 
     /// On Linux, when using epoll, this tracks the epoll file descriptor.  Otherwise it does
     /// nothing.

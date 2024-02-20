@@ -534,51 +534,59 @@ void OxenMQ::proxy_loop(std::promise<void> startup) {
 
 #ifdef OXENMQ_USE_EPOLL
         bool process_command = false, process_worker = false, process_zap = false, process_all = false;
+        if (using_epoll) {
 
-        if (proxy_skip_one_poll) {
-            proxy_skip_one_poll = false;
+            if (proxy_skip_one_poll) {
+                proxy_skip_one_poll = false;
 
-            process_command = command.get(zmq::sockopt::events) & ZMQ_POLLIN;
-            process_worker = workers_socket.get(zmq::sockopt::events) & ZMQ_POLLIN;
-            process_zap = zap_auth.get(zmq::sockopt::events) & ZMQ_POLLIN;
-            process_all = true;
-        }
-        else {
-            OMQ_TRACE("polling for new messages via epoll");
-
-            evs.resize(3 + connections.size());
-            const int max = epoll_wait(epoll_fd, evs.data(), evs.size(), poll_timeout.count());
-
-            queue.clear();
-            for (int i = 0; i < max; i++) {
-                const auto conn_id = evs[i].data.u64;
-                if (conn_id == EPOLL_COMMAND_ID)
-                    process_command = true;
-                else if (conn_id == EPOLL_WORKER_ID)
-                    process_worker = true;
-                else if (conn_id == EPOLL_ZAP_ID)
-                    process_zap = true;
-                else if (auto it = connections.find(conn_id); it != connections.end())
-                    queue.push_back(&*it);
+                process_command = command.get(zmq::sockopt::events) & ZMQ_POLLIN;
+                process_worker = workers_socket.get(zmq::sockopt::events) & ZMQ_POLLIN;
+                process_zap = zap_auth.get(zmq::sockopt::events) & ZMQ_POLLIN;
+                process_all = true;
             }
-            queue.push_back(nullptr);
-        }
+            else {
+                OMQ_TRACE("polling for new messages via epoll");
 
-#else
-        if (proxy_skip_one_poll)
-            proxy_skip_one_poll = false;
+                evs.resize(3 + connections.size());
+                const int max = epoll_wait(epoll_fd, evs.data(), evs.size(), poll_timeout.count());
+
+                queue.clear();
+                for (int i = 0; i < max; i++) {
+                    const auto conn_id = evs[i].data.u64;
+                    if (conn_id == EPOLL_COMMAND_ID)
+                        process_command = true;
+                    else if (conn_id == EPOLL_WORKER_ID)
+                        process_worker = true;
+                    else if (conn_id == EPOLL_ZAP_ID)
+                        process_zap = true;
+                    else if (auto it = connections.find(conn_id); it != connections.end())
+                        queue.push_back(&*it);
+                }
+                queue.push_back(nullptr);
+            }
+        }
         else {
-            OMQ_TRACE("polling for new messages");
-
-            // We poll the control socket and worker socket for any incoming messages.  If we have
-            // available worker room then also poll incoming connections and outgoing connections
-            // for messages to forward to a worker.  Otherwise, we just look for a control message
-            // or a worker coming back with a ready message.
-            zmq::poll(pollitems.data(), pollitems.size(), poll_timeout);
-        }
-
+            process_command = true;
+            process_worker = true;
+            process_zap = true;
+            process_all = true;
+#else
         constexpr bool process_command = true, process_worker = true, process_zap = true, process_all = true;
+        {
 #endif
+
+            if (proxy_skip_one_poll)
+                proxy_skip_one_poll = false;
+            else {
+                OMQ_TRACE("polling for new messages");
+
+                // We poll the control socket and worker socket for any incoming messages.  If we have
+                // available worker room then also poll incoming connections and outgoing connections
+                // for messages to forward to a worker.  Otherwise, we just look for a control message
+                // or a worker coming back with a ready message.
+                zmq::poll(pollitems.data(), pollitems.size(), poll_timeout);
+            }
+        }
 
         if (process_command) {
             OMQ_TRACE("processing control messages");
@@ -654,7 +662,7 @@ void OxenMQ::proxy_loop(std::promise<void> startup) {
         //
         // More info on the complexities here at https://github.com/zeromq/libzmq/issues/3641 and
         // https://funcptr.net/2012/09/10/zeromq---edge-triggered-notification/
-        if (!connections_updated && !proxy_skip_one_poll) {
+        if (using_epoll && !connections_updated && !proxy_skip_one_poll) {
             for (auto* s : {&command, &workers_socket, &zap_auth}) {
                 if (s->get(zmq::sockopt::events) & ZMQ_POLLIN) {
                     proxy_skip_one_poll = true;
