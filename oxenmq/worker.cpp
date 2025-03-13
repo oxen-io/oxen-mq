@@ -317,8 +317,10 @@ void OxenMQ::proxy_to_worker(int64_t conn_id, zmq::socket_t& sock, std::vector<z
             for (auto it = pr.first; it != pr.second; ++it) {
                 if (it->second.conn_id == tmp_peer.conn_id && it->second.route == tmp_peer.route) {
                     peer = &it->second;
-                    // Update the stored auth level just in case the peer reconnected
+                    // Update the stored auth level and service node status just in case the peer
+                    // reconnected or the service node status changed
                     peer->auth_level = tmp_peer.auth_level;
+                    peer->service_node = true;
                     break;
                 }
             }
