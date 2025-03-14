@@ -301,6 +301,11 @@ void OxenMQ::proxy_to_worker(int64_t conn_id, zmq::socket_t& sock, std::vector<z
             return;
         }
         peer = &it->second;
+        // Check SN status of the remote, so that even if we connect_remote but land on a SN,
+        // messages we receive back on that connection that require SN status will be properly
+        // accepted.
+        if (!peer->pubkey.empty())
+            peer->service_node = active_service_nodes.count(peer->pubkey);
     } else if (conn_id == inproc_listener_connid) {
         tmp_peer.auth_level = AuthLevel::admin;
         tmp_peer.pubkey = pubkey;
@@ -317,8 +322,10 @@ void OxenMQ::proxy_to_worker(int64_t conn_id, zmq::socket_t& sock, std::vector<z
             for (auto it = pr.first; it != pr.second; ++it) {
                 if (it->second.conn_id == tmp_peer.conn_id && it->second.route == tmp_peer.route) {
                     peer = &it->second;
-                    // Update the stored auth level just in case the peer reconnected
+                    // Update the stored auth level and service node status just in case the peer
+                    // reconnected or the service node status changed
                     peer->auth_level = tmp_peer.auth_level;
+                    peer->service_node = true;
                     break;
                 }
             }
