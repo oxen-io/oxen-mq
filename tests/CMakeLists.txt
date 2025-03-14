@@ -21,7 +21,7 @@ find_package(Threads)
 target_link_libraries(tests Catch2::Catch2 oxenmq Threads::Threads)
 
 set_target_properties(tests PROPERTIES
-    CXX_STANDARD 17
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
 )

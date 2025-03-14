@@ -279,7 +279,14 @@ void OxenMQ::start() {
     proxy_thread = std::thread{&OxenMQ::proxy_loop, this, std::move(startup_prom)};
 
     OMQ_LOG(debug, "Waiting for proxy thread to initialize...");
-    proxy_startup.get(); // Rethrows exceptions from the proxy startup (e.g. failure to bind)
+    try {
+        proxy_startup.get();
+    } catch (...) {
+        // If it threw then the proxy thread died, so join it so that we don't think it is joinable
+        // during destruction:
+        proxy_thread.join();
+        throw; // Rethrow exceptions from the proxy startup back to the start() caller (e.g. failure to bind)
+    }
 
     OMQ_LOG(debug, "Waiting for proxy thread to get ready...");
     auto &control = get_control_socket();
