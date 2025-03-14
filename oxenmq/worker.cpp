@@ -301,6 +301,11 @@ void OxenMQ::proxy_to_worker(int64_t conn_id, zmq::socket_t& sock, std::vector<z
             return;
         }
         peer = &it->second;
+        // Check SN status of the remote, so that even if we connect_remote but land on a SN,
+        // messages we receive back on that connection that require SN status will be properly
+        // accepted.
+        if (!peer->pubkey.empty())
+            peer->service_node = active_service_nodes.count(peer->pubkey);
     } else if (conn_id == inproc_listener_connid) {
         tmp_peer.auth_level = AuthLevel::admin;
         tmp_peer.pubkey = pubkey;
