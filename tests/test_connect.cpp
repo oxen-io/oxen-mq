@@ -607,3 +607,53 @@ TEST_CASE("inproc connection permissions", "[connect][inproc]") {
         REQUIRE_FALSE( pub_success_private );
     }
 }
+
+TEST_CASE("coincidental SN connect_remote permission", "[connect][remote][sn]") {
+    // Test that messages that arrive on an outgoing `connect_remote` connection are properly
+    // authenticated as service node messages if the remote happens to be a service node.
+
+    OxenMQ omq1{
+        "", "", // generate ephemeral keys
+        false, // not a service node
+        [](auto) { return ""; },
+        get_logger("S1» "),
+        LogLevel::trace
+    };
+    std::string listen = random_localhost();
+    omq1.listen_curve(listen);
+    omq1.add_category("sn", Access{AuthLevel::none, true})
+        .add_command("x", [&](Message& m) {
+            m.send_back("sn.y");
+        });
+
+    OxenMQ omq2{
+        "", "", // generate ephemeral keys
+        false, // not a service node
+        [](auto) { return ""; },
+        get_logger("S2» "),
+        LogLevel::trace
+    };
+    std::promise<void> prom;
+    omq2.add_category("sn", Access{AuthLevel::none, true})
+        .add_command("y", [&](const Message& m) {
+            prom.set_value();
+        });
+
+    oxenmq::pubkey_set snpks;
+    snpks.insert(omq1.get_pubkey());
+    snpks.insert(omq2.get_pubkey());
+    omq1.set_active_sns(snpks);
+    omq2.set_active_sns(snpks);
+
+    omq1.start();
+    omq2.start();
+
+    oxenmq::address addr1{listen, omq1.get_pubkey()};
+    auto c = omq2.connect_remote(addr1,
+            [](auto) { },
+            [](auto conn, std::string_view reason) { auto lock = catch_lock(); INFO("connection failed: " << reason); });
+    omq2.send(c, "sn.x");
+
+    auto sn_y_triggered = prom.get_future().wait_for(2s) == std::future_status::ready;
+    REQUIRE(sn_y_triggered);
+}
