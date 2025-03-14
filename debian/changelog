@@ -1,3 +1,17 @@
+oxenmq (1.2.19-1~deb12) bookworm; urgency=medium
+
+  * fix deprecated ci name
+  * Ensure service node status is set on incoming commands
+  * fix tests not using c++20
+  * bump clang/llvm versions
+  * Fix destruction hang after start() failure with tagged threads
+  * version bump
+  * bump oxenc to latest
+  * Set SN status for incoming messages on outgoing conn
+  * Rediff patches
+
+ -- Jason Rhinelander <jason@session.foundation>  Fri, 14 Mar 2025 15:12:52 -0300
+
 oxenmq (1.2.18-1~deb12) bookworm; urgency=medium
 
   [ Jason Rhinelander ]
