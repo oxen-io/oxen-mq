@@ -1,7 +1,7 @@
 Source: oxenmq
 Priority: optional
 Maintainer: Jason Rhinelander <jason@imaginary.ca>
-Build-Depends: debhelper-compat (= 11), cmake (>= 3.5), g++, pkg-config, libzmq3-dev (>= 4.3), libsodium-dev, liboxenc-dev (>= 1.0.4)
+Build-Depends: debhelper-compat (= 11), cmake (>= 3.5), g++-10, pkg-config, libzmq3-dev (>= 4.3), libsodium-dev, liboxenc-dev (>= 1.0.4)
 Standards-Version: 4.4.1
 Section: libs
 Homepage: https://github.com/oxen-io/oxen-mq
