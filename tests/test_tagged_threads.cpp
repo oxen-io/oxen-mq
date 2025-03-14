@@ -162,4 +162,30 @@ TEST_CASE("timer job completion on tagged threads", "[tagged][timer]") {
     }
 }
 
+TEST_CASE("destruction during start with tagged workers", "[tagged][destruction]") {
+    // Reproducible bug from oxend, where a start() failure due to binding to an already-used bind
+    // address resulted in a hang during oxenmq shutdown after the start failed, when there were
+    // also tagged threads present.
+
+    // Make a conflicting listener:
+    std::string listen = random_localhost();
+    oxenmq::OxenMQ omq0{"", "", false, [](auto) { return ""; }, get_logger("S» "), LogLevel::trace};
+    omq0.listen_curve(listen);
+    omq0.start();
+
+    oxenmq::OxenMQ omq{"", "", false, [](auto) { return ""; }, get_logger("S» "), LogLevel::trace};
+    omq.listen_curve(listen);
+
+    SECTION("no tagged thread") {}
+    SECTION("with tagged thread") {
+        omq.add_tagged_thread("xxx");
+    }
+
+    REQUIRE_THROWS_AS(
+        omq.start(),
+        zmq::error_t);
+
+    // HANGS HERE AT `omq` DESTRUCTION WITH BUG
+}
+
 
