@@ -1,12 +1,12 @@
 #include "oxenmq.h"
 #include "oxenmq-internal.h"
 #include "zmq.hpp"
-#include <map>
 #include <mutex>
 #include <random>
 #include <ostream>
 #include <thread>
 #include <future>
+#include <variant>
 
 extern "C" {
 #include <sodium/core.h>
@@ -14,7 +14,6 @@ extern "C" {
 #include <sodium/crypto_scalarmult.h>
 }
 #include <oxenc/hex.h>
-#include <oxenc/variant.h>
 
 namespace oxenmq {
 
@@ -424,7 +423,7 @@ OxenMQ::run_info& OxenMQ::run_info::load(pending_command&& pending) {
 
     assert(pending.callback.index() == 0);
     return load(&pending.cat, std::move(pending.command), std::move(pending.conn), std::move(pending.access),
-            std::move(pending.remote), std::move(pending.data_parts), var::get<0>(pending.callback));
+            std::move(pending.remote), std::move(pending.data_parts), std::get<0>(pending.callback));
 }
 
 OxenMQ::run_info& OxenMQ::run_info::load(batch_job&& bj, bool reply_job, int tagged_thread) {
