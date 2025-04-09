@@ -1,3 +1,9 @@
+oxenmq (1.2.19-1~ubuntu2504) plucky; urgency=medium
+
+  * Add plucky debs
+
+ -- Jason Rhinelander <jason@session.foundation>  Wed, 09 Apr 2025 16:10:58 -0300
+
 oxenmq (1.2.19-1~ubuntu2410) oracular; urgency=medium
 
   * remove armhf deb
