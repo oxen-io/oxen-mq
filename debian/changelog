@@ -1,3 +1,13 @@
+oxenmq (1.2.20-1~ubuntu2004) focal; urgency=medium
+
+  * Fix curve support
+  * fix build with g++-10 package
+  * oxen-encoding compatibility fixes
+  * Compilation fix for removed implicit conversions
+  * Rediff patches
+
+ -- Jason Rhinelander <jason@session.foundation>  Wed, 09 Apr 2025 16:15:50 -0300
+
 oxenmq (1.2.19-1~ubuntu2004) focal; urgency=medium
 
   * focal build fixes
