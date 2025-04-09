@@ -287,10 +287,10 @@ void OxenMQ::proxy_control_message(OxenMQ::control_message_array& parts, size_t 
         auto data = view(parts[2]);
         if (cmd == "SEND") {
             OMQ_TRACE("proxying message");
-            return proxy_send(data);
+            return proxy_send(oxenc::bt_dict_consumer{data});
         } else if (cmd == "REPLY") {
             OMQ_TRACE("proxying reply to non-SN incoming message");
-            return proxy_reply(data);
+            return proxy_reply(oxenc::bt_dict_consumer{data});
         } else if (cmd == "BATCH") {
             OMQ_TRACE("proxy batch jobs");
             auto ptrval = oxenc::bt_deserialize<uintptr_t>(data);
@@ -301,16 +301,16 @@ void OxenMQ::proxy_control_message(OxenMQ::control_message_array& parts, size_t 
         } else if (cmd == "SET_SNS") {
             return proxy_set_active_sns(data);
         } else if (cmd == "UPDATE_SNS") {
-            return proxy_update_active_sns(data);
+            return proxy_update_active_sns(oxenc::bt_list_consumer{data});
         } else if (cmd == "CONNECT_SN") {
-            proxy_connect_sn(data);
+            proxy_connect_sn(oxenc::bt_dict_consumer{data});
             return;
         } else if (cmd == "CONNECT_REMOTE") {
-            return proxy_connect_remote(data);
+            return proxy_connect_remote(oxenc::bt_dict_consumer{data});
         } else if (cmd == "DISCONNECT") {
-            return proxy_disconnect(data);
+            return proxy_disconnect(oxenc::bt_dict_consumer{data});
         } else if (cmd == "TIMER") {
-            return proxy_timer(data);
+            return proxy_timer(oxenc::bt_list_consumer{data});
         } else if (cmd == "TIMER_DEL") {
             return proxy_timer_del(oxenc::bt_deserialize<int>(data));
         } else if (cmd == "BIND") {
