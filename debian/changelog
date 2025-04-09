@@ -1,5 +1,12 @@
 oxenmq (1.2.20-1~deb13) trixie; urgency=medium
 
+  * 1.2.20
+  * Rediff patches
+
+ -- Jason Rhinelander <jason@session.foundation>  Wed, 09 Apr 2025 16:18:36 -0300
+
+oxenmq (1.2.20-1~deb13) trixie; urgency=medium
+
   * Fix curve support
   * oxen-encoding compatibility fixes
   * Compilation fix for removed implicit conversions
