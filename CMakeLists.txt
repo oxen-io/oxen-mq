@@ -81,7 +81,7 @@ if(TARGET oxenc::oxenc)
     message(STATUS "using pre-existing oxenc::oxenc target")
 elseif(BUILD_SHARED_LIBS)
     include(FindPkgConfig)
-    pkg_check_modules(oxenc liboxenc>=1.2.0 IMPORTED_TARGET)
+    pkg_check_modules(oxenc liboxenc>=1.4.0 IMPORTED_TARGET)
 
     if(oxenc_FOUND)
         # Work around cmake bug 22180 (PkgConfig::tgt not set if no flags needed)
