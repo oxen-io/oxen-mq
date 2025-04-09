@@ -8,7 +8,7 @@ extern "C" {
 #include <pthread_np.h>
 }
 #endif
-#include <oxenc/variant.h>
+#include <variant>
 
 namespace oxenmq {
 
@@ -111,7 +111,7 @@ void OxenMQ::worker_thread(unsigned int index, std::optional<std::string> tagged
 
         try {
             if (run.is_batch_job) {
-                auto* batch = var::get<detail::Batch*>(run.to_run);
+                auto* batch = std::get<detail::Batch*>(run.to_run);
                 if (run.batch_jobno >= 0) {
                     OMQ_TRACE("worker thread ", worker_id, " running batch ", batch, "#", run.batch_jobno);
                     batch->run_job(run.batch_jobno);
@@ -120,7 +120,7 @@ void OxenMQ::worker_thread(unsigned int index, std::optional<std::string> tagged
                     batch->job_completion();
                 }
             } else if (run.is_injected) {
-                auto& func = var::get<std::function<void()>>(run.to_run);
+                auto& func = std::get<std::function<void()>>(run.to_run);
                 OMQ_TRACE("worker thread ", worker_id, " invoking injected command ", run.command);
                 func();
                 func = nullptr;
@@ -132,7 +132,7 @@ void OxenMQ::worker_thread(unsigned int index, std::optional<std::string> tagged
 
                 OMQ_TRACE("Got incoming command from ", message.remote, "/", message.conn, message.conn.route.empty() ? " (outgoing)" : " (incoming)");
 
-                auto& [callback, is_request] = *var::get<const std::pair<CommandCallback, bool>*>(run.to_run);
+                auto& [callback, is_request] = *std::get<const std::pair<CommandCallback, bool>*>(run.to_run);
                 if (is_request) {
                     message.reply_tag = {run.data_parts[0].data<char>(), run.data_parts[0].size()};
                     for (auto it = run.data_parts.begin() + 1; it != run.data_parts.end(); ++it)
@@ -220,7 +220,7 @@ void OxenMQ::proxy_worker_message(OxenMQ::control_message_array& parts, size_t l
                 active--;
             }
             bool clear_job = false;
-            auto* batch = var::get<detail::Batch*>(run.to_run);
+            auto* batch = std::get<detail::Batch*>(run.to_run);
             if (run.batch_jobno == -1) {
                 // Returned from the completion function
                 clear_job = true;
