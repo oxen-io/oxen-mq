@@ -1,3 +1,12 @@
+oxenmq (1.2.20-1~ubuntu2204) jammy; urgency=medium
+
+  * Fix curve support
+  * oxen-encoding compatibility fixes
+  * Compilation fix for removed implicit conversions
+  * Rediff patches
+
+ -- Jason Rhinelander <jason@session.foundation>  Wed, 09 Apr 2025 16:15:47 -0300
+
 oxenmq (1.2.19-1~ubuntu2204) jammy; urgency=medium
 
   * fix deprecated ci name; remove armhf deb
