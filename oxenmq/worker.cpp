@@ -306,15 +306,15 @@ void OxenMQ::proxy_to_worker(int64_t conn_id, zmq::socket_t& sock, std::vector<z
         // accepted.
         if (!peer->pubkey.empty())
             peer->service_node = active_service_nodes.count(peer->pubkey);
-    } else if (conn_id == inproc_listener_connid) {
-        tmp_peer.auth_level = AuthLevel::admin;
-        tmp_peer.pubkey = pubkey;
-        tmp_peer.service_node = active_service_nodes.count(pubkey);
-        peer = &tmp_peer;
     } else {
-        std::tie(tmp_peer.pubkey, tmp_peer.auth_level) = detail::extract_metadata(parts.back());
-        tmp_peer.service_node = tmp_peer.pubkey.size() == 32 && active_service_nodes.count(tmp_peer.pubkey);
-
+        if (conn_id == inproc_listener_connid) {
+            tmp_peer.auth_level = AuthLevel::admin;
+            tmp_peer.pubkey = pubkey;
+            tmp_peer.service_node = active_service_nodes.count(pubkey);
+        } else {
+            std::tie(tmp_peer.pubkey, tmp_peer.auth_level) = detail::extract_metadata(parts.back());
+            tmp_peer.service_node = tmp_peer.pubkey.size() == 32 && active_service_nodes.count(tmp_peer.pubkey);
+        }
         if (tmp_peer.service_node) {
             // It's a service node so we should have a peer_info entry; see if we can find one with
             // the same route, and if not, add one.
