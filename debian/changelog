@@ -1,3 +1,11 @@
+oxenmq (1.2.21-1~deb13) trixie; urgency=medium
+
+  * bump version
+  * Fix inproc connections on active SNs
+  * Rediff patches
+
+ -- Jason Rhinelander <jason@session.foundation>  Thu, 24 Apr 2025 17:47:11 -0300
+
 oxenmq (1.2.20-1~deb13) trixie; urgency=medium
 
   * 1.2.20
