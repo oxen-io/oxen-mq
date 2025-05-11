@@ -22,6 +22,10 @@ foreach(lang C CXX)
     endforeach()
 endforeach()
 
+if(CMAKE_OSX_DEPLOYMENT_TARGET)
+    list(APPEND libzmq_compiler_args "-DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+endif()
+
 include(ExternalProject)
 include(ProcessorCount)
 ExternalProject_Add(libzmq_external
