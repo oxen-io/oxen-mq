@@ -298,9 +298,11 @@ void OxenMQ::proxy_conn_cleanup() {
         auto& pc = *it;
         if (std::get<std::chrono::steady_clock::time_point>(pc) < now) {
             auto id = std::get<int64_t>(pc);
-            job([cid = ConnectionID{id}, callback = std::move(std::get<ConnectFailure>(pc))] { callback(cid, "connection attempt timed out"); });
+            ConnectionID cid{id};
+            job([cid, callback = std::move(std::get<ConnectFailure>(pc))] { callback(cid, "connection attempt timed out"); });
             it = pending_connects.erase(it); // Don't let the below erase it (because it invalidates iterators)
-            proxy_close_connection(id, CLOSE_LINGER);
+            proxy_close_connection(id, 0ms);
+            peers.erase(cid);
         } else {
             ++it;
         }
