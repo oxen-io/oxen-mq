@@ -35,25 +35,29 @@ inline std::unique_lock<std::mutex> catch_lock() {
 
 /// Waits up to 200ms for something to happen.
 template <typename Func>
-inline void wait_for(Func f) {
+inline void wait_for(Func f, std::chrono::milliseconds wait_time = 200ms) {
     auto start = std::chrono::steady_clock::now();
-    for (int i = 0; i < 20; i++) {
+    auto end = start + wait_time * TIME_DILATION;
+    while (std::chrono::steady_clock::now() < end) {
         if (f())
             break;
         std::this_thread::sleep_for(10ms * TIME_DILATION);
     }
     auto lock = catch_lock();
-    UNSCOPED_INFO("done waiting after " << (std::chrono::steady_clock::now() - start).count() << "ns");
+    UNSCOPED_INFO(
+            "done waiting after " << (std::chrono::steady_clock::now() - start).count() << "ns");
 }
 
 /// Waits on an atomic bool for up to 100ms for an initial connection, which is more than enough
 /// time for an initial connection + request.
-inline void wait_for_conn(std::atomic<bool> &c) {
+inline void wait_for_conn(std::atomic<bool>& c) {
     wait_for([&c] { return c.load(); });
 }
 
 /// Waits enough time for us to receive a reply from a localhost remote.
-inline void reply_sleep() { std::this_thread::sleep_for(10ms * TIME_DILATION); }
+inline void reply_sleep() {
+    std::this_thread::sleep_for(10ms * TIME_DILATION);
+}
 
 inline OxenMQ::Logger get_logger(std::string prefix = "") {
     std::string me = "tests/common.h";
@@ -73,3 +77,10 @@ inline OxenMQ::Logger get_logger(std::string prefix = "") {
                 << lvl << ": " << msg);
     };
 }
+
+namespace oxenmq {
+class TestSuiteHelper {
+  public:
+    static size_t num_peers(const OxenMQ& omq) { return omq.peers.size(); }
+};
+}  // namespace oxenmq
