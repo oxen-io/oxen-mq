@@ -416,10 +416,23 @@ void OxenMQ::proxy_disconnect(ConnectionID conn, std::chrono::milliseconds linge
 }
 
 std::string ConnectionID::to_string() const {
-    if (!pk.empty())
-        return (sn() ? std::string("SN ") : std::string("non-SN authenticated remote ")) + oxenc::to_hex(pk);
-    else
-        return std::string("unauthenticated remote [") + std::to_string(id) + "]";
+    std::string result;
+    if (!pk.empty()) {
+        if (sn())
+            result += "SN ";
+        else {
+            result += "non-SN authenticated remote [";
+            result += std::to_string(id);
+            result += ']';
+        }
+        result += oxenc::to_hex(pk);
+    }
+    else {
+        result += "unauthenticated remote [";
+        result += std::to_string(id);
+        result += ']';
+    }
+    return result;
 }
 
 
