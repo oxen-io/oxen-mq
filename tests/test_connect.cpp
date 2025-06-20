@@ -657,3 +657,38 @@ TEST_CASE("coincidental SN connect_remote permission", "[connect][remote][sn]") 
     auto sn_y_triggered = prom.get_future().wait_for(2s) == std::future_status::ready;
     REQUIRE(sn_y_triggered);
 }
+
+TEST_CASE("connect_remote peer cleanup", "[connect][remote][peers]") {
+    // Before 1.2.22, failed connections did not properly clean up the internal peers data, which
+    // would increase memory + CPU usage looping through it.
+
+    OxenMQ omq{
+            "",
+            "",     // generate ephemeral keys
+            false,  // not a service node
+            [](auto) { return ""; },
+            get_logger("C» "),
+            LogLevel::trace};
+    omq.start();
+
+    {
+        auto lock = catch_lock();
+        REQUIRE(TestSuiteHelper::num_peers(omq) == 0);
+    }
+
+    std::atomic<int> success = 0, fails = 0;
+    for (int p = 1; p <= 100; p++)
+        omq.connect_remote(
+                address::tcp("127.10.10.10", p),
+                [&](auto conn) { success++; },
+                [&](auto conn, std::string_view) { fails++; },
+                oxenmq::connect_option::timeout{1ms});
+
+    wait_for([&] { return fails.load() + success.load() >= 100; }, 500ms);
+    {
+        auto lock = catch_lock();
+        REQUIRE(success.load() == 0);
+        REQUIRE(fails.load() == 100);
+        REQUIRE(TestSuiteHelper::num_peers(omq) == 0);
+    }
+}
