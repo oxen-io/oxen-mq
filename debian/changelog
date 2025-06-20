@@ -1,3 +1,14 @@
+oxenmq (1.2.22-1~ubuntu2004) focal; urgency=medium
+
+  * fix excessive trace log
+  * Add connection id value to non-SN authenticated remote
+  * Fix binary data in worker id logging
+  * Fix missing peers cleanup on failed outgoing connections
+  * 1.2.22 version bump
+  * Rediff patches
+
+ -- Jason Rhinelander <jason@session.foundation>  Fri, 20 Jun 2025 16:41:01 -0300
+
 oxenmq (1.2.21-1~ubuntu2004) focal; urgency=medium
 
   * bump version
