@@ -270,7 +270,7 @@ void OxenMQ::proxy_expire_idle_peers() {
                 proxy_close_connection(info.conn_id, CLOSE_LINGER);
                 it = peers.erase(it);
             } else {
-                OMQ_LOG(trace, "Not closing ", it->first, ": ", std::chrono::duration_cast<std::chrono::milliseconds>(idle).count(),
+                OMQ_TRACE("Not closing ", it->first, ": ", std::chrono::duration_cast<std::chrono::milliseconds>(idle).count(),
                         "ms <= ", info.idle_expiry.count(), "ms");
                 ++it;
                 continue;
