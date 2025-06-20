@@ -1372,6 +1372,9 @@ public:
      * \param timer a TimerID value as returned by add_timer.
      */
     void cancel_timer(TimerID timer);
+
+    // Test suite class used to be able to poke at OxenMQ internals.
+    friend class TestSuiteHelper;
 };
 
 /// Helper class that slightly simplifies adding commands to a category.
