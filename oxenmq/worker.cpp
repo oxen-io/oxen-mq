@@ -79,7 +79,7 @@ void OxenMQ::worker_thread(unsigned int index, std::optional<std::string> tagged
     }
     auto& sock = tagged ? *tagged_socket : worker_sockets[index];
     sock.set(zmq::sockopt::routing_id, routing_id);
-    OMQ_LOG(debug, "New worker thread ", worker_id, " (", routing_id, ") started");
+    OMQ_LOG(debug, "New worker thread ", worker_id, " started");
     sock.connect(SN_ADDR_WORKERS);
     if (tagged)
         detail::send_control(sock, "STARTING");
@@ -191,29 +191,30 @@ void OxenMQ::proxy_worker_message(OxenMQ::control_message_array& parts, size_t l
         OMQ_LOG(error, "Received send invalid ", len, "-part message");
         return;
     }
-    auto route = view(parts[0]), cmd = view(parts[1]);
-    if (route.size() != 5 || (route[0] != 'w' && route[0] != 't')) {
+    auto route_raw = view(parts[0]), cmd = view(parts[1]);
+    if (route_raw.size() != 5 || (route_raw[0] != 'w' && route_raw[0] != 't')) {
         OMQ_LOG(error, "Received malformed worker id in worker message; unable to process worker command");
         return;
     }
-    bool tagged_worker = route[0] == 't';
-    uint32_t worker_id;
-    std::memcpy(&worker_id, route.data() + 1, 4);
+    char wtype = route_raw[0];
+    bool tagged_worker = wtype == 't';
+    uint32_t wid;
+    std::memcpy(&wid, route_raw.data() + 1, 4);
     if (tagged_worker
-            ? 0 == worker_id || worker_id > tagged_workers.size() // tagged worker ids are indexed from 1 to N (0 means untagged)
-            : worker_id >= workers.size()) { // regular worker ids are indexed from 0 to N-1
-        OMQ_LOG(error, "Received invalid worker id w" + std::to_string(worker_id) + " in worker message; unable to process worker command");
+            ? 0 == wid || wid > tagged_workers.size() // tagged worker ids are indexed from 1 to N (0 means untagged)
+            : wid >= workers.size()) { // regular worker ids are indexed from 0 to N-1
+        OMQ_LOG(error, "Received invalid worker id ", wtype, wid, " in worker message; unable to process worker command");
         return;
     }
 
-    auto& run = tagged_worker ? std::get<run_info>(tagged_workers[worker_id - 1]) : workers[worker_id];
+    auto& run = tagged_worker ? std::get<run_info>(tagged_workers[wid - 1]) : workers[wid];
 
-    OMQ_TRACE("received ", cmd, " command from ", route);
+    OMQ_TRACE("received ", cmd, " command from ", wtype, wid);
     if (cmd == "RAN"sv) {
-        OMQ_TRACE("Worker ", route, " finished ", run.is_batch_job ? "batch job" : run.command);
+        OMQ_TRACE("Worker ", wtype, wid, " finished ", run.is_batch_job ? "batch job" : run.command);
         if (run.is_batch_job) {
             if (tagged_worker) {
-                std::get<bool>(tagged_workers[worker_id - 1]) = false;
+                std::get<bool>(tagged_workers[wid - 1]) = false;
             } else {
                 auto& active = run.is_reply_job ? reply_jobs_active : batch_jobs_active;
                 assert(active > 0);
@@ -263,16 +264,16 @@ void OxenMQ::proxy_worker_message(OxenMQ::control_message_array& parts, size_t l
             run.cat->active_threads--;
         }
         if (max_workers == 0) { // Shutting down
-            OMQ_TRACE("Telling worker ", route, " to quit");
-            route_control(workers_socket, route, "QUIT");
+            OMQ_TRACE("Telling worker ", wtype, wid, " to quit");
+            route_control(workers_socket, route_raw, "QUIT");
         } else if (!tagged_worker) {
-            idle_workers[idle_worker_count++] = worker_id;
+            idle_workers[idle_worker_count++] = wid;
         }
     } else if (cmd == "QUITTING"sv) {
         run.worker_thread.join();
-        OMQ_LOG(debug, "Worker ", route, " exited normally");
+        OMQ_LOG(debug, "Worker ", wtype, wid, " exited normally");
     } else {
-        OMQ_LOG(error, "Worker ", route, " sent unknown control message: `", cmd, "'");
+        OMQ_LOG(error, "Worker ", wtype, wid, " sent unknown control message: `", cmd, "'");
     }
 }
 
