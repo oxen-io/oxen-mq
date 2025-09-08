@@ -22,6 +22,10 @@ foreach(lang C CXX)
     endforeach()
 endforeach()
 
+if(CMAKE_OSX_DEPLOYMENT_TARGET)
+    list(APPEND libzmq_compiler_args "-DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+endif()
+
 include(ExternalProject)
 include(ProcessorCount)
 ExternalProject_Add(libzmq_external
@@ -30,6 +34,7 @@ ExternalProject_Add(libzmq_external
     URL_HASH ${LIBZMQ_HASH}
     CMAKE_ARGS ${libzmq_compiler_args}
     -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     -DWITH_LIBSODIUM=ON -DENABLE_CURVE=ON -DZMQ_BUILD_TESTS=OFF -DWITH_PERF_TOOL=OFF -DENABLE_DRAFTS=OFF
     -DBUILD_SHARED=OFF -DBUILD_STATIC=ON -DWITH_DOC=OFF -DCMAKE_INSTALL_PREFIX=${LIBZMQ_PREFIX}
     BUILD_BYPRODUCTS ${LIBZMQ_PREFIX}/${CMAKE_INSTALL_LIBDIR}/libzmq.a
