@@ -17,10 +17,11 @@ cmake_minimum_required(VERSION 3.7)
 set(CMAKE_OSX_DEPLOYMENT_TARGET 10.12 CACHE STRING "macOS deployment target (Apple clang only)")
 
 project(liboxenmq
-    VERSION 1.2.22
+    VERSION 1.2.23
     LANGUAGES CXX C)
 
 include(GNUInstallDirs)
+include(cmake/libatomic.cmake)
 
 message(STATUS "oxenmq v${PROJECT_VERSION}")
 
