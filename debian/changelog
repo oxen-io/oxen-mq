@@ -1,3 +1,16 @@
+oxenmq (1.2.23-1~deb12) bookworm; urgency=medium
+
+  [ Jason Rhinelander ]
+  * Add build compat hack for cmake 4.0+
+  * Fix missing dependency on -latomic
+  * version bump
+  * Rediff patches
+
+  [ Sean Darcy ]
+  * set osx deployment target
+
+ -- Jason Rhinelander <jason@session.foundation>  Mon, 08 Sep 2025 16:53:14 -0300
+
 oxenmq (1.2.22-1~deb12) bookworm; urgency=medium
 
   * fix excessive trace log
