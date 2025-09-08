@@ -21,6 +21,7 @@ project(liboxenmq
     LANGUAGES CXX C)
 
 include(GNUInstallDirs)
+include(cmake/libatomic.cmake)
 
 message(STATUS "oxenmq v${PROJECT_VERSION}")
 
