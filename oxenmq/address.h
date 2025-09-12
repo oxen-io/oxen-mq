@@ -30,7 +30,6 @@
 #include <string>
 #include <string_view>
 #include <cstdint>
-#include <iosfwd>
 #include <functional>
 
 namespace oxenmq {
@@ -203,9 +202,6 @@ struct address {
     /// connection will be curve25519 encrypted; the remote pubkey must be 32 bytes.
     static address ipc_curve(std::string path, std::string pubkey);
 };
-
-// Outputs address.full_address() when sent to an ostream.
-std::ostream& operator<<(std::ostream& o, const address& a);
 
 } // namespace oxenmq
 

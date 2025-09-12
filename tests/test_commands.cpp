@@ -10,9 +10,7 @@ TEST_CASE("basic commands", "[commands]") {
     OxenMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
-        [](auto) { return ""; },
-        get_logger("S» "),
-        LogLevel::trace
+        [](auto) { return ""; }
     };
     server.listen_curve(listen);
 
@@ -31,7 +29,7 @@ TEST_CASE("basic commands", "[commands]") {
 
     server.start();
 
-    OxenMQ client{get_logger("C» "), LogLevel::trace};
+    OxenMQ client{};
 
     client.add_category("public", Access{AuthLevel::none});
     client.add_command("public", "hi", [&](auto&) { his++; });
@@ -80,9 +78,7 @@ TEST_CASE("outgoing auth level", "[commands][auth]") {
     OxenMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
-        [](auto) { return ""; },
-        get_logger("S» "),
-        LogLevel::trace
+        [](auto) { return ""; }
     };
     server.listen_curve(listen);
 
@@ -93,7 +89,7 @@ TEST_CASE("outgoing auth level", "[commands][auth]") {
 
     server.start();
 
-    OxenMQ client{get_logger("C» "), LogLevel::trace};
+    OxenMQ client{};
 
     std::atomic<int> public_hi{0}, basic_hi{0}, admin_hi{0};
     client.add_category("public", Access{AuthLevel::none});
@@ -162,9 +158,7 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
     OxenMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
-        [](auto) { return ""; },
-        get_logger("S» "),
-        LogLevel::trace
+        [](auto) { return ""; }
     };
     server.listen_curve(listen);
 
@@ -207,7 +201,7 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
 
     std::set<std::string> backdoor_details;
 
-    OxenMQ nsa{get_logger("NSA» ")};
+    OxenMQ nsa{};
     nsa.add_category("backdoor", Access{AuthLevel::admin});
     nsa.add_command("backdoor", "data", [&](Message& m) {
         auto l = catch_lock();
@@ -239,9 +233,7 @@ TEST_CASE("deferred replies on incoming connections", "[commands][hey google]") 
     std::map<int, std::set<std::string>> google_knows;
     int things_remembered{0};
     for (int i = 0; i < 5; i++) {
-        clients.push_back(std::make_unique<OxenMQ>(
-            get_logger("C" + std::to_string(i) + "» "), LogLevel::trace
-        ));
+        clients.push_back(std::make_unique<OxenMQ>());
         auto& c = clients.back();
         c->add_category("personal", Access{AuthLevel::basic});
         c->add_command("personal", "detail", [&,i](Message& m) {
@@ -282,9 +274,7 @@ TEST_CASE("send failure callbacks", "[commands][queue_full]") {
     OxenMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
-        [](auto) { return ""; },
-        get_logger("S» "),
-        LogLevel::debug // This test traces so much that it takes 2.5-3s of CPU time at trace level, so don't do that.
+        [](auto) { return ""; }
     };
     server.listen_plain(listen);
 
@@ -376,9 +366,7 @@ TEST_CASE("data parts", "[commands][send][data_parts]") {
     OxenMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
-        [](auto) { return ""; },
-        get_logger("S» "),
-        LogLevel::trace
+        [](auto) { return ""; }
     };
     server.listen_curve(listen);
 
@@ -393,7 +381,7 @@ TEST_CASE("data parts", "[commands][send][data_parts]") {
     });
     server.start();
 
-    OxenMQ client{get_logger("C» "), LogLevel::trace};
+    OxenMQ client{};
     client.start();
 
     std::atomic<bool> got{false};
@@ -479,10 +467,7 @@ TEST_CASE("deferred replies", "[commands][send][deferred]") {
     server.set_general_threads(1);
     server.start();
 
-    OxenMQ client(
-        get_logger("C» "),
-        LogLevel::trace);
-    //client.log_level(LogLevel::trace);
+    OxenMQ client{};
 
     client.start();
 

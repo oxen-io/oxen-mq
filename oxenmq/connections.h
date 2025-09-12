@@ -2,11 +2,9 @@
 #include "auth.h"
 #include <oxenc/bt_value.h>
 #include <string_view>
-#include <iosfwd>
 #include <stdexcept>
 #include <string>
 #include <utility>
-#include <variant>
 
 namespace oxenmq {
 
@@ -84,7 +82,6 @@ private:
     friend struct std::hash<ConnectionID>;
     template <typename... T>
     friend oxenc::bt_dict detail::build_send(ConnectionID to, std::string_view cmd, T&&... opts);
-    friend std::ostream& operator<<(std::ostream& o, const ConnectionID& conn);
 };
 
 } // namespace oxenmq

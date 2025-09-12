@@ -20,10 +20,7 @@ TEST_CASE("basic requests", "[requests]") {
     });
     server.start();
 
-    OxenMQ client(
-        [](LogLevel, const char* file, int line, std::string msg) { std::cerr << file << ":" << line << " --C-- " << msg << "\n"; }
-        );
-    //client.log_level(LogLevel::trace);
+    OxenMQ client{};
 
     client.start();
 
@@ -77,10 +74,7 @@ TEST_CASE("request from server to client", "[requests]") {
     });
     server.start();
 
-    OxenMQ client(
-        [](LogLevel, const char* file, int line, std::string msg) { std::cerr << file << ":" << line << " --C-- " << msg << "\n"; }
-        );
-    //client.log_level(LogLevel::trace);
+    OxenMQ client{};
 
     client.start();
 
@@ -138,10 +132,7 @@ TEST_CASE("request timeouts", "[requests][timeout]") {
     server.add_request_command("public", "blackhole", [&](Message& m) { /* doesn't reply */ });
     server.start();
 
-    OxenMQ client(
-        [](LogLevel, const char* file, int line, std::string msg) { std::cerr << file << ":" << line << " --C-- " << msg << "\n"; }
-        );
-    //client.log_level(LogLevel::trace);
+    OxenMQ client{};
 
     client.CONN_CHECK_INTERVAL = 10ms; // impatience (don't set this low in production code)
     client.start();

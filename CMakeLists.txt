@@ -11,13 +11,13 @@ if(CCACHE_PROGRAM)
   endforeach()
 endif()
 
-cmake_minimum_required(VERSION 3.7)
+cmake_minimum_required(VERSION 3.10...3.31)
 
 # Has to be set before `project()`, and ignored on non-macos:
 set(CMAKE_OSX_DEPLOYMENT_TARGET 10.12 CACHE STRING "macOS deployment target (Apple clang only)")
 
 project(liboxenmq
-    VERSION 1.2.23
+    VERSION 1.3.0
     LANGUAGES CXX C)
 
 include(GNUInstallDirs)
@@ -73,6 +73,29 @@ endif()
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 target_link_libraries(oxenmq PRIVATE Threads::Threads)
+
+
+if(TARGET oxen::logging)
+    add_library(_oxenmq_external_logging INTERFACE IMPORTED)
+    target_link_libraries(_oxenmq_external_logging INTERFACE oxen::logging)
+    target_link_libraries(oxenmq PRIVATE _oxenmq_external_logging)
+    message(STATUS "using pre-existing oxen::logging target")
+elseif(BUILD_SHARED_LIBS)
+    include(FindPkgConfig)
+    pkg_check_modules(OXENLOGGING liboxen-logging>=1.2.0)
+    if(OXENLOGGING_FOUND)
+        # If we load oxen-logging via system lib then we won't necessarily have fmt/spdlog targets,
+        # but this script will give us them:
+        include(oxen-logging/cmake/load_fmt_spdlog.cmake)
+
+        add_library(omq_logging_fmt_spdlog INTERFACE)
+        target_link_libraries(omq_logging_fmt_spdlog INTERFACE oxen-logging ${OXEN_LOGGING_FMT_TARGET} ${OXEN_LOGGING_SPDLOG_TARGET})
+        add_library(oxen::logging ALIAS omq_logging_fmt_spdlog)
+        target_link_libraries(oxenmq PRIVATE oxen::logging)
+    else()
+        add_subdirectory(oxen-logging)
+    endif()
+endif()
 
 
 if(TARGET oxenc::oxenc)
