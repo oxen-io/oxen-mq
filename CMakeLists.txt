@@ -52,6 +52,11 @@ option(OXENMQ_USE_EPOLL "Build with epoll support for socket polling (requires L
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 configure_file(oxenmq/version.h.in oxenmq/version.h @ONLY)
 configure_file(liboxenmq.pc.in liboxenmq.pc @ONLY)
 
@@ -91,10 +96,13 @@ elseif(BUILD_SHARED_LIBS)
         add_library(omq_logging_fmt_spdlog INTERFACE)
         target_link_libraries(omq_logging_fmt_spdlog INTERFACE oxen-logging ${OXEN_LOGGING_FMT_TARGET} ${OXEN_LOGGING_SPDLOG_TARGET})
         add_library(oxen::logging ALIAS omq_logging_fmt_spdlog)
-        target_link_libraries(oxenmq PRIVATE oxen::logging)
-    else()
-        add_subdirectory(oxen-logging)
+        target_link_libraries(oxenmq PUBLIC oxen::logging)
     endif()
+endif()
+if(NOT TARGET oxen::logging)
+    set(OXEN_LOGGING_FORCE_SUBMODULES ON CACHE INTERNAL "")
+    add_subdirectory(oxen-logging)
+    target_link_libraries(oxenmq PUBLIC oxen::logging)
 endif()
 
 
@@ -177,13 +185,6 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_L
     target_compile_options(oxenmq PRIVATE -Wno-error=restrict)
 endif()
 
-set_target_properties(oxenmq PROPERTIES
-    POSITION_INDEPENDENT_CODE ON
-    CXX_STANDARD 20
-    CXX_STANDARD_REQUIRED ON
-    CXX_EXTENSIONS OFF
-)
-
 function(link_dep_libs target linktype libdirs)
     foreach(lib ${ARGN})
         find_library(link_lib-${lib} NAMES ${lib} PATHS ${libdirs})
@@ -214,18 +215,12 @@ else()
         target_include_directories(oxenmq PUBLIC ${sodium_STATIC_INCLUDE_DIRS})
         if(oxenmq_build_static_libzmq)
             link_dep_libs(libzmq_vendor INTERFACE "${sodium_STATIC_LIBRARY_DIRS}" ${sodium_STATIC_LIBRARIES})
-            target_link_libraries(libzmq_vendor INTERFACE ${sodium_STATIC_INCLUDE_DIRS})
+            target_include_directories(libzmq_vendor INTERFACE ${sodium_STATIC_INCLUDE_DIRS})
         endif()
     endif()
 endif()
 
 add_library(oxenmq::oxenmq ALIAS oxenmq)
-
-export(
-    TARGETS oxenmq
-    NAMESPACE oxenmq::
-    FILE oxenmqTargets.cmake
-)
 
 if(OXENMQ_INSTALL)
     install(
