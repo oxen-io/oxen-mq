@@ -4,7 +4,7 @@
 #include <future>
 
 TEST_CASE("timer test", "[timer][basic]") {
-    oxenmq::OxenMQ omq{get_logger(""), LogLevel::trace};
+    oxenmq::OxenMQ omq{};
 
     omq.set_general_threads(1);
     omq.set_batch_threads(1);
@@ -23,7 +23,7 @@ TEST_CASE("timer test", "[timer][basic]") {
 }
 
 TEST_CASE("timer squelch", "[timer][squelch]") {
-    oxenmq::OxenMQ omq{get_logger(""), LogLevel::trace};
+    oxenmq::OxenMQ omq{};
 
     omq.set_general_threads(3);
     omq.set_batch_threads(3);
@@ -75,7 +75,7 @@ TEST_CASE("timer squelch", "[timer][squelch]") {
 }
 
 TEST_CASE("timer cancel", "[timer][cancel]") {
-    oxenmq::OxenMQ omq{get_logger(""), LogLevel::trace};
+    oxenmq::OxenMQ omq{};
 
     omq.set_general_threads(1);
     omq.set_batch_threads(1);

@@ -29,18 +29,16 @@
 #pragma once
 
 #include <condition_variable>
+#include <deque>
 #include <string>
 #include <string_view>
 #include <list>
-#include <queue>
 #include <type_traits>
 #include <unordered_map>
-#include <unordered_set>
 #include <memory>
 #include <functional>
 #include <thread>
 #include <mutex>
-#include <iostream>
 #include <chrono>
 #include <atomic>
 #include <cassert>
@@ -62,10 +60,6 @@
 namespace oxenmq {
 
 using namespace std::literals;
-
-/// Logging levels passed into LogFunc.  (Note that trace does nothing more than debug in a release
-/// build).
-enum class LogLevel { fatal, error, warn, info, debug, trace };
 
 // Forward declarations; see batch.h
 namespace detail { class Batch; }
@@ -193,12 +187,6 @@ public:
     /// part strings when we get a reply, or `false` and empty vector on timeout.
     using ReplyCallback = std::function<void(bool success, std::vector<std::string> data)>;
 
-    /// Called to write a log message.  This will only be called if the `level` is >= the current
-    /// OxenMQ object log level.  It must be a raw function pointer (or a capture-less lambda) for
-    /// performance reasons.  Takes four arguments: the log level of the message, the filename and
-    /// line number where the log message was invoked, and the log message itself.
-    using Logger = std::function<void(LogLevel level, const char* file, int line, std::string msg)>;
-
     /// Callback for the success case of connect_remote()
     using ConnectSuccess = std::function<void(ConnectionID)>;
     /// Callback for the failure case of connect_remote()
@@ -321,21 +309,10 @@ public:
     /// to direct very simple batch completion jobs to be executed directly in the proxy thread.
     inline static constexpr TaggedThreadID run_in_proxy{-1};
 
-    /// Writes a message to the logging system; intended mostly for internal use.
-    template <typename... T>
-    void log(LogLevel lvl, const char* filename, int line, const T&... stuff);
-
 private:
 
     /// The lookup function that tells us where to connect to a peer, or empty if not found.
     SNRemoteAddress sn_lookup;
-
-    /// The log level; this is atomic but we use relaxed order to set and access it (so changing it
-    /// might not be instantly visible on all threads, but that's okay).
-    std::atomic<LogLevel> log_lvl{LogLevel::warn};
-
-    /// The callback to call with log messages
-    Logger logger;
 
     ///////////////////////////////////////////////////////////////////////////////////
     /// NB: The following are all the domain of the proxy thread (once it is started)!
@@ -834,29 +811,19 @@ public:
      * self (that uses an internal connection instead).  Also note that the service node must be
      * listening in curve25519 mode (otherwise we couldn't verify its authenticity).  Should return
      * empty for not found or if SN lookups are not supported.
-     *
-     * @param log a function or callable object that writes a log message.  If omitted then all log
-     * messages are suppressed.
-     *
-     * @param level the initial log level; defaults to warn.  The log level can be changed later by
-     * calling log_level(...).
      */
     OxenMQ( std::string pubkey,
             std::string privkey,
             bool service_node,
-            SNRemoteAddress sn_lookup,
-            Logger logger = nullptr,
-            LogLevel level = LogLevel::warn);
+            SNRemoteAddress sn_lookup);
 
     /**
      * Simplified OxenMQ constructor for a non-listening client or simple listener without any
      * outgoing SN connection lookup capabilities.  The OxenMQ object will not be able to establish
      * new connections (including reconnections) to service nodes by pubkey.
      */
-    explicit OxenMQ(
-            Logger logger = nullptr,
-            LogLevel level = LogLevel::warn)
-        : OxenMQ("", "", false, [](auto) { return ""s; /*no peer lookups*/ }, std::move(logger), level) {}
+    OxenMQ()
+        : OxenMQ("", "", false, [](auto) { return ""s; /*no peer lookups*/ }) {}
 
     /**
      * Destructor; instructs the proxy to quit.  The proxy tells all workers to quit, waits for them
@@ -864,12 +831,6 @@ public:
      * running) rejoins the proxy thread.
      */
     ~OxenMQ();
-
-    /// Sets the log level of the OxenMQ object.
-    void log_level(LogLevel level);
-
-    /// Gets the log level of the OxenMQ object.
-    LogLevel log_level() const;
 
     /**
      * Add a new command category.  This method may not be invoked after `start()` has been called.
@@ -1685,36 +1646,38 @@ oxenc::bt_dict build_send(ConnectionID to, std::string_view cmd, T&&... opts) {
 
 }
 
-inline void apply_connect_option(OxenMQ& omq, bool remote, oxenc::bt_dict& opts, const AuthLevel& auth) {
+extern void log_connect_option_warning(std::string_view warning);
+
+inline void apply_connect_option(bool remote, oxenc::bt_dict& opts, const AuthLevel& auth) {
     if (remote) opts["auth_level"] = static_cast<std::underlying_type_t<AuthLevel>>(auth);
-    else omq.log(LogLevel::warn, __FILE__, __LINE__, "AuthLevel ignored for connect_sn(...)");
+    else log_connect_option_warning("AuthLevel ignored for connect_sn(...)");
 }
-inline void apply_connect_option(OxenMQ&, bool, oxenc::bt_dict& opts, const connect_option::ephemeral_routing_id& er) {
+inline void apply_connect_option(bool, oxenc::bt_dict& opts, const connect_option::ephemeral_routing_id& er) {
     opts["ephemeral_rid"] = er.use_ephemeral_routing_id;
 }
-inline void apply_connect_option(OxenMQ& omq, bool remote, oxenc::bt_dict& opts, const connect_option::timeout& timeout) {
+inline void apply_connect_option(bool remote, oxenc::bt_dict& opts, const connect_option::timeout& timeout) {
     if (remote) opts["timeout"] = timeout.time.count();
-    else omq.log(LogLevel::warn, __FILE__, __LINE__, "connect_option::timeout ignored for connect_sn(...)");
+    else log_connect_option_warning("connect_option::timeout ignored for connect_sn(...)");
 }
-inline void apply_connect_option(OxenMQ& omq, bool remote, oxenc::bt_dict& opts, const connect_option::keep_alive& ka) {
+inline void apply_connect_option(bool remote, oxenc::bt_dict& opts, const connect_option::keep_alive& ka) {
     if (ka.time < 0ms) return;
     else if (!remote) opts["keep_alive"] = ka.time.count();
-    else omq.log(LogLevel::warn, __FILE__, __LINE__, "connect_option::keep_alive ignored for connect_remote(...)");
+    else log_connect_option_warning("connect_option::keep_alive ignored for connect_remote(...)");
 }
-inline void apply_connect_option(OxenMQ& omq, bool remote, oxenc::bt_dict& opts, const connect_option::hint& hint) {
+inline void apply_connect_option(bool remote, oxenc::bt_dict& opts, const connect_option::hint& hint) {
     if (hint.address.empty()) return;
     if (!remote) opts["hint"] = hint.address;
-    else omq.log(LogLevel::warn, __FILE__, __LINE__, "connect_option::hint ignored for connect_remote(...)");
+    else log_connect_option_warning("connect_option::hint ignored for connect_remote(...)");
 }
 [[deprecated("use oxenmq::connect_option::keep_alive or ::timeout instead")]]
-inline void apply_connect_option(OxenMQ&, bool remote, oxenc::bt_dict& opts, std::chrono::milliseconds time) {
+inline void apply_connect_option(bool remote, oxenc::bt_dict& opts, std::chrono::milliseconds time) {
     if (remote) opts["timeout"] = time.count();
     else opts["keep_alive"] = time.count();
 }
 [[deprecated("use oxenmq::connect_option::hint{hint} instead of a direct string argument")]]
-inline void apply_connect_option(OxenMQ& omq, bool remote, oxenc::bt_dict& opts, std::string_view hint) {
+inline void apply_connect_option(bool remote, oxenc::bt_dict& opts, std::string_view hint) {
     if (!remote) opts["hint"] = hint;
-    else omq.log(LogLevel::warn, __FILE__, __LINE__, "string argument ignored for connect_remote(...)");
+    else log_connect_option_warning("string argument ignored for connect_remote(...)");
 }
 
 } // namespace detail
@@ -1723,7 +1686,7 @@ template <typename... Option>
 ConnectionID OxenMQ::connect_remote(const address& remote, ConnectSuccess on_connect, ConnectFailure on_failure,
             const Option&... options) {
     oxenc::bt_dict opts;
-    (detail::apply_connect_option(*this, true, opts, options), ...);
+    (detail::apply_connect_option(true, opts, options), ...);
 
     auto id = next_conn_id++;
     opts["conn_id"] = id;
@@ -1744,7 +1707,7 @@ ConnectionID OxenMQ::connect_sn(std::string_view pubkey, const Option&... option
         {"ephemeral_rid", EPHEMERAL_ROUTING_ID},
     };
 
-    (detail::apply_connect_option(*this, false, opts, options), ...);
+    (detail::apply_connect_option(false, opts, options), ...);
 
     opts["pubkey"] = pubkey;
 
@@ -1761,7 +1724,7 @@ ConnectionID OxenMQ::connect_inproc(ConnectSuccess on_connect, ConnectFailure on
         {"auth_level", static_cast<std::underlying_type_t<AuthLevel>>(AuthLevel::admin)}
     };
 
-    (detail::apply_connect_option(*this, true, opts, options), ...);
+    (detail::apply_connect_option(true, opts, options), ...);
 
     auto id = next_conn_id++;
     opts["conn_id"] = id;
@@ -1822,27 +1785,6 @@ void Message::DeferredSend::request(std::string_view cmd, Callback&& callback, A
     oxenmq.request(conn, cmd, std::forward<Callback>(callback),
             send_option::optional{!conn.sn()}, std::forward<Args>(args)...);
 }
-
-// When log messages are invoked we strip out anything before this in the filename:
-constexpr std::string_view LOG_PREFIX{"oxenmq/", 7};
-inline std::string_view trim_log_filename(std::string_view local_file) {
-    auto chop = local_file.rfind(LOG_PREFIX);
-    if (chop != local_file.npos)
-        local_file.remove_prefix(chop);
-    return local_file;
-}
-
-template <typename... T>
-void OxenMQ::log(LogLevel lvl, const char* file, int line, const T&... stuff) {
-    if (log_level() < lvl || !logger)
-        return;
-
-    std::ostringstream os;
-    (os << ... << stuff);
-    logger(lvl, trim_log_filename(file).data(), line, os.str());
-}
-
-std::ostream &operator<<(std::ostream &os, LogLevel lvl);
 
 } // namespace oxenmq
 

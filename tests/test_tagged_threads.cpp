@@ -3,7 +3,7 @@
 #include <future>
 
 TEST_CASE("tagged thread start functions", "[tagged][start]") {
-    oxenmq::OxenMQ omq{get_logger(""), LogLevel::trace};
+    oxenmq::OxenMQ omq{};
 
     omq.set_general_threads(2);
     omq.set_batch_threads(2);
@@ -26,13 +26,13 @@ TEST_CASE("tagged thread start functions", "[tagged][start]") {
 }
 
 TEST_CASE("tagged threads quit-before-start", "[tagged][quit]") {
-    auto omq = std::make_unique<oxenmq::OxenMQ>(get_logger(""), LogLevel::trace);
+    auto omq = std::make_unique<oxenmq::OxenMQ>();
     auto t_abc = omq->add_tagged_thread("abc");
     REQUIRE_NOTHROW(omq.reset());
 }
 
 TEST_CASE("batch jobs to tagged threads", "[tagged][batch]") {
-    oxenmq::OxenMQ omq{get_logger(""), LogLevel::trace};
+    oxenmq::OxenMQ omq{};
 
     omq.set_general_threads(2);
     omq.set_batch_threads(2);
@@ -111,7 +111,7 @@ TEST_CASE("batch jobs to tagged threads", "[tagged][batch]") {
 }
 
 TEST_CASE("batch job completion on tagged threads", "[tagged][batch-completion]") {
-    oxenmq::OxenMQ omq{get_logger(""), LogLevel::trace};
+    oxenmq::OxenMQ omq{};
 
     omq.set_general_threads(4);
     omq.set_batch_threads(4);
@@ -140,7 +140,7 @@ TEST_CASE("batch job completion on tagged threads", "[tagged][batch-completion]"
 
 
 TEST_CASE("timer job completion on tagged threads", "[tagged][timer]") {
-    oxenmq::OxenMQ omq{get_logger(""), LogLevel::trace};
+    oxenmq::OxenMQ omq{};
 
     omq.set_general_threads(4);
     omq.set_batch_threads(4);
@@ -169,11 +169,11 @@ TEST_CASE("destruction during start with tagged workers", "[tagged][destruction]
 
     // Make a conflicting listener:
     std::string listen = random_localhost();
-    oxenmq::OxenMQ omq0{"", "", false, [](auto) { return ""; }, get_logger("S» "), LogLevel::trace};
+    oxenmq::OxenMQ omq0{"", "", false, [](auto) { return ""; }};
     omq0.listen_curve(listen);
     omq0.start();
 
-    oxenmq::OxenMQ omq{"", "", false, [](auto) { return ""; }, get_logger("S» "), LogLevel::trace};
+    oxenmq::OxenMQ omq{"", "", false, [](auto) { return ""; }};
     omq.listen_curve(listen);
 
     SECTION("no tagged thread") {}
