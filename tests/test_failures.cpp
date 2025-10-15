@@ -9,9 +9,7 @@ TEST_CASE("failure responses - UNKNOWNCOMMAND", "[failure][UNKNOWNCOMMAND]") {
     OxenMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
-        [](auto) { return ""; },
-        get_logger("S» "),
-        LogLevel::trace
+        [](auto) { return ""; }
     };
     server.listen_plain(listen);
     server.start();
@@ -50,9 +48,7 @@ TEST_CASE("failure responses - NO_REPLY_TAG", "[failure][NO_REPLY_TAG]") {
     OxenMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
-        [](auto) { return ""; },
-        get_logger("S» "),
-        LogLevel::trace
+        [](auto) { return ""; }
     };
     server.listen_plain(listen);
     server.add_category("x", AuthLevel::none)
@@ -111,9 +107,7 @@ TEST_CASE("failure responses - FORBIDDEN", "[failure][FORBIDDEN]") {
     OxenMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
-        [](auto) { return ""; },
-        get_logger("S» "),
-        LogLevel::trace
+        [](auto) { return ""; }
     };
     server.listen_plain(listen, [](auto, auto, auto) {
             static int count = 0;
@@ -194,9 +188,7 @@ TEST_CASE("failure responses - NOT_A_SERVICE_NODE", "[failure][NOT_A_SERVICE_NOD
     OxenMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
-        [](auto) { return ""; },
-        get_logger("S» "),
-        LogLevel::trace
+        [](auto) { return ""; }
     };
     server.listen_plain(listen, [](auto, auto, auto) {
             static int count = 0;
@@ -261,9 +253,7 @@ TEST_CASE("failure responses - FORBIDDEN_SN", "[failure][FORBIDDEN_SN]") {
     OxenMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
-        [](auto) { return ""; },
-        get_logger("S» "),
-        LogLevel::trace
+        [](auto) { return ""; }
     };
     server.listen_plain(listen, [](auto, auto, auto) {
             static int count = 0;

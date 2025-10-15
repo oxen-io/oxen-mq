@@ -1,7 +1,13 @@
 #pragma once
 #include "oxenmq/oxenmq.h"
-#include <catch2/catch.hpp>
+#include <catch2/catch_message.hpp>
+#include <catch2/catch_test_case_info.hpp>
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers.hpp>
+#include <catch2/matchers/catch_matchers_exception.hpp>
 #include <chrono>
+#include <oxen/log.hpp>
+#include "oxenmq/fmt.h"
 
 using namespace oxenmq;
 
@@ -11,8 +17,10 @@ using namespace oxenmq;
 constexpr int TIME_DILATION =
 #ifdef __APPLE__
     5;
-#else
+#elif defined(__x86_64__)
     1;
+#else
+    2;
 #endif
 
 static auto startup = std::chrono::steady_clock::now();
@@ -57,25 +65,6 @@ inline void wait_for_conn(std::atomic<bool>& c) {
 /// Waits enough time for us to receive a reply from a localhost remote.
 inline void reply_sleep() {
     std::this_thread::sleep_for(10ms * TIME_DILATION);
-}
-
-inline OxenMQ::Logger get_logger(std::string prefix = "") {
-    std::string me = "tests/common.h";
-    std::string strip = __FILE__;
-    if (strip.substr(strip.size() - me.size()) == me)
-        strip.resize(strip.size() - me.size());
-    else
-        strip.clear();
-
-    return [prefix,strip](LogLevel lvl, std::string file, int line, std::string msg) {
-        if (!strip.empty() && file.substr(0, strip.size()) == strip)
-            file = file.substr(strip.size());
-
-        auto lock = catch_lock();
-        UNSCOPED_INFO(prefix << "[" << file << ":" << line << "/"
-                "+" << std::chrono::duration<double>(std::chrono::steady_clock::now() - startup).count() << "s]: "
-                << lvl << ": " << msg);
-    };
 }
 
 namespace oxenmq {

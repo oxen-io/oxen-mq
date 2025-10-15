@@ -1,20 +1,15 @@
 #pragma once
+#include <oxenc/hex.h>
+
 #include <limits>
+#include <oxen/log.hpp>
+
+#include "fmt.h"
 #include "oxenmq.h"
 
-// Inside some method:
-//     OMQ_LOG(warn, "bad ", 42, " stuff");
-//
-#define OMQ_LOG(level, ...) log(LogLevel::level, __FILE__, __LINE__, __VA_ARGS__)
-
-#ifndef NDEBUG
-// Same as OMQ_LOG(trace, ...) when not doing a release build; nothing under a release build.
-#  define OMQ_TRACE(...) log(LogLevel::trace, __FILE__, __LINE__, __VA_ARGS__)
-#else
-#  define OMQ_TRACE(...)
-#endif
-
 namespace oxenmq {
+
+namespace log = oxen::log;
 
 constexpr char SN_ADDR_COMMAND[] = "inproc://sn-command";
 constexpr char SN_ADDR_WORKERS[] = "inproc://sn-workers";
@@ -36,7 +31,7 @@ extern "C" inline void message_buffer_destroy(void*, void* hint) {
 
 /// Creates a message without needing to reallocate the provided string data
 inline zmq::message_t create_message(std::string&& data) {
-    auto *buffer = new std::string(std::move(data));
+    auto* buffer = new std::string(std::move(data));
     return zmq::message_t{&(*buffer)[0], buffer->size(), message_buffer_destroy, buffer};
 };
 
@@ -48,8 +43,11 @@ inline zmq::message_t create_message(std::string_view data) {
 template <typename It>
 bool send_message_parts(zmq::socket_t& sock, It begin, It end) {
     while (begin != end) {
-        zmq::message_t &msg = *begin++;
-        if (!sock.send(msg, begin == end ? zmq::send_flags::dontwait : zmq::send_flags::dontwait | zmq::send_flags::sndmore))
+        zmq::message_t& msg = *begin++;
+        if (!sock.send(
+                    msg,
+                    begin == end ? zmq::send_flags::dontwait
+                                 : zmq::send_flags::dontwait | zmq::send_flags::sndmore))
             return false;
     }
     return true;
@@ -64,14 +62,16 @@ bool send_message_parts(zmq::socket_t& sock, Container&& c) {
 /// the msg frame will be an empty message; if `data` is empty then the data frame will be omitted.
 /// `flags` is passed through to zmq: typically given `zmq::send_flags::dontwait` to throw rather
 /// than block if a message can't be queued.
-inline bool send_routed_message(zmq::socket_t& socket, std::string route, std::string msg = {}, std::string data = {}) {
+inline bool send_routed_message(
+        zmq::socket_t& socket, std::string route, std::string msg = {}, std::string data = {}) {
     assert(!route.empty());
     std::array<zmq::message_t, 3> msgs{{create_message(std::move(route))}};
     if (!msg.empty())
         msgs[1] = create_message(std::move(msg));
     if (!data.empty())
         msgs[2] = create_message(std::move(data));
-    return send_message_parts(socket, msgs.begin(), data.empty() ? std::prev(msgs.end()) : msgs.end());
+    return send_message_parts(
+            socket, msgs.begin(), data.empty() ? std::prev(msgs.end()) : msgs.end());
 }
 
 // Sends some stuff to a socket directly.  If dontwait is true then we throw instead of blocking if
@@ -80,12 +80,16 @@ inline bool send_direct_message(zmq::socket_t& socket, std::string msg, std::str
     std::array<zmq::message_t, 2> msgs{{create_message(std::move(msg))}};
     if (!data.empty())
         msgs[1] = create_message(std::move(data));
-    return send_message_parts(socket, msgs.begin(), data.empty() ? std::prev(msgs.end()) : msgs.end());
+    return send_message_parts(
+            socket, msgs.begin(), data.empty() ? std::prev(msgs.end()) : msgs.end());
 }
 
 // Receive all the parts of a single message from the given socket.  Returns true if a message was
 // received, false if called with flags=zmq::recv_flags::dontwait and no message was available.
-inline bool recv_message_parts(zmq::socket_t& sock, std::vector<zmq::message_t>& parts, const zmq::recv_flags flags = zmq::recv_flags::none) {
+inline bool recv_message_parts(
+        zmq::socket_t& sock,
+        std::vector<zmq::message_t>& parts,
+        const zmq::recv_flags flags = zmq::recv_flags::none) {
     do {
         zmq::message_t msg;
         if (!sock.recv(msg, flags))
@@ -100,8 +104,11 @@ inline bool recv_message_parts(zmq::socket_t& sock, std::vector<zmq::message_t>&
 // not bounds check except in debug builds).  Returns the number of message parts received, or 0 on
 // read error.
 template <size_t N>
-inline size_t recv_message_parts(zmq::socket_t& sock, std::array<zmq::message_t, N>& parts, const zmq::recv_flags flags = zmq::recv_flags::none) {
-    for (size_t count = 0; ; count++) {
+inline size_t recv_message_parts(
+        zmq::socket_t& sock,
+        std::array<zmq::message_t, N>& parts,
+        const zmq::recv_flags flags = zmq::recv_flags::none) {
+    for (size_t count = 0;; count++) {
         assert(count < N);
         if (!sock.recv(parts[count], flags))
             return 0;
@@ -110,10 +117,18 @@ inline size_t recv_message_parts(zmq::socket_t& sock, std::array<zmq::message_t,
     }
 }
 
-inline const char* peer_address(zmq::message_t& msg) {
-    try { return msg.gets("Peer-Address"); } catch (...) {}
+inline const char* get_peer_address(zmq::message_t& msg) {
+    try {
+        return msg.gets("Peer-Address");
+    } catch (...) {
+    }
     return "(unknown)";
 }
+
+// For logging: extracts the address on demand
+struct peer_address {
+    zmq::message_t& msg;
+};
 
 // Returns a string view of the given message data.  It's the caller's responsibility to keep the
 // referenced message alive.  If you want a std::string instead just call `m.to_string()`
@@ -122,7 +137,8 @@ inline std::string_view view(const zmq::message_t& m) {
 }
 
 // Extracts and builds the "send" part of a message for proxy_send/proxy_reply
-inline std::list<zmq::message_t> build_send_parts(oxenc::bt_list_consumer send, std::string_view route) {
+inline std::list<zmq::message_t> build_send_parts(
+        oxenc::bt_list_consumer send, std::string_view route) {
     std::list<zmq::message_t> parts;
     if (!route.empty())
         parts.push_back(create_message(route));
@@ -132,13 +148,33 @@ inline std::list<zmq::message_t> build_send_parts(oxenc::bt_list_consumer send, 
 }
 
 /// Sends a control message to a specific destination by prefixing the worker name (or identity)
-/// then appending the command and optional data (if non-empty).  (This is needed when sending the control message
-/// to a router socket, i.e. inside the proxy thread).
-inline void route_control(zmq::socket_t& sock, std::string_view identity, std::string_view cmd, const std::string& data = {}) {
+/// then appending the command and optional data (if non-empty).  (This is needed when sending the
+/// control message to a router socket, i.e. inside the proxy thread).
+inline void route_control(
+        zmq::socket_t& sock,
+        std::string_view identity,
+        std::string_view cmd,
+        const std::string& data = {}) {
     sock.send(create_message(identity), zmq::send_flags::sndmore);
     detail::send_control(sock, cmd, data);
 }
 
+struct log_hex {
+    std::string_view orig;
+};
 
+}  // namespace oxenmq
 
-}
+template <>
+struct fmt::formatter<oxenmq::log_hex> : formatter<std::string> {
+    auto format(const oxenmq::log_hex& l, format_context& ctx) const {
+        return formatter<std::string>::format(oxenc::to_hex(l.orig), ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<oxenmq::peer_address> : formatter<const char*> {
+    auto format(oxenmq::peer_address& pa, format_context& ctx) const {
+        return formatter<const char*>::format(oxenmq::get_peer_address(pa.msg), ctx);
+    }
+};
