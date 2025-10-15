@@ -18,7 +18,7 @@ add_executable(tests
 
 find_package(Threads)
 
-target_link_libraries(tests Catch2::Catch2 oxenmq Threads::Threads)
+target_link_libraries(tests Catch2::Catch2 oxenmq Threads::Threads oxen::logging)
 
 set_target_properties(tests PROPERTIES
     CXX_STANDARD 20
