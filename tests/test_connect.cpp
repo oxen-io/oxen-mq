@@ -1,7 +1,5 @@
 #include "common.h"
-extern "C" {
 #include <sodium.h>
-}
 
 
 TEST_CASE("connections with curve authentication", "[curve][connect]") {
@@ -9,9 +7,7 @@ TEST_CASE("connections with curve authentication", "[curve][connect]") {
     OxenMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
-        [](auto) { return ""; },
-        get_logger("S» "),
-        LogLevel::trace
+        [](auto) { return ""; }
     };
 
     server.listen_curve(listen);
@@ -19,7 +15,7 @@ TEST_CASE("connections with curve authentication", "[curve][connect]") {
     server.add_request_command("public", "hello", [&](Message& m) { m.send_reply("hi"); });
     server.start();
 
-    OxenMQ client{get_logger("C» "), LogLevel::trace};
+    OxenMQ client{};
 
     client.start();
 
@@ -57,9 +53,7 @@ TEST_CASE("self-connection SN optimization", "[connect][self]") {
     OxenMQ sn{
         pubkey, privkey,
         true,
-        [&](auto pk) { if (pk == pubkey) return listen_addr; else return ""s; },
-        get_logger("S» "),
-        LogLevel::trace
+        [&](auto pk) { if (pk == pubkey) return listen_addr; else return ""s; }
     };
 
     sn.listen_curve(listen_addr, [&](auto ip, auto pk, auto sn) {
@@ -91,7 +85,7 @@ TEST_CASE("self-connection SN optimization", "[connect][self]") {
 
 TEST_CASE("plain-text connections", "[plaintext][connect]") {
     std::string listen = random_localhost();
-    OxenMQ server{get_logger("S» "), LogLevel::trace};
+    OxenMQ server{};
 
     server.add_category("public", Access{AuthLevel::none});
     server.add_request_command("public", "hello", [&](Message& m) { m.send_reply("hi"); });
@@ -100,7 +94,7 @@ TEST_CASE("plain-text connections", "[plaintext][connect]") {
 
     server.start();
 
-    OxenMQ client{get_logger("C» "), LogLevel::trace};
+    OxenMQ client{};
 
     client.start();
 
@@ -129,7 +123,7 @@ TEST_CASE("plain-text connections", "[plaintext][connect]") {
 }
 
 TEST_CASE("post-start listening", "[connect][listen]") {
-    OxenMQ server{get_logger("S» "), LogLevel::trace};
+    OxenMQ server{};
     server.add_category("x", AuthLevel::none)
         .add_request_command("y", [&](Message& m) { m.send_reply("hi", m.data[0]); });
     server.start();
@@ -155,7 +149,7 @@ TEST_CASE("post-start listening", "[connect][listen]") {
     }
 
 
-    OxenMQ client{get_logger("C1» "), LogLevel::trace};
+    OxenMQ client{};
     client.start();
     std::atomic<int> conns = 0;
     auto c1 = client.connect_remote(address{listen_curve, server.get_pubkey()},
@@ -188,7 +182,7 @@ TEST_CASE("post-start listening", "[connect][listen]") {
 
 TEST_CASE("unique connection IDs", "[connect][id]") {
     std::string listen = random_localhost();
-    OxenMQ server{get_logger("S» "), LogLevel::trace};
+    OxenMQ server{};
 
     ConnectionID first, second;
     server.add_category("x", Access{AuthLevel::none})
@@ -200,8 +194,8 @@ TEST_CASE("unique connection IDs", "[connect][id]") {
 
     server.start();
 
-    OxenMQ client1{get_logger("C1» "), LogLevel::trace};
-    OxenMQ client2{get_logger("C2» "), LogLevel::trace};
+    OxenMQ client1{};
+    OxenMQ client2{};
     client1.start();
     client2.start();
 
@@ -259,9 +253,7 @@ TEST_CASE("SN disconnections", "[connect][disconnect]") {
     for (int i = 0; i < pubkey.size(); i++) {
         omq.push_back(std::make_unique<OxenMQ>(
             pubkey[i], privkey[i], true,
-            [conn](auto pk) { auto it = conn.find((std::string) pk); if (it != conn.end()) return it->second; return ""s; },
-            get_logger("S" + std::to_string(i) + "» "),
-            LogLevel::trace
+            [conn](auto pk) { auto it = conn.find((std::string) pk); if (it != conn.end()) return it->second; return ""s; }
         ));
         auto& server = *omq.back();
 
@@ -298,9 +290,7 @@ TEST_CASE("SN auth checks", "[sandwich][auth]") {
     OxenMQ server{
         pubkey, privkey,
         true, // service node
-        [](auto) { return ""; },
-        get_logger("A» "),
-        LogLevel::trace
+        [](auto) { return ""; }
     };
 
     std::atomic<bool> incoming_is_sn{false};
@@ -324,8 +314,7 @@ TEST_CASE("SN auth checks", "[sandwich][auth]") {
 
     OxenMQ client{
         "", "", false,
-        [&](auto remote_pk) { if (remote_pk == pubkey) return listen; return ""s; },
-        get_logger("B» "), LogLevel::trace};
+        [&](auto remote_pk) { if (remote_pk == pubkey) return listen; return ""s; }};
     client.start();
 
     std::atomic<bool> got{false};
@@ -412,9 +401,7 @@ TEST_CASE("SN single worker test", "[connect][worker]") {
     OxenMQ server{
         "", "",
         false, // service node
-        [](auto) { return ""; },
-        get_logger("S» "),
-        LogLevel::trace
+        [](auto) { return ""; }
     };
     server.set_general_threads(1);
     server.set_batch_threads(0);
@@ -425,7 +412,7 @@ TEST_CASE("SN single worker test", "[connect][worker]") {
         ;
     server.start();
 
-    OxenMQ client{get_logger("B» "), LogLevel::trace};
+    OxenMQ client{};
     client.start();
     auto conn = client.connect_remote(address{listen}, [](auto) {}, [](auto, auto) {});
 
@@ -465,9 +452,7 @@ TEST_CASE("SN backchatter", "[connect][sn]") {
     for (int i = 0; i < pubkey.size(); i++) {
         omq.push_back(std::make_unique<OxenMQ>(
             pubkey[i], privkey[i], true,
-            [conn](auto pk) { auto it = conn.find((std::string) pk); if (it != conn.end()) return it->second; return ""s; },
-            get_logger("S" + std::to_string(i) + "» "),
-            LogLevel::trace
+            [conn](auto pk) { auto it = conn.find((std::string) pk); if (it != conn.end()) return it->second; return ""s; }
         ));
         auto& server = *omq.back();
 
@@ -488,7 +473,7 @@ TEST_CASE("SN backchatter", "[connect][sn]") {
         .add_command("b", [&](Message& m) {
             {
                 auto lock = catch_lock();
-                UNSCOPED_INFO("b.b from conn " << m.conn);
+                UNSCOPED_INFO("b.b from conn " << fmt::to_string(m.conn));
             }
             m.send_back("a.z", m.data[0]);
         });
@@ -506,7 +491,7 @@ TEST_CASE("SN backchatter", "[connect][sn]") {
 
 TEST_CASE("inproc connections", "[connect][inproc]") {
     std::string inproc_name = "foo";
-    OxenMQ omq{get_logger("OMQ» "), LogLevel::trace};
+    OxenMQ omq{};
 
     omq.add_category("public", Access{AuthLevel::none});
     omq.add_request_command("public", "hello", [&](Message& m) { m.send_reply("hi"); });
@@ -541,14 +526,14 @@ TEST_CASE("inproc connections", "[connect][inproc]") {
 }
 
 TEST_CASE("no explicit inproc listening", "[connect][inproc]") {
-    OxenMQ omq{get_logger("OMQ» "), LogLevel::trace};
+    OxenMQ omq{};
     REQUIRE_THROWS_AS(omq.listen_plain("inproc://foo"), std::logic_error);
     REQUIRE_THROWS_AS(omq.listen_curve("inproc://foo"), std::logic_error);
 }
 
 TEST_CASE("inproc connection permissions", "[connect][inproc]") {
     std::string listen = random_localhost();
-    OxenMQ omq{get_logger("OMQ» "), LogLevel::trace};
+    OxenMQ omq{};
 
     omq.add_category("public", Access{AuthLevel::none});
     omq.add_request_command("public", "hello", [&](Message& m) { m.send_reply("hi"); });
@@ -615,9 +600,7 @@ TEST_CASE("coincidental SN connect_remote permission", "[connect][remote][sn]") 
     OxenMQ omq1{
         "", "", // generate ephemeral keys
         false, // not a service node
-        [](auto) { return ""; },
-        get_logger("S1» "),
-        LogLevel::trace
+        [](auto) { return ""; }
     };
     std::string listen = random_localhost();
     omq1.listen_curve(listen);
@@ -629,9 +612,7 @@ TEST_CASE("coincidental SN connect_remote permission", "[connect][remote][sn]") 
     OxenMQ omq2{
         "", "", // generate ephemeral keys
         false, // not a service node
-        [](auto) { return ""; },
-        get_logger("S2» "),
-        LogLevel::trace
+        [](auto) { return ""; }
     };
     std::promise<void> prom;
     omq2.add_category("sn", Access{AuthLevel::none, true})
@@ -666,9 +647,7 @@ TEST_CASE("connect_remote peer cleanup", "[connect][remote][peers]") {
             "",
             "",     // generate ephemeral keys
             false,  // not a service node
-            [](auto) { return ""; },
-            get_logger("C» "),
-            LogLevel::trace};
+            [](auto) { return ""; }};
     omq.start();
 
     {
