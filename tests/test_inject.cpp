@@ -7,9 +7,7 @@ TEST_CASE("injected external commands", "[injected]") {
     OxenMQ server{
         "", "", // generate ephemeral keys
         false, // not a service node
-        [](auto) { return ""; },
-        get_logger("S» "),
-        LogLevel::trace
+        [](auto) { return ""; }
     };
     server.set_general_threads(1);
     server.listen_curve(listen);
@@ -24,7 +22,7 @@ TEST_CASE("injected external commands", "[injected]") {
 
     server.start();
 
-    OxenMQ client{get_logger("C» "), LogLevel::trace};
+    OxenMQ client{};
     client.start();
 
     std::atomic<bool> got{false};
