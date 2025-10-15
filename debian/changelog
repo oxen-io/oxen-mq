@@ -1,3 +1,9 @@
+oxenmq (1.2.23-1~ubuntu2510) questing; urgency=medium
+
+  * questing deb
+
+ -- Jason Rhinelander <jason@session.foundation>  Wed, 15 Oct 2025 20:52:29 -0300
+
 oxenmq (1.2.23-1~ubuntu2504) plucky; urgency=medium
 
   [ Jason Rhinelander ]
