@@ -26,7 +26,7 @@ local generic_build(build_type, cmake_extra, werror=false, tests=true)
         ]
         + (if tests then [
              'cd build',
-             './tests/tests --use-colour yes',
+             './tests/tests --colour-mode ansi',
              'cd ..',
            ] else []);
 
