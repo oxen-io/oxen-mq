@@ -7,7 +7,7 @@ Subject: Fully version library
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 1963213..64f5873 100644
+index 65ccf0d..9d87500 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -25,7 +25,7 @@ include(cmake/libatomic.cmake)
