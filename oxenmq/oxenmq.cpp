@@ -3,7 +3,6 @@
 #include "zmq.hpp"
 #include <mutex>
 #include <random>
-#include <ostream>
 #include <thread>
 #include <future>
 #include <variant>
@@ -19,6 +18,7 @@ namespace oxenmq {
 
 namespace {
 
+auto cat = log::Cat("oxenmq");
 
 /// Creates a message by bt-serializing the given value (string, number, list, or dict)
 template <typename T>
@@ -75,19 +75,14 @@ std::pair<std::string, AuthLevel> extract_metadata(zmq::message_t& msg) {
     return result;
 }
 
+void log_connect_option_warning(std::string_view warning) {
+    log::warning(cat, "{}", warning);
+}
 
 } // namespace detail
 
 void OxenMQ::set_zmq_context_option(zmq::ctxopt option, int value) {
     context.set(option, value);
-}
-
-void OxenMQ::log_level(LogLevel level) {
-    log_lvl.store(level, std::memory_order_relaxed);
-}
-
-LogLevel OxenMQ::log_level() const {
-    return log_lvl.load(std::memory_order_relaxed);
 }
 
 
@@ -189,19 +184,15 @@ zmq::socket_t& OxenMQ::get_control_socket() {
     return *last_socket;
 }
 
-
 OxenMQ::OxenMQ(
-        std::string pubkey_,
-        std::string privkey_,
-        bool service_node,
-        SNRemoteAddress lookup,
-        Logger logger,
-        LogLevel level)
-    : object_id{next_id++}, pubkey{std::move(pubkey_)}, privkey{std::move(privkey_)}, local_service_node{service_node},
-        sn_lookup{std::move(lookup)}, log_lvl{level}, logger{std::move(logger)}
-{
+        std::string pubkey_, std::string privkey_, bool service_node, SNRemoteAddress lookup) :
+        object_id{next_id++},
+        pubkey{std::move(pubkey_)},
+        privkey{std::move(privkey_)},
+        local_service_node{service_node},
+        sn_lookup{std::move(lookup)} {
 
-    OMQ_TRACE("Constructing OxenMQ, id=", object_id, ", this=", this);
+    log::trace(cat, "Constructing OxenMQ, id={}, this @ {}", object_id, (void*)this);
 
     if (sodium_init() == -1)
         throw std::runtime_error{"libsodium initialization failed"};
@@ -211,7 +202,7 @@ OxenMQ::OxenMQ(
     } else if (pubkey.empty()) {
         if (service_node)
             throw std::invalid_argument("Cannot construct a service node mode OxenMQ without a keypair");
-        OMQ_LOG(debug, "generating x25519 keypair for remote-only OxenMQ instance");
+        log::debug(cat, "generating x25519 keypair for remote-only OxenMQ instance");
         pubkey.resize(crypto_box_PUBLICKEYBYTES);
         privkey.resize(crypto_box_SECRETKEYBYTES);
         crypto_box_keypair(reinterpret_cast<unsigned char*>(&pubkey[0]), reinterpret_cast<unsigned char*>(&privkey[0]));
@@ -234,11 +225,11 @@ void OxenMQ::start() {
     if (proxy_thread.joinable())
         throw std::logic_error("Cannot call start() multiple times!");
 
-    OMQ_LOG(info, "Initializing OxenMQ ", bind.empty() ? "remote-only" : "listener", " with pubkey ", oxenc::to_hex(pubkey));
+    log::info(cat, "Initializing OxenMQ {} with pubkey {}", bind.empty() ? "remote-only" : "listener", log_hex(pubkey));
 
 #ifdef OXENMQ_USE_EPOLL
     using_epoll = USE_EPOLL;
-    OMQ_LOG(debug, "epoll ", using_epoll ? "enabled" : "disabled");
+    log::debug(cat, "epoll {}", using_epoll ? "enabled" : "disabled");
 #else
     using_epoll = false;
 #endif
@@ -254,13 +245,13 @@ void OxenMQ::start() {
         max_workers += cat.second.reserved_threads;
     }
 
-    if (log_level() >= LogLevel::debug) {
-        OMQ_LOG(debug, "Reserving space for ", max_workers, " max workers = ", general_workers, " general plus reservations for:");
-        for (const auto& cat : categories)
-            OMQ_LOG(debug, "    - ", cat.first, ": ", cat.second.reserved_threads);
-        OMQ_LOG(debug, "    - (batch jobs): ", batch_jobs_reserved);
-        OMQ_LOG(debug, "    - (reply jobs): ", reply_jobs_reserved);
-        OMQ_LOG(debug, "Plus ", tagged_workers.size(), " tagged worker threads");
+    if (log::get_level(cat) <= log::Level::debug) {
+        log::debug(cat, "Reserving space for {} max workers = {} general plus reservations for:", max_workers, general_workers);
+        for (const auto& c : categories)
+            log::debug(cat, "    - {}: {}", c.first, c.second.reserved_threads);
+        log::debug(cat, "    - (batch jobs): {}", batch_jobs_reserved);
+        log::debug(cat, "    - (reply jobs): {}", reply_jobs_reserved);
+        log::debug(cat, "Plus {} tagged worker threads", tagged_workers.size());
     }
 
     if (MAX_SOCKETS != 0) {
@@ -284,7 +275,7 @@ void OxenMQ::start() {
     auto proxy_startup = startup_prom.get_future();
     proxy_thread = std::thread{&OxenMQ::proxy_loop, this, std::move(startup_prom)};
 
-    OMQ_LOG(debug, "Waiting for proxy thread to initialize...");
+    log::debug(cat, "Waiting for proxy thread to initialize...");
     try {
         proxy_startup.get();
     } catch (...) {
@@ -294,10 +285,10 @@ void OxenMQ::start() {
         throw; // Rethrow exceptions from the proxy startup back to the start() caller (e.g. failure to bind)
     }
 
-    OMQ_LOG(debug, "Waiting for proxy thread to get ready...");
+    log::debug(cat, "Waiting for proxy thread to get ready...");
     auto &control = get_control_socket();
     detail::send_control(control, "START");
-    OMQ_TRACE("Sent START command");
+    log::trace(cat, "Sent START command");
 
     zmq::message_t ready_msg;
     std::vector<zmq::message_t> parts;
@@ -306,7 +297,7 @@ void OxenMQ::start() {
 
     if (!(parts.size() == 1 && view(parts.front()) == "READY"))
         throw std::runtime_error("Invalid startup message from proxy thread (didn't get expected READY message)");
-    OMQ_LOG(debug, "Proxy thread is ready");
+    log::debug(cat, "Proxy thread is ready");
 }
 
 void OxenMQ::listen_curve(std::string bind_addr, AllowFunc allow_connection, std::function<void(bool)> on_bind) {
@@ -334,7 +325,7 @@ void OxenMQ::listen_plain(std::string bind_addr, AllowFunc allow_connection, std
 
 std::pair<OxenMQ::category*, const std::pair<OxenMQ::CommandCallback, bool>*> OxenMQ::get_command(std::string& command) {
     if (command.size() > MAX_CATEGORY_LENGTH + 1 + MAX_COMMAND_LENGTH) {
-        OMQ_LOG(warn, "Invalid command '", command, "': command too long");
+        log::warning(cat, "Invalid command '{}': command too long", command);
         return {};
     }
 
@@ -346,7 +337,7 @@ std::pair<OxenMQ::category*, const std::pair<OxenMQ::CommandCallback, bool>*> Ox
 
     auto dot = command.find('.');
     if (dot == 0 || dot == std::string::npos) {
-        OMQ_LOG(warn, "Invalid command '", command, "': expected <category>.<command>");
+        log::warning(cat, "Invalid command '{}': expected <category>.<command>", command);
         return {};
     }
     std::string catname = command.substr(0, dot);
@@ -354,14 +345,14 @@ std::pair<OxenMQ::category*, const std::pair<OxenMQ::CommandCallback, bool>*> Ox
 
     auto catit = categories.find(catname);
     if (catit == categories.end()) {
-        OMQ_LOG(warn, "Invalid command category '", catname, "'");
+        log::warning(cat, "Invalid command category '{}'", catname);
         return {};
     }
 
     const auto& category = catit->second;
     auto callback_it = category.commands.find(cmd);
     if (callback_it == category.commands.end()) {
-        OMQ_LOG(warn, "Invalid command '", command, "'");
+        log::warning(cat, "Invalid command '{}'", command);
         return {};
     }
 
@@ -454,21 +445,10 @@ OxenMQ::~OxenMQ() {
         return;
     }
 
-    OMQ_LOG(info, "OxenMQ shutting down proxy thread");
+    log::info(cat, "OxenMQ shutting down proxy thread");
     detail::send_control(get_control_socket(), "QUIT");
     proxy_thread.join();
-    OMQ_LOG(info, "OxenMQ proxy thread has stopped");
-}
-
-std::ostream &operator<<(std::ostream &os, LogLevel lvl) {
-    os <<  (lvl == LogLevel::trace ? "trace" :
-            lvl == LogLevel::debug ? "debug" :
-            lvl == LogLevel::info  ? "info"  :
-            lvl == LogLevel::warn  ? "warn"  :
-            lvl == LogLevel::error ? "ERROR" :
-            lvl == LogLevel::fatal ? "FATAL" :
-            "unknown");
-    return os;
+    log::info(cat, "OxenMQ proxy thread has stopped");
 }
 
 std::string make_random_string(size_t size) {

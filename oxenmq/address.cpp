@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <utility>
 #include <stdexcept>
-#include <ostream>
 #include <oxenc/hex.h>
 #include <oxenc/base32z.h>
 #include <oxenc/base64.h>
@@ -345,7 +344,5 @@ address address::ipc_curve(std::string path, std::string pubkey) {
     a.pubkey = std::move(pubkey);
     return a;
 }
-
-std::ostream& operator<<(std::ostream& o, const address& a) { return o << a.full_address(); }
 
 }
