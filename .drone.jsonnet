@@ -26,7 +26,7 @@ local generic_build(build_type, cmake_extra, werror=false, tests=true)
         ]
         + (if tests then [
              'cd build',
-             './tests/tests --use-colour yes',
+             './tests/tests --colour-mode ansi',
              'cd ..',
            ] else []);
 
@@ -75,7 +75,7 @@ local clang(version) = debian_pipeline(
   'Debian sid/clang-' + version + ' (amd64)',
   docker_base + 'debian-sid-clang',
   distro='sid',
-  deps=['clang-' + version] + default_deps_nocxx,
+  deps=['clang-' + version, 'clang-tools-' + version] + default_deps_nocxx,
   cmake_extra='-DCMAKE_C_COMPILER=clang-' + version + ' -DCMAKE_CXX_COMPILER=clang++-' + version + ' '
 );
 
@@ -83,7 +83,7 @@ local full_llvm(version) = debian_pipeline(
   'Debian sid/llvm-' + version + ' (amd64)',
   docker_base + 'debian-sid-clang',
   distro='sid',
-  deps=['clang-' + version, 'lld-' + version, 'libc++-' + version + '-dev', 'libc++abi-' + version + '-dev']
+  deps=['clang-' + version, 'clang-tools-' + version, 'lld-' + version, 'libc++-' + version + '-dev', 'libc++abi-' + version + '-dev']
        + default_deps_nocxx,
   cmake_extra='-DCMAKE_C_COMPILER=clang-' + version +
               ' -DCMAKE_CXX_COMPILER=clang++-' + version +

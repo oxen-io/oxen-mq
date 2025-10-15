@@ -25,8 +25,10 @@ extern "C" {
 
 namespace oxenmq {
 
+static auto cat = log::Cat("oxenmq");
+
 void OxenMQ::proxy_quit() {
-    OMQ_LOG(debug, "Received quit command, shutting down proxy thread");
+    log::debug(cat, "Received quit command, shutting down proxy thread");
 
     assert(std::none_of(workers.begin(), workers.end(), [](auto& worker) { return worker.worker_thread.joinable(); }));
     assert(std::none_of(tagged_workers.begin(), tagged_workers.end(), [](auto& worker) { return std::get<0>(worker).worker_thread.joinable(); }));
@@ -44,7 +46,7 @@ void OxenMQ::proxy_quit() {
     connections.clear();
     peers.clear();
 
-    OMQ_LOG(debug, "Proxy thread teardown complete");
+    log::debug(cat, "Proxy thread teardown complete");
 }
 
 void OxenMQ::proxy_send(oxenc::bt_dict_consumer data) {
@@ -126,10 +128,9 @@ void OxenMQ::proxy_send(oxenc::bt_dict_consumer data) {
             if (!sock_route.first) {
                 nowarn = true;
                 if (optional)
-                    OMQ_LOG(debug, "Not sending: send is optional and no connection to ",
-                            oxenc::to_hex(conn_id.pk), " is currently established");
+                    log::debug(cat, "Not sending: send is optional and no connection to {} is currently established", log_hex(conn_id.pk));
                 else
-                    OMQ_LOG(error, "Unable to send to ", oxenc::to_hex(conn_id.pk), ": no valid connection address found");
+                    log::error(cat, "Unable to send to {}: no valid connection address found", log_hex(conn_id.pk));
                 break;
             }
             send_to = sock_route.first;
@@ -137,20 +138,20 @@ void OxenMQ::proxy_send(oxenc::bt_dict_consumer data) {
         } else if (!conn_id.route.empty()) { // incoming non-SN connection
             auto it = connections.find(conn_id.id);
             if (it == connections.end()) {
-                OMQ_LOG(warn, "Unable to send to ", conn_id, ": incoming listening socket not found");
+                log::warning(cat, "Unable to send to {}: incoming listening socket not found", conn_id);
                 break;
             }
             send_to = &it->second;
         } else {
             auto pr = peers.equal_range(conn_id);
             if (pr.first == peers.end()) {
-                OMQ_LOG(warn, "Unable to send: connection id ", conn_id, " is not (or is no longer) a valid outgoing connection");
+                log::warning(cat, "Unable to send: connection id {} is not (or is no longer) a valid outgoing connection", conn_id);
                 break;
             }
             auto& peer = pr.first->second;
             auto it = connections.find(peer.conn_id);
             if (it == connections.end()) {
-                OMQ_LOG(warn, "Unable to send: peer connection id ", conn_id, " is not (or is no longer) a valid outgoing connection");
+                log::warning(cat, "Unable to send: peer connection id {} is not (or is no longer) a valid outgoing connection", conn_id);
                 break;
             }
             send_to = &it->second;
@@ -161,7 +162,7 @@ void OxenMQ::proxy_send(oxenc::bt_dict_consumer data) {
         } catch (const zmq::error_t &e) {
             if (e.num() == EHOSTUNREACH && !conn_id.route.empty() /*= incoming conn*/) {
 
-                OMQ_LOG(debug, "Incoming connection is no longer valid; removing peer details");
+                log::debug(cat, "Incoming connection is no longer valid; removing peer details");
 
                 auto pr = peers.equal_range(conn_id);
                 if (pr.first != peers.end()) {
@@ -180,7 +181,7 @@ void OxenMQ::proxy_send(oxenc::bt_dict_consumer data) {
                         // The incoming connection to the SN is no longer good, but we can retry because
                         // we may have another active connection with the SN (or may want to open one).
                         if (removed) {
-                            OMQ_LOG(debug, "Retrying sending to SN ", oxenc::to_hex(conn_id.pk), " using other sockets");
+                            log::debug(cat, "Retrying sending to SN {} using other sockets", log_hex(conn_id.pk));
                             retry = true;
                         }
                     }
@@ -188,10 +189,10 @@ void OxenMQ::proxy_send(oxenc::bt_dict_consumer data) {
             }
             if (!retry) {
                 if (!conn_id.sn() && !conn_id.route.empty()) { // incoming non-SN connection
-                    OMQ_LOG(debug, "Unable to send message to incoming connection ", conn_id, ": ", e.what(),
-                            "; remote has probably disconnected");
+                    log::debug(cat, "Unable to send message to incoming connection {}: {}; remote has probably disconnected",
+                            conn_id, e.what());
                 } else {
-                    OMQ_LOG(warn, "Unable to send message to ", conn_id, ": ", e.what());
+                    log::warning(cat, "Unable to send message to {}: {}", conn_id, e.what());
                 }
                 nowarn = true;
                 if (callback_nosend) {
@@ -203,11 +204,11 @@ void OxenMQ::proxy_send(oxenc::bt_dict_consumer data) {
     }
     if (request) {
         if (sent) {
-            OMQ_LOG(debug, "Added new pending request ", oxenc::to_hex(request_tag));
+            log::debug(cat, "Added new pending request {}", log_hex(request_tag));
             pending_requests.insert({ request_tag, {
                 std::chrono::steady_clock::now() + request_timeout, std::move(request_callback) }});
         } else {
-            OMQ_LOG(debug, "Could not send request, scheduling request callback failure");
+            log::debug(cat, "Could not send request, scheduling request callback failure");
             job([callback = std::move(request_callback)] { callback(false, {{"TIMEOUT"s}}); });
         }
     }
@@ -217,7 +218,7 @@ void OxenMQ::proxy_send(oxenc::bt_dict_consumer data) {
         else if (callback_noqueue)
             job(std::move(callback_noqueue));
         else if (!nowarn)
-            OMQ_LOG(warn, "Unable to send message to ", conn_id, ": sending would block");
+            log::warning(cat, "Unable to send message to {}: sending would block", conn_id);
     }
 }
 
@@ -244,7 +245,7 @@ void OxenMQ::proxy_reply(oxenc::bt_dict_consumer data) {
 
     auto pr = peers.equal_range(conn_id);
     if (pr.first == pr.second) {
-        OMQ_LOG(warn, "Unable to send tagged reply: the connection is no longer valid");
+        log::warning(cat, "Unable to send tagged reply: the connection is no longer valid");
         return;
     }
 
@@ -257,18 +258,18 @@ void OxenMQ::proxy_reply(oxenc::bt_dict_consumer data) {
         } catch (const zmq::error_t &err) {
             if (err.num() == EHOSTUNREACH) {
                 if (it->second.outgoing()) {
-                    OMQ_LOG(debug, "Unable to send reply to non-SN request on outgoing socket: "
+                    log::debug(cat, "Unable to send reply to non-SN request on outgoing socket: "
                             "remote is no longer connected; closing connection");
                     proxy_close_connection(it->second.conn_id, CLOSE_LINGER);
                     it = peers.erase(it);
                     ++it;
                 } else {
-                    OMQ_LOG(debug, "Unable to send reply to non-SN request on incoming socket: "
+                    log::debug(cat, "Unable to send reply to non-SN request on incoming socket: "
                             "remote is no longer connected; removing peer details");
                     it = peers.erase(it);
                 }
             } else {
-                OMQ_LOG(warn, "Unable to send reply to incoming non-SN request: ", err.what());
+                log::warning(cat, "Unable to send reply to incoming non-SN request: {}", err.what());
                 ++it;
             }
         }
@@ -281,22 +282,22 @@ void OxenMQ::proxy_control_message(OxenMQ::control_message_array& parts, size_t 
     if (len < 2)
         throw std::logic_error("OxenMQ bug: Expected 2-3 message parts for a proxy control message");
     auto route = view(parts[0]), cmd = view(parts[1]);
-    OMQ_TRACE("control message: ", cmd);
+    log::trace(cat, "control message: {}", cmd);
     if (len == 3) {
-        OMQ_TRACE("...: ", parts[2]);
+        log::trace(cat, "...: {}", view(parts[2]));
         auto data = view(parts[2]);
         if (cmd == "SEND") {
-            OMQ_TRACE("proxying message");
+            log::trace(cat, "proxying message");
             return proxy_send(oxenc::bt_dict_consumer{data});
         } else if (cmd == "REPLY") {
-            OMQ_TRACE("proxying reply to non-SN incoming message");
+            log::trace(cat, "proxying reply to non-SN incoming message");
             return proxy_reply(oxenc::bt_dict_consumer{data});
         } else if (cmd == "BATCH") {
-            OMQ_TRACE("proxy batch jobs");
+            log::trace(cat, "proxy batch jobs");
             auto ptrval = oxenc::bt_deserialize<uintptr_t>(data);
             return proxy_batch(reinterpret_cast<detail::Batch*>(ptrval));
         } else if (cmd == "INJECT") {
-            OMQ_TRACE("proxy inject");
+            log::trace(cat, "proxy inject");
             return proxy_inject_task(detail::deserialize_object<injected_task>(oxenc::bt_deserialize<uintptr_t>(data)));
         } else if (cmd == "SET_SNS") {
             return proxy_set_active_sns(data);
@@ -357,11 +358,11 @@ bool OxenMQ::proxy_bind(bind_data& b, size_t bind_index) {
         b.on_bind = nullptr;
     }
     if (!good) {
-        OMQ_LOG(warn, "OxenMQ failed to listen on ", b.address);
+        log::warning(cat, "OxenMQ failed to listen on {}", b.address);
         return false;
     }
 
-    OMQ_LOG(info, "OxenMQ listening on ", b.address);
+    log::info(cat, "OxenMQ listening on {}", b.address);
 
     b.conn_id = next_conn_id++;
     connections.emplace_hint(connections.end(), b.conn_id, std::move(listener));
@@ -414,7 +415,7 @@ void OxenMQ::proxy_loop_init() {
 
     for (size_t i = 0; i < bind.size(); i++) {
         if (!proxy_bind(bind[i], i)) {
-            OMQ_LOG(fatal, "OxenMQ failed to listen on ", bind[i].address);
+            log::critical(cat, "OxenMQ failed to listen on {}", bind[i].address);
             throw zmq::error_t{};
         }
     }
@@ -456,7 +457,7 @@ void OxenMQ::proxy_loop_init() {
     // and send them back a "START" to let them know to go ahead with startup.  We need this
     // synchronization dance to guarantee that the workers are routable before we can proceed.
     if (!tagged_workers.empty()) {
-        OMQ_LOG(debug, "Waiting for tagged workers");
+        log::debug(cat, "Waiting for tagged workers");
         {
             std::unique_lock lock{tagged_startup_mutex};
             tagged_go = tagged_go_mode::GO;
@@ -468,18 +469,18 @@ void OxenMQ::proxy_loop_init() {
         for (std::vector<zmq::message_t> parts; !waiting_on.empty(); parts.clear()) {
             recv_message_parts(workers_socket, parts);
             if (parts.size() != 2 || view(parts[1]) != "STARTING"sv) {
-                OMQ_LOG(error, "Received invalid message on worker socket while waiting for tagged thread startup");
+                log::error(cat, "Received invalid message on worker socket while waiting for tagged thread startup");
                 continue;
             }
-            OMQ_LOG(debug, "Received STARTING message from ", view(parts[0]));
+            log::debug(cat, "Received STARTING message from {}", log_hex(view(parts[0])));
             if (auto it = waiting_on.find(view(parts[0])); it != waiting_on.end())
                 waiting_on.erase(it);
             else
-                OMQ_LOG(error, "Received STARTING message from unknown worker ", view(parts[0]));
+                log::error(cat, "Received STARTING message from unknown worker {}", view(parts[0]));
         }
 
         for (auto&w : tagged_workers) {
-            OMQ_LOG(debug, "Telling tagged thread worker ", std::get<run_info>(w).worker_routing_name, " to finish startup");
+            log::debug(cat, "Telling tagged thread worker {} to finish startup", std::get<run_info>(w).worker_routing_name);
             route_control(workers_socket, std::get<run_info>(w).worker_routing_id, "START");
         }
     }
@@ -545,7 +546,7 @@ void OxenMQ::proxy_loop(std::promise<void> startup) {
                 process_all = true;
             }
             else {
-                OMQ_TRACE("polling for new messages via epoll");
+                log::trace(cat, "polling for new messages via epoll");
 
                 evs.resize(3 + connections.size());
                 const int max = epoll_wait(epoll_fd, evs.data(), evs.size(), poll_timeout.count());
@@ -578,7 +579,7 @@ void OxenMQ::proxy_loop(std::promise<void> startup) {
             if (proxy_skip_one_poll)
                 proxy_skip_one_poll = false;
             else {
-                OMQ_TRACE("polling for new messages");
+                log::trace(cat, "polling for new messages");
 
                 // We poll the control socket and worker socket for any incoming messages.  If we have
                 // available worker room then also poll incoming connections and outgoing connections
@@ -589,32 +590,32 @@ void OxenMQ::proxy_loop(std::promise<void> startup) {
         }
 
         if (process_command) {
-            OMQ_TRACE("processing control messages");
+            log::trace(cat, "processing control messages");
             while (size_t len = recv_message_parts(command, control_parts, zmq::recv_flags::dontwait))
                 proxy_control_message(control_parts, len);
         }
 
         if (process_worker) {
-            OMQ_TRACE("processing worker messages");
+            log::trace(cat, "processing worker messages");
             while (size_t len = recv_message_parts(workers_socket, control_parts, zmq::recv_flags::dontwait))
                 proxy_worker_message(control_parts, len);
         }
 
-        OMQ_TRACE("processing timers");
+        log::trace(cat, "processing timers");
         zmq_timers_execute(timers.get());
 
         if (process_zap) {
             // Handle any zap authentication
-            OMQ_TRACE("processing zap requests");
+            log::trace(cat, "processing zap requests");
             process_zap_requests();
         }
 
         // See if we can drain anything from the current queue before we potentially add to it
         // below.
-        OMQ_TRACE("processing queued jobs and messages");
+        log::trace(cat, "processing queued jobs and messages");
         proxy_process_queue();
 
-        OMQ_TRACE("processing new incoming messages");
+        log::trace(cat, "processing new incoming messages");
         if (process_all) {
             queue.clear();
             for (auto& id_sock : connections)
@@ -638,7 +639,7 @@ void OxenMQ::proxy_loop(std::promise<void> startup) {
             ++end %= queue.size();
 
             if (parts.empty()) {
-                OMQ_LOG(warn, "Ignoring empty (0-part) incoming message");
+                log::warning(cat, "Ignoring empty (0-part) incoming message");
                 continue;
             }
 
@@ -648,7 +649,7 @@ void OxenMQ::proxy_loop(std::promise<void> startup) {
             if (connections_updated) {
                 // If connections got updated then our points are stale, so restart the proxy loop;
                 // we'll immediately end up right back here at least once before we resume polling.
-                OMQ_TRACE("connections became stale; short-circuiting incoming message loop");
+                log::trace(cat, "connections became stale; short-circuiting incoming message loop");
                 break;
             }
         }
@@ -680,7 +681,7 @@ void OxenMQ::proxy_loop(std::promise<void> startup) {
         }
 #endif
 
-        OMQ_TRACE("done proxy loop");
+        log::trace(cat, "done proxy loop");
     }
 }
 
@@ -696,7 +697,7 @@ bool OxenMQ::proxy_handle_builtin(int64_t conn_id, zmq::socket_t& sock, std::vec
 
     std::string_view route, cmd;
     if (parts.size() < 1 + incoming) {
-        OMQ_LOG(warn, "Received empty message; ignoring");
+        log::warning(cat, "Received empty message; ignoring");
         return true;
     }
     if (incoming) {
@@ -705,18 +706,18 @@ bool OxenMQ::proxy_handle_builtin(int64_t conn_id, zmq::socket_t& sock, std::vec
     } else {
         cmd = view(parts[0]);
     }
-    OMQ_TRACE("Checking for builtins: '", cmd, "' from ", peer_address(parts.back()));
+    log::trace(cat, "Checking for builtins: '{}' from {}", cmd, peer_address(parts.back()));
 
     if (cmd == "REPLY") {
         size_t tag_pos = 1 + incoming;
         if (parts.size() <= tag_pos) {
-            OMQ_LOG(warn, "Received REPLY without a reply tag; ignoring");
+            log::warning(cat, "Received REPLY without a reply tag; ignoring");
             return true;
         }
         std::string reply_tag{view(parts[tag_pos])};
         auto it = pending_requests.find(reply_tag);
         if (it != pending_requests.end()) {
-            OMQ_LOG(debug, "Received REPLY for pending command ", oxenc::to_hex(reply_tag), "; scheduling callback");
+            log::debug(cat, "Received REPLY for pending command {}; scheduling callback", log_hex(reply_tag));
             std::vector<std::string> data;
             data.reserve(parts.size() - (tag_pos + 1));
             for (auto it = parts.begin() + (tag_pos + 1); it != parts.end(); ++it)
@@ -726,38 +727,38 @@ bool OxenMQ::proxy_handle_builtin(int64_t conn_id, zmq::socket_t& sock, std::vec
             });
             pending_requests.erase(it);
         } else {
-            OMQ_LOG(warn, "Received REPLY with unknown or already handled reply tag (", oxenc::to_hex(reply_tag), "); ignoring");
+            log::warning(cat, "Received REPLY with unknown or already handled reply tag ({}); ignoring", log_hex(reply_tag));
         }
         return true;
     } else if (cmd == "HI") {
         if (!incoming) {
-            OMQ_LOG(warn, "Got invalid 'HI' message on an outgoing connection; ignoring");
+            log::warning(cat, "Got invalid 'HI' message on an outgoing connection; ignoring");
             return true;
         }
-        OMQ_LOG(debug, "Incoming client from ", peer_address(parts.back()), " sent HI, replying with HELLO");
+        log::debug(cat, "Incoming client from {} sent HI, replying with HELLO", peer_address(parts.back()));
         try {
             send_routed_message(sock, std::string{route}, "HELLO");
-        } catch (const std::exception &e) { OMQ_LOG(warn, "Couldn't reply with HELLO: ", e.what()); }
+        } catch (const std::exception &e) { log::warning(cat, "Couldn't reply with HELLO: {}", e.what()); }
         return true;
     } else if (cmd == "HELLO") {
         if (incoming) {
-            OMQ_LOG(warn, "Got invalid 'HELLO' message on an incoming connection; ignoring");
+            log::warning(cat, "Got invalid 'HELLO' message on an incoming connection; ignoring");
             return true;
         }
         auto it = std::find_if(pending_connects.begin(), pending_connects.end(),
                 [&](auto& pc) { return std::get<int64_t>(pc) == conn_id; });
         if (it == pending_connects.end()) {
-            OMQ_LOG(warn, "Got invalid 'HELLO' message on an already handshaked incoming connection; ignoring");
+            log::warning(cat, "Got invalid 'HELLO' message on an already handshaked incoming connection; ignoring");
             return true;
         }
         auto& pc = *it;
         auto pit = peers.find(std::get<int64_t>(pc));
         if (pit == peers.end()) {
-            OMQ_LOG(warn, "Got invalid 'HELLO' message with invalid conn_id; ignoring");
+            log::warning(cat, "Got invalid 'HELLO' message with invalid conn_id; ignoring");
             return true;
         }
 
-        OMQ_LOG(debug, "Got initial HELLO server response from ", peer_address(parts.back()));
+        log::debug(cat, "Got initial HELLO server response from {}", peer_address(parts.back()));
         proxy_schedule_reply_job([on_success=std::move(std::get<ConnectSuccess>(pc)),
                 conn=pit->first] {
             on_success(conn);
@@ -766,10 +767,10 @@ bool OxenMQ::proxy_handle_builtin(int64_t conn_id, zmq::socket_t& sock, std::vec
         return true;
     } else if (cmd == "BYE") {
         if (!incoming) {
-            OMQ_LOG(debug, "BYE command received; disconnecting from ", peer_address(parts.back()));
+            log::debug(cat, "BYE command received; disconnecting from {}", peer_address(parts.back()));
             proxy_close_connection(conn_id, 0s);
         } else {
-            OMQ_LOG(warn, "Got invalid 'BYE' command on an incoming socket; ignoring");
+            log::warning(cat, "Got invalid 'BYE' command on an incoming socket; ignoring");
         }
 
         return true;
@@ -787,7 +788,7 @@ bool OxenMQ::proxy_handle_builtin(int64_t conn_id, zmq::socket_t& sock, std::vec
             // pre-1.1.0 sent just a plain UNKNOWNCOMMAND (without the actual command); this was not
             // useful, but also this response is *expected* for things 1.0.5 didn't understand, like
             // FORBIDDEN_SN: so log it only at debug level and move on.
-            OMQ_LOG(debug, "Received plain UNKNOWNCOMMAND; remote is probably an older oxenmq. Ignoring.");
+            log::debug(cat, "Received plain UNKNOWNCOMMAND; remote is probably an older oxenmq. Ignoring.");
             return true;
         }
 
@@ -795,17 +796,21 @@ bool OxenMQ::proxy_handle_builtin(int64_t conn_id, zmq::socket_t& sock, std::vec
             std::string reply_tag{view(parts[2 + incoming])};
             auto it = pending_requests.find(reply_tag);
             if (it != pending_requests.end()) {
-                OMQ_LOG(debug, "Received ", cmd, " REPLY for pending command ", oxenc::to_hex(reply_tag), "; scheduling failure callback");
+                log::debug(cat, "Received {} REPLY for pending command {}; scheduling failure callback", cmd, log_hex(reply_tag));
                 proxy_schedule_reply_job([callback=std::move(it->second.second), cmd=std::string{cmd}] {
                     callback(false, {{std::move(cmd)}});
                 });
                 pending_requests.erase(it);
             } else {
-                OMQ_LOG(warn, "Received REPLY with unknown or already handled reply tag (", oxenc::to_hex(reply_tag), "); ignoring");
+                log::warning(cat, "Received REPLY with unknown or already handled reply tag ({}); ignoring", log_hex(reply_tag));
             }
         } else {
-            OMQ_LOG(warn, "Received ", cmd, ':', (parts.size() > 1 + incoming ? view(parts[1 + incoming]) : "(unknown command)"sv),
-                        " from ", peer_address(parts.back()));
+            log::warning(
+                    cat,
+                    "Received {}: {} from {}",
+                    cmd,
+                    (parts.size() > 1 + incoming ? view(parts[1 + incoming]) : "(unknown command)"sv),
+                    peer_address(parts.back()));
         }
         return true;
     }
