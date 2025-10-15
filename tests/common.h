@@ -17,8 +17,10 @@ using namespace oxenmq;
 constexpr int TIME_DILATION =
 #ifdef __APPLE__
     5;
-#else
+#elif defined(__x86_64__)
     1;
+#else
+    2;
 #endif
 
 static auto startup = std::chrono::steady_clock::now();
