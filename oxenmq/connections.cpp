@@ -2,6 +2,7 @@
 #include "oxenmq-internal.h"
 #include <oxenc/hex.h>
 #include <optional>
+#include <fmt/chrono.h>
 
 #ifdef OXENMQ_USE_EPOLL
 extern "C" {
@@ -12,11 +13,9 @@ extern "C" {
 
 namespace oxenmq {
 
-std::ostream& operator<<(std::ostream& o, const ConnectionID& conn) {
-    return o << conn.to_string();
-}
-
 namespace {
+
+auto cat = log::Cat("oxenmq");
 
 void add_pollitem(std::vector<zmq::pollitem_t>& pollitems, zmq::socket_t& sock) {
     pollitems.emplace_back();
@@ -154,23 +153,22 @@ OxenMQ::proxy_connect_sn(std::string_view remote, std::string_view connect_hint,
     }
 
     if (peer) {
-        OMQ_TRACE("proxy asked to connect to ", oxenc::to_hex(remote), "; reusing existing connection");
+        log::trace(cat, "proxy asked to connect to {}; reusing existing connection", log_hex(remote));
         if (peer->route.empty() /* == outgoing*/) {
             if (peer->idle_expiry < keep_alive) {
-                OMQ_LOG(debug, "updating existing outgoing peer connection idle expiry time from ",
-                        peer->idle_expiry.count(), "ms to ", keep_alive.count(), "ms");
+                log::debug(cat, "updating existing outgoing peer connection idle expiry time from {} to {}", peer->idle_expiry, keep_alive);
                 peer->idle_expiry = keep_alive;
             }
             peer->activity();
         }
         return {&connections[peer->conn_id], peer->route};
     } else if (optional || incoming_only) {
-        OMQ_LOG(debug, "proxy asked for optional or incoming connection, but no appropriate connection exists so aborting connection attempt");
+        log::debug(cat, "proxy asked for optional or incoming connection, but no appropriate connection exists so aborting connection attempt");
         return {nullptr, ""s};
     }
 
     // No connection so establish a new one
-    OMQ_LOG(debug, "proxy establishing new outbound connection to ", oxenc::to_hex(remote));
+    log::debug(cat, "proxy establishing new outbound connection to {}", log_hex(remote));
     std::string addr;
     bool to_self = false && remote == pubkey; // FIXME; need to use a separate listening socket for this, otherwise we can't easily
                                               // tell it wasn't from a remote.
@@ -182,15 +180,15 @@ OxenMQ::proxy_connect_sn(std::string_view remote, std::string_view connect_hint,
         if (addr.empty())
             addr = sn_lookup(remote);
         else
-            OMQ_LOG(debug, "using connection hint ", connect_hint);
+            log::debug(cat, "using connection hint {}", connect_hint);
 
         if (addr.empty()) {
-            OMQ_LOG(error, "peer lookup failed for ", oxenc::to_hex(remote));
+            log::error(cat, "peer lookup failed for {}", log_hex(remote));
             return {nullptr, ""s};
         }
     }
 
-    OMQ_LOG(debug, oxenc::to_hex(pubkey), " (me) connecting to ", addr, " to reach ", oxenc::to_hex(remote));
+    log::debug(cat, "{} (me) connecting to {} to reach {}", log_hex(pubkey), addr, log_hex(remote));
     std::optional<zmq::socket_t> socket;
     try {
         socket.emplace(context, zmq::socket_type::dealer);
@@ -199,7 +197,7 @@ OxenMQ::proxy_connect_sn(std::string_view remote, std::string_view connect_hint,
     } catch (const zmq::error_t& e) {
         // Note that this failure cases indicates something serious went wrong that means zmq isn't
         // even going to try connecting (for example an unparseable remote address).
-        OMQ_LOG(error, "Outgoing connection to ", addr, " failed: ", e.what());
+        log::error(cat, "Outgoing connection to {} failed: {}", addr, e.what());
         return {nullptr, ""s};
     }
 
@@ -247,10 +245,10 @@ std::pair<zmq::socket_t *, std::string> OxenMQ::proxy_connect_sn(oxenc::bt_dict_
 void OxenMQ::proxy_close_connection(int64_t id, std::chrono::milliseconds linger) {
     auto it = connections.find(id);
     if (it == connections.end()) {
-        OMQ_LOG(warn, "internal error: connection to close (", id, ") doesn't exist!");
+        log::warning(cat, "internal error: connection to close ({}) doesn't exist!", id);
         return;
     }
-    OMQ_LOG(debug, "Closing conn ", id);
+    log::debug(cat, "Closing conn {}", id);
     it->second.set(zmq::sockopt::linger, linger > 0ms ? (int) linger.count() : 0);
     connections.erase(it);
     connections_updated = true;
@@ -264,14 +262,22 @@ void OxenMQ::proxy_expire_idle_peers() {
         if (info.outgoing()) {
             auto idle = std::chrono::steady_clock::now() - info.last_activity;
             if (idle > info.idle_expiry) {
-                OMQ_LOG(debug, "Closing outgoing connection to ", it->first, ": idle time (",
-                        std::chrono::duration_cast<std::chrono::milliseconds>(idle).count(), "ms) reached connection timeout (",
-                        info.idle_expiry.count(), "ms)");
+                log::debug(
+                        cat,
+                        "Closing outgoing connection to {}: idle time ({}) reached connection "
+                        "timeout ({})",
+                        it->first,
+                        std::chrono::duration_cast<std::chrono::milliseconds>(idle),
+                        info.idle_expiry);
                 proxy_close_connection(info.conn_id, CLOSE_LINGER);
                 it = peers.erase(it);
             } else {
-                OMQ_TRACE("Not closing ", it->first, ": ", std::chrono::duration_cast<std::chrono::milliseconds>(idle).count(),
-                        "ms <= ", info.idle_expiry.count(), "ms");
+                log::trace(
+                        cat,
+                        "Not closing {}: {} <= {}",
+                        it->first,
+                        std::chrono::duration_cast<std::chrono::milliseconds>(idle),
+                        info.idle_expiry);
                 ++it;
                 continue;
             }
@@ -282,17 +288,17 @@ void OxenMQ::proxy_expire_idle_peers() {
 }
 
 void OxenMQ::proxy_conn_cleanup() {
-    OMQ_TRACE("starting proxy connections cleanup");
+    log::trace(cat, "starting proxy connections cleanup");
 
     // Drop idle connections (if we haven't done it in a while)
-    OMQ_TRACE("closing idle connections");
+    log::trace(cat, "closing idle connections");
     proxy_expire_idle_peers();
 
     auto now = std::chrono::steady_clock::now();
 
     // FIXME - check other outgoing connections to see if they died and if so purge them
 
-    OMQ_TRACE("Timing out pending outgoing connections");
+    log::trace(cat, "Timing out pending outgoing connections");
     // Check any pending outgoing connections for timeout
     for (auto it = pending_connects.begin(); it != pending_connects.end(); ) {
         auto& pc = *it;
@@ -308,12 +314,12 @@ void OxenMQ::proxy_conn_cleanup() {
         }
     }
 
-    OMQ_TRACE("Timing out pending requests");
+    log::trace(cat, "Timing out pending requests");
     // Remove any expired pending requests and schedule their callback with a failure
     for (auto it = pending_requests.begin(); it != pending_requests.end(); ) {
         auto& callback = it->second;
         if (callback.first < now) {
-            OMQ_LOG(debug, "pending request ", oxenc::to_hex(it->first), " expired, invoking callback with failure status and removing");
+            log::debug(cat, "pending request {} expired, invoking callback with failure status and removing", log_hex(it->first));
             job([callback = std::move(callback.second)] { callback(false, {{"TIMEOUT"s}}); });
             it = pending_requests.erase(it);
         } else {
@@ -321,7 +327,7 @@ void OxenMQ::proxy_conn_cleanup() {
         }
     }
 
-    OMQ_TRACE("done proxy connections cleanup");
+    log::trace(cat, "done proxy connections cleanup");
 };
 
 void OxenMQ::proxy_connect_remote(oxenc::bt_dict_consumer data) {
@@ -356,8 +362,12 @@ void OxenMQ::proxy_connect_remote(oxenc::bt_dict_consumer data) {
     if (conn_id == -1 || remote.empty())
         throw std::runtime_error("Internal error: CONNECT_REMOTE proxy command missing required 'conn_id' and/or 'remote' value");
 
-    OMQ_LOG(debug, "Establishing remote connection to ", remote,
-            remote_pubkey.empty() ? " (NULL auth)" : " via CURVE expecting pubkey " + oxenc::to_hex(remote_pubkey));
+    log::trace(
+            cat,
+            "Establishing remote connection to {} {}{}",
+            remote,
+            remote_pubkey.empty() ? "(NULL auth)" : "via CURVE expecting pubkey ",
+            log_hex(remote_pubkey));
 
     std::optional<zmq::socket_t> sock;
     try {
@@ -373,7 +383,7 @@ void OxenMQ::proxy_connect_remote(oxenc::bt_dict_consumer data) {
 
     auto &s = connections.emplace_hint(connections.end(), conn_id, std::move(*sock))->second;
     connections_updated = true;
-    OMQ_LOG(debug, "Opened new zmq socket to ", remote, ", conn_id ", conn_id, "; sending HI");
+    log::debug(cat, "Opened new zmq socket to {}", remote, ", conn_id ", conn_id, "; sending HI");
     send_direct_message(s, "HI");
     pending_connects.emplace_back(conn_id, std::chrono::steady_clock::now() + timeout,
             std::move(on_connect), std::move(on_failure));
@@ -403,39 +413,28 @@ void OxenMQ::proxy_disconnect(oxenc::bt_dict_consumer data) {
     proxy_disconnect(std::move(connid), linger);
 }
 void OxenMQ::proxy_disconnect(ConnectionID conn, std::chrono::milliseconds linger) {
-    OMQ_TRACE("Disconnecting outgoing connection to ", conn);
+    log::trace(cat, "Disconnecting outgoing connection to {}", conn);
     auto pr = peers.equal_range(conn);
     for (auto it = pr.first; it != pr.second; ++it) {
         auto& peer = it->second;
         if (peer.outgoing()) {
-            OMQ_LOG(debug, "Closing outgoing connection to ", conn);
+            log::debug(cat, "Closing outgoing connection to {}", conn);
             proxy_close_connection(peer.conn_id, linger);
             peers.erase(it);
             return;
         }
     }
-    OMQ_LOG(warn, "Failed to disconnect ", conn, ": no such outgoing connection");
+    log::warning(cat, "Failed to disconnect {}: no such outgoing connection", conn);
 }
 
 std::string ConnectionID::to_string() const {
     std::string result;
     if (!pk.empty()) {
         if (sn())
-            result += "SN ";
-        else {
-            result += "non-SN authenticated remote [";
-            result += std::to_string(id);
-            result += ']';
-        }
-        result += oxenc::to_hex(pk);
+            return fmt::format("SN {}", oxenc::to_hex(pk));
+        return fmt::format("non-SN authenticated remote [{}] {}", id, oxenc::to_hex(pk));
     }
-    else {
-        result += "unauthenticated remote [";
-        result += std::to_string(id);
-        result += ']';
-    }
-    return result;
+    return fmt::format("unauthenticated remote [{}]", id);
 }
-
 
 }
