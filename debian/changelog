@@ -1,3 +1,21 @@
+oxenmq (1.3.0-1~ubuntu2404) noble; urgency=medium
+
+  [ Sean Darcy ]
+  * set osx deployment target
+
+  [ Jason Rhinelander ]
+  * Fix missing dependency on -latomic
+  * version bump
+  * Migrate oxenmq logging to oxen-logging
+  * Fix fmt-related build issues
+  * fix changed colour flag
+  * add clang-tools dependency for clang/llvm builds
+  * disable LTO on apple when building oxen-logging
+  * increase test waits on non-amd64
+  * Rediff patches
+
+ -- Jason Rhinelander <jason@session.foundation>  Wed, 15 Oct 2025 20:57:15 -0300
+
 oxenmq (1.2.23-1~ubuntu2404) noble; urgency=medium
 
   [ Jason Rhinelander ]
