@@ -1,14 +1,10 @@
 #include "oxenmq.h"
 #include <oxenc/hex.h>
 #include "oxenmq-internal.h"
-#include <ostream>
-#include <sstream>
+#include <oxen/log.hpp>
+#include <fmt/core.h>
 
 namespace oxenmq {
-
-std::ostream& operator<<(std::ostream& o, AuthLevel a) {
-    return o << to_string(a);
-}
 
 namespace {
 
@@ -28,6 +24,8 @@ std::string zmtp_metadata(std::string_view key, std::string_view value) {
     return result;
 }
 
+auto cat = log::Cat("oxenmq");
+
 }
 
 
@@ -37,23 +35,19 @@ bool OxenMQ::proxy_check_auth(int64_t conn_id, bool outgoing, const peer_info& p
     std::string reply;
 
     if (!cat_call.first) {
-        OMQ_LOG(warn, "Invalid command '", command, "' sent by remote [", oxenc::to_hex(peer.pubkey), "]/", peer_address(cmd));
+        log::warning(cat, "Invalid command '{}' sent by remote [{}]/{}", command, log_hex(peer.pubkey), peer_address(cmd));
         reply = "UNKNOWNCOMMAND";
     } else if (peer.auth_level < cat_call.first->access.auth) {
-        OMQ_LOG(warn, "Access denied to ", command, " for peer [", oxenc::to_hex(peer.pubkey), "]/", peer_address(cmd),
-                ": peer auth level ", peer.auth_level, " < ", cat_call.first->access.auth);
+        log::warning(cat, "Access denied to {} for peer [{}]/{}: peer auth level {} < {}", command, log_hex(peer.pubkey), peer_address(cmd), peer.auth_level, cat_call.first->access.auth);
         reply = "FORBIDDEN";
     } else if (cat_call.first->access.local_sn && !local_service_node) {
-        OMQ_LOG(warn, "Access denied to ", command, " for peer [", oxenc::to_hex(peer.pubkey), "]/", peer_address(cmd),
-                ": that command is only available when this OxenMQ is running in service node mode");
+        log::warning(cat, "Access denied to {} for peer [{}]/{}: that command is only available when this OxenMQ is running in service node mode", command, log_hex(peer.pubkey), peer_address(cmd));
         reply = "NOT_A_SERVICE_NODE";
     } else if (cat_call.first->access.remote_sn && !peer.service_node) {
-        OMQ_LOG(warn, "Access denied to ", command, " for peer [", oxenc::to_hex(peer.pubkey), "]/", peer_address(cmd),
-                ": remote is not recognized as a service node");
+        log::warning(cat, "Access denied to {} for peer [{}]/{}: remote is not recognized as a service node", command, log_hex(peer.pubkey), peer_address(cmd));
         reply = "FORBIDDEN_SN";
     } else if (cat_call.second->second /*is_request*/ && data.empty()) {
-        OMQ_LOG(warn, "Received an invalid request for '", command, "' with no reply tag from remote [",
-                oxenc::to_hex(peer.pubkey), "]/", peer_address(cmd));
+        log::warning(cat, "Received an invalid request for '{}' with no reply tag from remote [{}]/{}", command, log_hex(peer.pubkey), peer_address(cmd));
         reply = "NO_REPLY_TAG";
     } else {
         return true;
@@ -75,7 +69,7 @@ bool OxenMQ::proxy_check_auth(int64_t conn_id, bool outgoing, const peer_info& p
         send_message_parts(connections.at(conn_id), msgs);
     } catch (const zmq::error_t& err) {
         /* can't send: possibly already disconnected.  Ignore. */
-        OMQ_LOG(debug, "Couldn't send auth failure message ", reply, " to peer [", oxenc::to_hex(peer.pubkey), "]/", peer_address(cmd), ": ", err.what());
+        log::debug(cat, "Couldn't send auth failure message {} to peer [{}]/{}: {}", reply, log_hex(peer.pubkey), peer_address(cmd), err.what());
     }
 
     return false;
@@ -97,7 +91,7 @@ void OxenMQ::proxy_set_active_sns(pubkey_set pubkeys) {
     for (auto it = pubkeys.begin(); it != pubkeys.end(); ) {
         auto& pk = *it;
         if (pk.size() != 32) {
-            OMQ_LOG(warn, "Invalid private key of length ", pk.size(), " (", oxenc::to_hex(pk), ") passed to set_active_sns");
+            log::warning(cat, "Invalid private key of length {} ({}) passed to set_active_sns", pk.size(), log_hex(pk));
             it = pubkeys.erase(it);
             continue;
         }
@@ -106,7 +100,7 @@ void OxenMQ::proxy_set_active_sns(pubkey_set pubkeys) {
         ++it;
     }
     if (added.empty() && active_service_nodes.size() == pubkeys.size()) {
-        OMQ_LOG(debug, "set_active_sns(): new set of SNs is unchanged, skipping update");
+        log::debug(cat, "set_active_sns(): new set of SNs is unchanged, skipping update");
         return;
     }
     for (const auto& pk : active_service_nodes) {
@@ -141,7 +135,7 @@ void OxenMQ::proxy_update_active_sns(pubkey_set added, pubkey_set removed) {
     for (auto it = removed.begin(); it != removed.end(); ) {
         const auto& pk = *it;
         if (pk.size() != 32) {
-            OMQ_LOG(warn, "Invalid private key of length ", pk.size(), " (", oxenc::to_hex(pk), ") passed to update_active_sns (removed)");
+            log::warning(cat, "Invalid private key of length {} ({}) passed to update_active_sns (removed)", pk.size(), log_hex(pk));
             it = removed.erase(it);
         } else if (!active_service_nodes.count(pk) || added.count(pk) /* added wins if in both */) {
             it = removed.erase(it);
@@ -153,7 +147,7 @@ void OxenMQ::proxy_update_active_sns(pubkey_set added, pubkey_set removed) {
     for (auto it = added.begin(); it != added.end(); ) {
         const auto& pk = *it;
         if (pk.size() != 32) {
-            OMQ_LOG(warn, "Invalid private key of length ", pk.size(), " (", oxenc::to_hex(pk), ") passed to update_active_sns (added)");
+            log::warning(cat, "Invalid private key of length {} ({}) passed to update_active_sns (added)", pk.size(), log_hex(pk));
             it = added.erase(it);
         } else if (active_service_nodes.count(pk)) {
             it = added.erase(it);
@@ -166,7 +160,7 @@ void OxenMQ::proxy_update_active_sns(pubkey_set added, pubkey_set removed) {
 }
 
 void OxenMQ::proxy_update_active_sns_clean(pubkey_set added, pubkey_set removed) {
-    OMQ_LOG(debug, "Updating SN auth status with +", added.size(), "/-", removed.size(), " pubkeys");
+    log::debug(cat, "Updating SN auth status with +{}/-{} pubkeys", added.size(), removed.size());
 
     // For anything we remove we want close the connection to the SN (if outgoing), and remove the
     // stored peer_info (incoming or outgoing).
@@ -179,7 +173,7 @@ void OxenMQ::proxy_update_active_sns_clean(pubkey_set added, pubkey_set removed)
             auto conn_id = it->second.conn_id;
             it = peers.erase(it);
             if (outgoing) {
-                OMQ_LOG(debug, "Closing outgoing connection to ", c);
+                log::debug(cat, "Closing outgoing connection to {}", c);
                 proxy_close_connection(conn_id, CLOSE_LINGER);
             }
         }
@@ -192,22 +186,7 @@ void OxenMQ::proxy_update_active_sns_clean(pubkey_set added, pubkey_set removed)
 
 void OxenMQ::process_zap_requests() {
     for (std::vector<zmq::message_t> frames; recv_message_parts(zap_auth, frames, zmq::recv_flags::dontwait); frames.clear()) {
-#ifndef NDEBUG
-        if (log_level() >= LogLevel::trace) {
-            std::ostringstream o;
-            o << "Processing ZAP authentication request:";
-            for (size_t i = 0; i < frames.size(); i++) {
-                o << "\n[" << i << "]: ";
-                auto v = view(frames[i]);
-                if (i == 1 || i == 6)
-                    o << oxenc::to_hex(v);
-                else
-                    o << v;
-            }
-            log(LogLevel::trace, __FILE__, __LINE__, o.str());
-        } else
-#endif
-            OMQ_LOG(debug, "Processing ZAP authentication request");
+        log::debug(cat, "Processing ZAP authentication request");
 
         // https://rfc.zeromq.org/spec:27/ZAP/
         //
@@ -240,7 +219,7 @@ void OxenMQ::process_zap_requests() {
         std::string &status_code = response_vals[2], &status_text = response_vals[3];
 
         if (frames.size() < 6 || view(frames[0]) != "1.0") {
-            OMQ_LOG(error, "Bad ZAP authentication request: version != 1.0 or invalid ZAP message parts");
+            log::error(cat, "Bad ZAP authentication request: version != 1.0 or invalid ZAP message parts");
             status_code = "500";
             status_text = "Internal error: invalid auth request";
         } else {
@@ -251,18 +230,18 @@ void OxenMQ::process_zap_requests() {
             } catch (...) {}
 
             if (bind_id >= bind.size()) {
-                OMQ_LOG(error, "Bad ZAP authentication request: invalid auth domain '", auth_domain, "'");
+                log::error(cat, "Bad ZAP authentication request: invalid auth domain '{}'", auth_domain);
                 status_code = "400";
                 status_text = "Unknown authentication domain: " + std::string{auth_domain};
             } else if (bind[bind_id].curve
                     ? !(frames.size() == 7 && view(frames[5]) == "CURVE")
                     : !(frames.size() == 6 && view(frames[5]) == "NULL")) {
-                OMQ_LOG(error, "Bad ZAP authentication request: invalid ",
-                        bind[bind_id].curve ? "CURVE" : "NULL", " authentication request");
+                log::error(cat, "Bad ZAP authentication request: invalid {} authentication request",
+                        bind[bind_id].curve ? "CURVE" : "NULL");
                 status_code = "500";
                 status_text = "Invalid authentication request mechanism";
             } else if (bind[bind_id].curve && frames[6].size() != 32) {
-                OMQ_LOG(error, "Bad ZAP authentication request: invalid request pubkey");
+                log::error(cat, "Bad ZAP authentication request: invalid request pubkey");
                 status_code = "500";
                 status_text = "Invalid public key size for CURVE authentication";
             } else {
@@ -286,16 +265,21 @@ void OxenMQ::process_zap_requests() {
                 }
 
                 if (auth <= AuthLevel::denied || auth > AuthLevel::admin) {
-                    OMQ_LOG(info, "Access denied for incoming ", view(frames[5]), (sn ? " service node" : " client"),
-                            " connection from ", !user_id.empty() ? user_id + " at " : ""s, ip,
-                            " with initial auth level ", auth);
+                    log::info(cat, "Access denied for incoming {} {} connection from {} at {} with initial auth level {}",
+                            view(frames[5]),
+                            sn ? " service node" : " client",
+                            !user_id.empty() ? user_id : "[nouser]", ip,
+                            auth);
                     status_code = "400";
                     status_text = "Access denied";
                     user_id.clear();
                 } else {
-                    OMQ_LOG(debug, "Accepted incoming ", view(frames[5]), (sn ? " service node" : " client"),
-                            " connection with authentication level ", auth,
-                            " from ", !user_id.empty() ? user_id + " at " : ""s, ip);
+                    log::debug(cat, "Accepted incoming {} {} connection with authentication level {} from {} at {}",
+                            view(frames[5]),
+                            sn ? " service node" : " client",
+                            auth,
+                            !user_id.empty() ? user_id : "[nouser]",
+                            ip);
 
                     auto& metadata = response_vals[5];
                     metadata += zmtp_metadata("X-AuthLevel", to_string(auth));
@@ -306,7 +290,7 @@ void OxenMQ::process_zap_requests() {
             }
         }
 
-        OMQ_TRACE("ZAP request result: ", status_code, " ", status_text);
+        log::trace(cat, "ZAP request result: {} {}", status_code, status_text);
 
         std::vector<zmq::message_t> response;
         response.reserve(response_vals.size());

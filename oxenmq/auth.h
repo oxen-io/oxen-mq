@@ -1,5 +1,4 @@
 #pragma once
-#include <iosfwd>
 #include <string>
 #include <cstring>
 #include <unordered_set>
@@ -13,8 +12,6 @@ enum class AuthLevel {
     basic, ///< Basic authentication commands require a login, or a node that is specifically configured to be a public node (e.g. for public RPC).
     admin, ///< Advanced authentication commands require an admin user, either via explicit login or by implicit login from localhost.  This typically protects administrative commands like shutting down, starting mining, or access sensitive data.
 };
-
-std::ostream& operator<<(std::ostream& os, AuthLevel a);
 
 /// The access level for a command category
 struct Access {
