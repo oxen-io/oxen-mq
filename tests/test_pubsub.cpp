@@ -1,10 +1,13 @@
 #include "common.h"
 #include "oxenmq/pubsub.h"
+#include <oxen/log.hpp>
 
 #include <oxenc/hex.h>
 
 using namespace oxenmq;
 using namespace std::chrono_literals;
+
+static auto cat = oxen::log::Cat("oxenmq.test");
 
 TEST_CASE("sub OK", "[pubsub]") {
     std::string listen = random_localhost();
@@ -25,9 +28,7 @@ TEST_CASE("sub OK", "[pubsub]") {
     });
     server.start();
 
-    OxenMQ client(
-        [](LogLevel, const char* file, int line, std::string msg) { std::cerr << file << ":" << line << " --C-- " << msg << "\n"; }
-        );
+    OxenMQ client{};
 
     std::atomic<int> reply_count{0};
     client.add_category("notify", Access{AuthLevel::none});
@@ -35,7 +36,7 @@ TEST_CASE("sub OK", "[pubsub]") {
             const auto& data = m.data;
             if (!data.size())
             {
-                std::cerr << "client received public.greetings with empty data\n";
+                oxen::log::error(cat, "client received public.greetings with empty data");
                 return;
             }
             if (data[0] == "hello")
@@ -117,9 +118,7 @@ TEST_CASE("user data", "[pubsub]") {
     });
     server.start();
 
-    OxenMQ client(
-        [](LogLevel, const char* file, int line, std::string msg) { std::cerr << file << ":" << line << " --C-- " << msg << "\n"; }
-        );
+    OxenMQ client{};
 
     std::string response{"foo"};
     std::atomic<int> reply_count{0};
@@ -129,7 +128,7 @@ TEST_CASE("user data", "[pubsub]") {
             const auto& data = m.data;
             if (!data.size())
             {
-                std::cerr << "client received public.greetings with empty data\n";
+                oxen::log::error(cat, "client received public.greetings with empty data");
                 return;
             }
             if (data[0] == response)
@@ -255,9 +254,7 @@ TEST_CASE("unsubscribe", "[pubsub]") {
     });
     server.start();
 
-    OxenMQ client(
-        [](LogLevel, const char* file, int line, std::string msg) { std::cerr << file << ":" << line << " --C-- " << msg << "\n"; }
-        );
+    OxenMQ client{};
 
     std::atomic<int> reply_count{0};
     client.add_category("notify", Access{AuthLevel::none});
@@ -265,7 +262,7 @@ TEST_CASE("unsubscribe", "[pubsub]") {
             const auto& data = m.data;
             if (!data.size())
             {
-                std::cerr << "client received public.greetings with empty data\n";
+                oxen::log::error(cat, "client received public.greetings with empty data");
                 return;
             }
             if (data[0] == "hello")
@@ -385,9 +382,7 @@ TEST_CASE("expire", "[pubsub]") {
     });
     server.start();
 
-    OxenMQ client(
-        [](LogLevel, const char* file, int line, std::string msg) { std::cerr << file << ":" << line << " --C-- " << msg << "\n"; }
-        );
+    OxenMQ client{};
 
     std::atomic<int> reply_count{0};
     client.add_category("notify", Access{AuthLevel::none});
@@ -395,7 +390,7 @@ TEST_CASE("expire", "[pubsub]") {
             const auto& data = m.data;
             if (!data.size())
             {
-                std::cerr << "client received public.greetings with empty data\n";
+                oxen::log::error(cat, "client received public.greetings with empty data");
                 return;
             }
             if (data[0] == "hello")
@@ -486,16 +481,14 @@ TEST_CASE("multiple subs", "[pubsub]") {
     bool success_c1;
     std::vector<std::string> data_c1;
     std::string pubkey_c1;
-    OxenMQ client1(
-        [](LogLevel, const char* file, int line, std::string msg) { std::cerr << file << ":" << line << " --C-- " << msg << "\n"; }
-        );
+    OxenMQ client1{};
 
     client1.add_category("notify", Access{AuthLevel::none});
     client1.add_command("notify", "greetings", [&](Message& m) {
             const auto& data = m.data;
             if (!data.size())
             {
-                std::cerr << "client received public.greetings with empty data\n";
+                oxen::log::error(cat, "client received public.greetings with empty data");
                 return;
             }
             if (data[0] == "hello")
@@ -538,16 +531,14 @@ TEST_CASE("multiple subs", "[pubsub]") {
     bool success_c2;
     std::vector<std::string> data_c2;
     std::string pubkey_c2;
-    OxenMQ client2(
-        [](LogLevel, const char* file, int line, std::string msg) { std::cerr << file << ":" << line << " --C-- " << msg << "\n"; }
-        );
+    OxenMQ client2{};
 
     client2.add_category("notify", Access{AuthLevel::none});
     client2.add_command("notify", "greetings", [&](Message& m) {
             const auto& data = m.data;
             if (!data.size())
             {
-                std::cerr << "client received public.greetings with empty data\n";
+                oxen::log::error(cat, "client received public.greetings with empty data");
                 return;
             }
             if (data[0] == "hello")
