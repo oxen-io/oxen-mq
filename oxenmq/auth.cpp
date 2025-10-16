@@ -35,19 +35,19 @@ bool OxenMQ::proxy_check_auth(int64_t conn_id, bool outgoing, const peer_info& p
     std::string reply;
 
     if (!cat_call.first) {
-        log::warning(cat, "Invalid command '{}' sent by remote [{}]/{}", command, log_hex(peer.pubkey), peer_address(cmd));
+        log::info(cat, "Invalid command '{}' sent by remote [{}]/{}", command, log_hex(peer.pubkey), peer_address(cmd));
         reply = "UNKNOWNCOMMAND";
     } else if (peer.auth_level < cat_call.first->access.auth) {
-        log::warning(cat, "Access denied to {} for peer [{}]/{}: peer auth level {} < {}", command, log_hex(peer.pubkey), peer_address(cmd), peer.auth_level, cat_call.first->access.auth);
+        log::info(cat, "Access denied to {} for peer [{}]/{}: peer auth level {} < {}", command, log_hex(peer.pubkey), peer_address(cmd), peer.auth_level, cat_call.first->access.auth);
         reply = "FORBIDDEN";
     } else if (cat_call.first->access.local_sn && !local_service_node) {
-        log::warning(cat, "Access denied to {} for peer [{}]/{}: that command is only available when this OxenMQ is running in service node mode", command, log_hex(peer.pubkey), peer_address(cmd));
+        log::info(cat, "Access denied to {} for peer [{}]/{}: that command is only available when this OxenMQ is running in service node mode", command, log_hex(peer.pubkey), peer_address(cmd));
         reply = "NOT_A_SERVICE_NODE";
     } else if (cat_call.first->access.remote_sn && !peer.service_node) {
-        log::warning(cat, "Access denied to {} for peer [{}]/{}: remote is not recognized as a service node", command, log_hex(peer.pubkey), peer_address(cmd));
+        log::info(cat, "Access denied to {} for peer [{}]/{}: remote is not recognized as a service node", command, log_hex(peer.pubkey), peer_address(cmd));
         reply = "FORBIDDEN_SN";
     } else if (cat_call.second->second /*is_request*/ && data.empty()) {
-        log::warning(cat, "Received an invalid request for '{}' with no reply tag from remote [{}]/{}", command, log_hex(peer.pubkey), peer_address(cmd));
+        log::info(cat, "Received an invalid request for '{}' with no reply tag from remote [{}]/{}", command, log_hex(peer.pubkey), peer_address(cmd));
         reply = "NO_REPLY_TAG";
     } else {
         return true;
