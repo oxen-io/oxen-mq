@@ -33,6 +33,7 @@ override_dh_auto_configure:
 	debian/gen-liboxenmq-install.sh $(DEB_VERSION_UPSTREAM)
 	dh_auto_configure -- -DOXENMQ_INSTALL_CPPZMQ=ON \
 		$(DEB_CMAKE_ARCH_OPTIONS) \
+		-DOXEN_LOGGING_FMT_HEADER_ONLY=ON -DOXEN_LOGGING_SPDLOG_HEADER_ONLY=ON -DOXEN_LOGGING_FORCE_SUBMODULES=ON \
 		-DOXENMQ_BUILD_TESTS=OFF
 
 # dh_make generated override targets
