@@ -1,3 +1,11 @@
+oxenmq (1.3.0-2~ubuntu2204) jammy; urgency=medium
+
+  * update oxenc version; add oxen-logging dep
+  * use embedded spdlog/fmt for jammy
+  * Downgrade auth logs to info
+
+ -- Jason Rhinelander <jason@session.foundation>  Wed, 15 Oct 2025 22:55:37 -0300
+
 oxenmq (1.3.0-1~ubuntu2204) jammy; urgency=medium
 
   [ Sean Darcy ]
