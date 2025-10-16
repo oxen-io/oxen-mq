@@ -1,7 +1,8 @@
 Source: oxenmq
 Priority: optional
 Maintainer: Jason Rhinelander <jason@imaginary.ca>
-Build-Depends: debhelper-compat (= 11), cmake (>= 3.5), g++, pkg-config, libzmq3-dev (>= 4.3), libsodium-dev, liboxenc-dev (>= 1.0.4)
+Build-Depends: debhelper-compat (= 11), cmake (>= 3.5), g++, pkg-config, libzmq3-dev (>= 4.3), libsodium-dev, liboxenc-dev (>= 1.5.0),
+    liboxen-logging-dev (>= 1.2.0)
 Standards-Version: 4.4.1
 Section: libs
 Homepage: https://github.com/oxen-io/oxen-mq
@@ -9,9 +10,10 @@ Homepage: https://github.com/oxen-io/oxen-mq
 Package: liboxenmq-dev
 Section: libdevel
 Architecture: any
-Depends: liboxenmq1.3.0 (= ${binary:Version}), ${misc:Depends}, libzmq3-dev (>= 4.3), liboxenc-dev (>= 1.0.4)
+Depends: liboxenmq1.3.0 (= ${binary:Version}), ${misc:Depends}, libzmq3-dev (>= 4.3), liboxenc-dev (>= 1.5.0),
+    liboxen-logging-dev (>= 1.2.0)
 Description: zeromq-based Oxen message passing library (headers)
- This C++17 library contains an abstraction layer around ZeroMQ to support
+ This C++20 library contains an abstraction layer around ZeroMQ to support
  integration with Oxen authentication, RPC, and message passing.  It is
  designed to be usable as the underlying communication mechanism of SN-to-SN
  communication ("quorumnet"), the RPC interface used by wallets and local
@@ -26,7 +28,7 @@ Package: liboxenmq1.3.0
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: zeromq-based Oxen message passing library
- This C++17 library contains an abstraction layer around ZeroMQ to support
+ This C++20 library contains an abstraction layer around ZeroMQ to support
  integration with Oxen authentication, RPC, and message passing.  It is
  designed to be usable as the underlying communication mechanism of SN-to-SN
  communication ("quorumnet"), the RPC interface used by wallets and local
