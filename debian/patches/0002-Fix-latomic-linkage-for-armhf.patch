@@ -1,0 +1,27 @@
+From: Jason Rhinelander <jason@imaginary.ca>
+Date: Mon, 20 Oct 2025 18:30:45 -0300
+Subject: Fix -latomic linkage (for armhf)
+
+---
+ cmake/libatomic.cmake | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/cmake/libatomic.cmake b/cmake/libatomic.cmake
+index e08c2bb..1c879f7 100644
+--- a/cmake/libatomic.cmake
++++ b/cmake/libatomic.cmake
+@@ -17,7 +17,7 @@ int main() {
+   set(CMAKE_REQUIRED_FLAGS ${OLD_CMAKE_REQUIRED_FLAGS})
+ endfunction()
+ 
+-function(link_libatomic)
++if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+   check_working_cxx_atomics64(HAVE_CXX_ATOMICS64_WITHOUT_LIB)
+ 
+   if(HAVE_CXX_ATOMICS64_WITHOUT_LIB)
+@@ -43,4 +43,4 @@ function(link_libatomic)
+   else()
+     message(FATAL_ERROR "Host compiler must support 64-bit std::atomic!")
+   endif()
+-endfunction()
++endif()
