@@ -17,7 +17,7 @@ int main() {
   set(CMAKE_REQUIRED_FLAGS ${OLD_CMAKE_REQUIRED_FLAGS})
 endfunction()
 
-function(link_libatomic)
+if(CMAKE_SYSTEM_NAME MATCHES "Linux")
   check_working_cxx_atomics64(HAVE_CXX_ATOMICS64_WITHOUT_LIB)
 
   if(HAVE_CXX_ATOMICS64_WITHOUT_LIB)
@@ -43,4 +43,4 @@ function(link_libatomic)
   else()
     message(FATAL_ERROR "Host compiler must support 64-bit std::atomic!")
   endif()
-endfunction()
+endif()
