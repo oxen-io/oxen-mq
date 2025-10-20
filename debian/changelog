@@ -1,3 +1,10 @@
+oxenmq (1.3.0-3) unstable; urgency=medium
+
+  * dont allow bundled libfmt.so to get packaged
+  * Fix -latomic linkage (for armhf)
+
+ -- Jason Rhinelander <jason@session.foundation>  Mon, 20 Oct 2025 18:35:56 -0300
+
 oxenmq (1.3.0-2) unstable; urgency=medium
 
   * update oxenc version; add oxen-logging dep
